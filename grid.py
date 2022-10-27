@@ -17,14 +17,19 @@ import goexplore
 import returners, explorers, state2latents
 
 parser = argparse.ArgumentParser(description='Grid')
-parser.add_argument('--n_steps', type=int, default=100)
-parser.add_argument('--n_exploration_steps', type=int, default=5)
+parser.add_argument('--n_steps', type=int, default=100) # n policy updates
+parser.add_argument('--n_trajs', type=int, default=100) # n trajectories in update
+parser.add_argument('--len_traj', type=int, default=10) # len of trajectory
+
+parser.add_argument('--n_epochs_policy', type=int, default=4)
+parser.add_argument('--batch_size_policy', type=int, default=512)
+
 parser.add_argument('--returner', type=str, default='random')
-parser.add_argument('--explorer', type=str, default='random')
-parser.add_argument('--latent', type=str, default='obs')
+parser.add_argument('--explorer', type=str, default='policy')
+parser.add_argument('--latent', type=str, default='grid')
 
 parser.add_argument('--track', type=bool, action=argparse.BooleanOptionalAction, default=False)
-parser.add_argument('--exp_name', type=str, default='random')
+parser.add_argument('--exp_name', type=str, default=None)
 parser.add_argument('--n_viz_steps', type=int, default=10)
 
 class MyMiniGrid():
@@ -63,7 +68,8 @@ def main():
     print(args)
 
     if args.track:
-        wandb.init(project='goexplore', name=args.exp_name, config=args)
+        exp_name = args.exp_name if args.exp_name else f'{args.returner}_{args.explorer}_{args.latent}'
+        wandb.init(project='goexplore', name=exp_name, config=args)
 
     env = MyMiniGrid()
 
@@ -76,37 +82,48 @@ def main():
     elif args.explorer == 'policy':
         explorer = explorers.PolicyExplorer()
 
-    state2latent = state2latents.Obs2Latent()
+    state2latent = state2latents.MinigridState2Latent()
 
-    ge = goexplore.GoExplore(env, returner=returner, explorer=explorer, state2latent=state2latent, n_exploration_steps=args.n_exploration_steps)
+    ge = goexplore.GoExplore(env, returner=returner, explorer=explorer, state2latent=state2latent)
     for i_step in tqdm(range(args.n_steps)):
-        ge.step()
+        ge.step(n_trajs=args.n_trajs, len_traj=args.len_traj, n_epochs_policy=args.n_epochs_policy, batch_size_policy=args.batch_size_policy)
 
+        data_wandb = {'n_nodes': len(ge.archive.nodes)}
         if args.track and i_step%(args.n_steps//args.n_viz_steps)==0:
             plt.figure(figsize=(10, 5))
             plt.subplot(121); plt.title('Nodes Colored by selection_prob')
             x, c = ge.latents.numpy(), ge.returner.score_nodes(ge.latents).numpy()
-            plt.scatter(*x.T, c=c, cmap='viridis')
-            for node in ge.archive.nodes:
+            plt.scatter(*x[-1000:].T, c=c[-1000:], cmap='viridis')
+            for node in ge.archive.nodes[-1000:]:
                 if node.parent is not None:
                     x = torch.stack([node.parent.latent, node.latent])
                     plt.plot(*x.numpy().T, c='r', linewidth=.2)
             plt.colorbar()
 
             plt.subplot(122); plt.title('Nodes Colored Productivity')
-            productivities = explorers.compute_productivities(ge, alpha=0.1, child_aggregate='mean')
+            productivities = explorers.compute_productivities(ge.archive.nodes, alpha=0.1, child_aggregate='mean')
             productivities = torch.tensor([productivities[node] for node in ge.archive.nodes]).float()
             x, c = ge.latents.numpy(), productivities.numpy()
-            plt.scatter(*x.T, c=c, cmap='viridis')
-            for node in ge.archive.nodes:
+            plt.scatter(*x[-1000:].T, c=c[-1000:], cmap='viridis')
+            for node in ge.archive.nodes[-1000:]:
                 if node.parent is not None:
                     x = torch.stack([node.parent.latent, node.latent])
                     plt.plot(*x.numpy().T, c='r', linewidth=.2)
             plt.colorbar()
             plt.tight_layout()
 
-            wandb.log({'archive': wandb.Image(plt)})
+            if args.track:
+                data_wandb.update({'viz': wandb.Image(plt)})
+
             plt.close()
+        
+        latents = ge.latents[torch.randperm(len(ge.latents))[:1000]]
+        _, _, logits = ge.explorer.get_action(None, None, latents)
+        probs = logits.softmax(dim=-1).mean(dim=0).detach().numpy()
+        data_wandb.update({f'p({i})': p for i, p in enumerate(probs)})
+
+        if args.track:
+            wandb.log(data_wandb)
 
 
 if __name__=='__main__':

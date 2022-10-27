@@ -8,7 +8,7 @@ class RandomNodeSelector():
     def __init__(self):
         self.goexplore = None
 
-    def fit(self, idx_archive):
+    def fit(self, latents):
         pass
 
     def score_nodes(self, X):
@@ -38,13 +38,14 @@ class GaussianNodeSelector():
         self.gm = sklearn.mixture.GaussianMixture(n_components=n_components, random_state=0)
         # self.t = 0
 
-    def fit(self, idx_archive):
-        X = torch.stack([node.latent for node in self.goexplore.archive.nodes[:idx_archive]])
+    def fit(self, latents):
+        X = latents
         if len(X) < 2:
             return
         self.gm = self.gm.fit(X.numpy())
 
-    def score_nodes(self, X):
+    def score_nodes(self, latents):
+        X = latents
         if len(X)<2:
             return torch.log(torch.ones(len(X)))
         logits = -self.gm.score_samples(X.numpy()) # log probs then "invert" them
