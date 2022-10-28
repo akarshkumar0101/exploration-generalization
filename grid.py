@@ -33,9 +33,9 @@ parser.add_argument('--exp_name', type=str, default=None)
 parser.add_argument('--n_viz_steps', type=int, default=10)
 
 class MyMiniGrid():
-    def __init__(self):
+    def __init__(self, limit=100):
         super().__init__()
-        self.reset()
+        self.limit = limit
 
         self.action2vec = {
             0: torch.tensor([1, 0]),
@@ -43,26 +43,23 @@ class MyMiniGrid():
             2: torch.tensor([-1, 0]),
             3: torch.tensor([0, -1]),
         }
+
+        self.reset()
         
     def step(self, action):
         if isinstance(action, torch.Tensor):
             action = action.item()
-        self.state = torch.clamp(self.state + self.action2vec[action], min=0, max=None)
+        self.state = torch.clamp(self.state + self.action2vec[action], min=-self.limit, max=self.limit)
         obs, reward, done, info = self.state, 0, False, {}
         return self.state, obs, reward, done, info
     
-    def reset(self):
-        self.state = torch.zeros(2)
+    def reset(self, state=None):
+        if state is None:
+            state = torch.zeros(2, dtype=torch.int32) - self.limit
+        self.state = state
         obs, reward, done, info = self.state, 0, False, {}
         return self.state, obs, 0, False, info
     
-    def get_current_state_sim(self):
-        return self.state
-    
-    def goto_state_sim(self, state):
-        self.state = state
-
-
 def main():
     args = parser.parse_args()
     print(args)

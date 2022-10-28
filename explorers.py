@@ -20,7 +20,42 @@ class RandomExplorer():
 
     def update_policy(self, nodes, *args, **kwargs):
         pass
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
     
+class Agent(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(2, 10)),
+            nn.Tanh(),
+            layer_init(nn.Linear(10, 10)),
+            nn.Tanh(),
+            layer_init(nn.Linear(10, 1), std=1.0),
+        )
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(2, 10)),
+            nn.Tanh(),
+            layer_init(nn.Linear(10, 10)),
+            nn.Tanh(),
+            layer_init(nn.Linear(10, 4), std=0.01),
+        )
+
+    def get_value(self, x):
+        return self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        logits = self.actor(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+
+
 class PolicyExplorer(nn.Module):
     def __init__(self):
         super().__init__()
@@ -61,7 +96,7 @@ class PolicyExplorer(nn.Module):
         
         # TODO normalize obs
         
-#     nodes = self.goexplore.archive.nodes[1:] # ignore root because it has not trajectory
+    # nodes = self.goexplore.archive.nodes[1:] # ignore root because it has not trajectory
         obss = torch.stack([torch.stack([trans[1] for trans in node.traj]) for node in nodes]).float()
         actions = torch.stack([torch.stack([trans[2] for trans in node.traj]) for node in nodes]).float()
         # shape: n_trajs, len_traj, ...
@@ -90,6 +125,65 @@ class PolicyExplorer(nn.Module):
         
         # plt.plot(losses)
         # plt.show()
+
+
+    def do_something(self):
+        obs = torch.zeros(100, 10)
+
+    def collect_traj(self, node_start, len_traj):
+        traj = [] # list of tuples (state, obs, action, log_probs, reward)
+        # state_sim, obs = node_start.state_sim, node_start.obs
+        state_sim, obs, reward, done, info = self.env.goto_state_sim(node_start.state_sim)
+        for i_trans in range(len_traj):
+            latent = self.state2latent(state_sim, obs)
+
+            with torch.no_grad():
+                action, logprob, _, value = self.get_action_and_value(next_obs)
+                # values[step] = value.flatten()
+            # action, log_prob, _ = self.explorer.get_action(state_sim, obs, latent)
+            
+            state_sim_next, obs_next, reward, done, info = self.env.step(action.cpu().numpy())
+            traj.append((state_sim, obs, done, action, log_prob, reward))
+            state_sim, obs = state_sim_next, obs_next
+            if done:
+                print('DONE!!!!!!!')
+                break
+
+        latent = self.state2latent(state_sim, obs)
+        node = Node(node_start, traj, state_sim, obs, done, latent, node_start.depth+1)
+        return node, done
+
+    def collect_trajs(self, n_trajs, len_traj):
+        nodes = []
+        for i_traj in range(n_trajs):
+            node_start = self.select_node()
+            self.env.reset(node_start.state_sim)
+            node_end, done = self.collect_traj(node_start, len_traj)
+            nodes.append(node_end)
+        return nodes
+
+    def step(self, n_trajs, len_traj, n_epochs_policy, batch_size_policy):
+        # TODO: anneal lr, 
+        # collect new policy/exploration data
+        nodes = self.perform_multiple_trajs(n_trajs, len_traj)
+        
+        # update policy using this data
+        self.explorer.update_policy(nodes, n_epochs_policy, batch_size_policy)
+
+        
+
+
+
+        # add the end nodes to the archive
+        for node in nodes:
+            self.archive.add_node(node)
+        self.latents = torch.stack([node.latent for node in self.archive.nodes])
+
+        self.returner.fit(self.latents)
+
+
+
+
 
 
 def compute_productivities(nodes, alpha=0.01, child_aggregate='mean'):
