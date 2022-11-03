@@ -45,19 +45,23 @@ class MyMiniGrid():
         }
 
         self.reset()
+    def calc_obs(self, state=None):
+        if state is None:
+            state = self.state
+        return state/self.limit*2
         
     def step(self, action):
         if isinstance(action, torch.Tensor):
             action = action.item()
         self.state = torch.clamp(self.state + self.action2vec[action], min=-self.limit, max=self.limit)
-        obs, reward, done, info = self.state, 0, False, {}
+        obs, reward, done, info = self.calc_obs(), 0, False, {}
         return self.state, obs, reward, done, info
     
     def reset(self, state=None):
         if state is None:
             state = torch.zeros(2, dtype=torch.int32) - self.limit
         self.state = state
-        obs, reward, done, info = self.state, 0, False, {}
+        obs, reward, done, info = self.calc_obs(), 0, False, {}
         return self.state, obs, 0, False, info
     
 def main():

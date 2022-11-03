@@ -85,50 +85,106 @@ class PolicyExplorer(nn.Module):
             action = dist.sample()
         return action, dist.log_prob(action), logits
 
+
+    def compute_gae(self, rewards, values, gamma=0.99, gae_lambda=0.95):
+        """
+        Generalized Advantage Estimation
+        rewards, values should have shape (n_trajs, len_traj)
+        """
+        t = torch.arange(rewards.shape[1]).expand(rewards.shape[0], -1)
+
+        values_now, values_next = values[..., :-1], values[..., 1:]
+        rewards_now, rewards_next = rewards[..., :-1], rewards[..., 1:]
+        t_now, t_next = t[..., :-1], t[..., 1:]
+
+        # Compute TD residual
+        # shape: (n_trajs, len_traj-1)
+        deltas_now = rewards_now + gamma * values_next - values_now
+        def reverse_cumsum(x, dim=0):
+            return x + x.sum(dim=dim, keepdims=True) - torch.cumsum(x, dim=dim)
+        advantages = ((gamma*gae_lambda)**t_now) * deltas_now
+        advantages = reverse_cumsum(advantages, dim=-1)
+        returns = advantages + values_now
+        return advantages, returns
+
     def update_policy(self, nodes, n_epochs_policy, batch_size_policy):
         # print(f'updating policy with {len(nodes)} nodes')
-        nodes_history = self.goexplore.archive.nodes
+        # nodes_history = self.goexplore.archive.nodes
         n_trajs, len_traj = len(nodes), len(nodes[0].traj)
-        
-        prods = compute_productivities(nodes)
-        prods = torch.tensor([prods[node] for node in nodes]).float()
-        prods = prods[:, None].expand(-1, len_traj)
-        
-        # TODO normalize obs
-        
-    # nodes = self.goexplore.archive.nodes[1:] # ignore root because it has not trajectory
+
         obss = torch.stack([torch.stack([trans[1] for trans in node.traj]) for node in nodes]).float()
         actions = torch.stack([torch.stack([trans[2] for trans in node.traj]) for node in nodes]).float()
+        values = torch.zeros(n_trajs, len_traj)
+        # shape: n_trajs, len_traj, ...
+        # rewards = (prods - prods.mean())/(prods.std() + 1e-6)
+        rewards = torch.zeros(n_trajs, len_traj)
+        # prods = compute_productivities(nodes)
+        # prods = torch.tensor([prods[node] for node in nodes]).float()
+        # prods = prods[:, None].expand(-1, len_traj)
+        advantages, returns = compute_gae(rewards, values)
+        # returns = (prods - prods.mean())/(prods.std()+1e-6)
+    # nodes = self.goexplore.archive.nodes[1:] # ignore root because it has not trajectory
         # shape: n_trajs, len_traj, ...
         
-        returns = (prods - prods.mean())/(prods.std()+1e-6)
-        
-        obss_f, actions_f, returns_f = obss.view(-1, obss.shape[-1]), actions.view(-1), returns.view(-1)
-        
-        # pe = explorers.PolicyExplorer()
-        
+        obss_f = obss.reshape(-1, obss.shape[-1])
+        actions_f = actions.reshape(-1)
+        values_f = values.reshape(-1)
+        rewards_f = rewards.reshape(-1)
+        advantages_f = advantages.reshape(-1)
+        returns_f = returns.reshape(-1)
+
         for i_epoch in range(n_epochs_policy):
             for i_batch, idx_b in enumerate(torch.randperm(n_trajs*len_traj).split(batch_size_policy)):
-                obss_b, actions_b, returns_b = obss_f[idx_b], actions_f[idx_b], returns_f[idx_b]
-                latent_b = self.goexplore.state2latent(None, obss_b)
+
+                obss_b = obss_f[idx_b]
+                actions_b = actions_f[idx_b]
+                values_b = values_f[idx_b]
+                rewards_b = rewards_f[idx_b]
+                advantages_b = advantages_f[idx_b]
+                returns_b = returns_f[idx_b]
+
+                # latent_b = self.goexplore.state2latent(None, obss_b)
+
                 # print(obss_b.shape, actions_b.shape, returns_b.shape)
                 
-                _, logprob_b, _ = self.get_action(None, obss_b, latent_b, action=actions_b)
+                _, newlogprob_b, entropy_b, newvalues_b = self.get_action(None, obss_b, latent_b, actions_b)
+                logratio = newlogprob_b - log_probs_b
+                ratio = logratio.exp()
 
-                loss = (-returns_b*logprob_b).mean()
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratio - 1) - logratio).mean()
+                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+
+                if True:
+                    advantages_b = (advantages_b - advantages_b.mean())/(advantages_b.std() + 1e-8)
+                # Policy loss
+                pg_loss1 = -advantages_b * ratio
+                pg_loss2 = -advantages_b * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+                # Value loss
+                if args.clip_vloss:
+                    v_loss_unclipped = (newvalues_b - returns_b) ** 2
+                    v_clipped = values_b + (newvalues_b - values_b).clamp(-args.clip_coef, args.clip_coef)
+                    v_loss_clipped = (v_clipped - returns_b) ** 2
+                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                    v_loss = 0.5 * v_loss_max.mean()
+                else:
+                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
+                entropy_loss = entropy_b.mean()
+                loss = 1*pg_loss - args.ent_coef*entropy_loss + args.vf_coef*v_loss
 
                 self.opt.zero_grad()
                 loss.backward()
+                nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 self.opt.step()
 
-                self.losses.append(loss.item())
-        
-        # plt.plot(losses)
-        # plt.show()
-
-
-    def do_something(self):
-        obs = torch.zeros(100, 10)
+            if args.target_kl is not None:
+                if approx_kl > args.target_kl:
+                    break
 
     def collect_traj(self, node_start, len_traj):
         traj = [] # list of tuples (state, obs, action, log_probs, reward)
@@ -164,6 +220,7 @@ class PolicyExplorer(nn.Module):
 
     def step(self, n_trajs, len_traj, n_epochs_policy, batch_size_policy):
         # TODO: anneal lr, 
+        # TODO normalize obs
         # collect new policy/exploration data
         nodes = self.perform_multiple_trajs(n_trajs, len_traj)
         

@@ -4,7 +4,7 @@ class MinigridState2Latent():
         self.goexplore = None
     
     def __call__(self, state_sim, obs):
-        return obs/self.goexplore.env.limit*2
+        return obs
 
 
 

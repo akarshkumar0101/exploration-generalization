@@ -121,6 +121,3 @@ class GoExplore():
 
         self.returner.fit(self.latents)
 
-
-
-

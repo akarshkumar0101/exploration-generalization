@@ -64,3 +64,4 @@ class GaussianNodeSelector():
         logits = -self.gm.score_samples(X) # log probs then "invert" them
         p = torch.from_numpy(logits).softmax(dim=0).numpy()
         return self.goexplore.archive.nodes[np.random.choice(n, p=p)], logits
+
