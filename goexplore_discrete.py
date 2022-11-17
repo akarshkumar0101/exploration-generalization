@@ -60,14 +60,15 @@ class GoExplore(list):
         return [self.cell2node[cells[i]] for i in np.random.choice(len(cells), size=n_nodes, p=p)]
     
     def explore_from_single(self, nodes, len_traj):
+        self.explorer = self.explorer.to(self.device)
         trajs = [[] for _ in nodes] # list of tuples (snapshot, obs, action, reward, done)
         snapshot = [node.snapshot for node in nodes]
         snapshot, obs, reward, done, info = self.env.reset(snapshot)
         for i_trans in range(len_traj):
             with torch.no_grad():
-                action, log_prob, entropy, values = self.explorer.get_action_and_value(obs)
+                action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
                 # action, log_prob = action.cpu(), log_prob.cpu()
-            snapshot_next, obs_next, reward, done_next, info = self.env.step(action)
+            snapshot_next, obs_next, reward, done_next, info = self.env.step(action.cpu())
             for i, traj in enumerate(trajs):
                 traj.append((snapshot[i], obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
             snapshot, obs, done = snapshot_next, obs_next, done_next
