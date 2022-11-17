@@ -1,20 +1,19 @@
 import argparse
 from distutils.util import strtobool
 
-import torch
-from torch import nn
-import numpy as np
-
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from gym import spaces
+from matplotlib import cm
+from torch import nn
 from tqdm.auto import tqdm
 
-from gym import spaces
-
+import bc
 import wandb
+from goexplore_discrete import GoExplore, Node, calc_reward_novelty
 
-
-from goexplore_discrete import Node, GoExplore
 
 class LavaGrid():
     def __init__(self, size_grid=100, obs_size=9, p_lava=0.15, n_envs=10, dead_screen=True):
@@ -46,6 +45,9 @@ class LavaGrid():
         self.map = self.map.to(*args, **kwargs)
         self.action2vec = self.action2vec.to(*args, **kwargs)
         return self
+
+    def to_list_tuple():
+        pass
         
     def reset(self, snapshot=None):
         if snapshot is None:
@@ -127,37 +129,6 @@ class ImitationExplorer(nn.Module):
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), values
     
-def calc_prods_dfs(ge, reduce1=np.max, reduce2=np.max, log=True):
-    node2prod = {}
-    def recurse(node):
-        novelty = -ge.cell2n_seen[node.latent]
-        if node.children:
-            for child in node.children:
-                recurse(child)
-            prods_children = [node2prod[child] for child in node.children]
-            if reduce2 is None:
-                prod = reduce1([novelty]+prods_children)
-            else:
-                prod = reduce1([novelty, reduce2(prods_children)])
-        else:
-            prod = novelty
-        node2prod[node] = prod
-    recurse(ge.node_root)
-    prod = torch.tensor([node2prod[node] for node in ge]).float()
-    return -(-prod).log() if log else prod
-
-def calc_prods_novelty(ge, log=True):
-    n_seen = torch.tensor([ge.cell2n_seen[node.latent] for node in ge]).float()
-    return -n_seen.log() if log else -n_seen
-
-def normalize(a, devs=None):
-    b = a
-    if devs is not None:
-        # mask = ((a-a.mean())/a.std()).abs()<devs
-        mask = ((a-a.median())/a.std()).abs()<devs
-        b = a[mask]
-    return (a-b.mean())/(a.std()+1e-9)
-    
 def step_policy(ge, explorer, opt, calc_prod, n_steps, batch_size=100, coef_entropy=1e-1, viz=False, device=None, data=None):
     # list of tuples (snapshot, obs, action, reward, done)
     obs = torch.stack([trans[1] for node in ge for trans in node.traj])
@@ -225,7 +196,8 @@ def step_policy(ge, explorer, opt, calc_prod, n_steps, batch_size=100, coef_entr
             # print(f'Action {i}')
             # print(log_probs[batch_actions==i].mean().item())
 
-from matplotlib import cm
+
+
 def plot_ge(ge):
     cells = [cell for cell in ge.cell2node.keys() if cell!=(-1, -1)]
     snapshot = torch.stack([ge.cell2node[cell].snapshot for cell in cells])
@@ -276,8 +248,6 @@ def run(args):
         run = wandb.init(
             config=args,
             name=args.name,
-            sync_tensorboard=True,
-            monitor_gym=True,
             save_code=True)
     
     env = LavaGrid(obs_size=args.obs_size, n_envs=args.n_envs, dead_screen=False).to(args.device)
@@ -294,18 +264,19 @@ def run(args):
         ge.explore_from(nodes, 1, 10)
 
         if args.freq_learn is not None and args.freq_learn>0 and i_step%args.freq_learn==0:
-            step_policy(ge, explorer, opt, calc_prods_novelty, args.n_updates_learn, 
-                        batch_size=args.batch_size, coef_entropy=args.coef_entropy, viz=False, device=args.device, data=data)
+            obs = torch.stack([trans[1] for node in ge for trans in node.traj])
+            action = torch.stack([trans[2] for node in ge for trans in node.traj])
+            mask_done = torch.stack([trans[4] for node in ge for trans in node.traj])
+            reward = calc_reward_novelty(ge)
+            reward = torch.stack([reward[i] for i, node in enumerate(ge) for trans in node.traj])
+            reward = (reward-reward[~mask_done].mean())/(reward[~mask_done].std()+1e-9)
 
-            
-        n_cells = len(ge.cell2node)
+            bc.train_contrastive_bc(explorer, opt, obs, action, reward,
+                                    args.n_updates_learn, args.batch_size, 
+                                    args.coef_entropy, args.device, data, viz=False)
+
         n_dead = torch.stack([node.done for node in ge]).sum().item()
         n_seen_max = torch.tensor(list(ge.cell2n_seen.values())).max().item()
-        # done = torch.stack([node.done for node in ge])
-        # pbar.set_postfix(cells=len(ge.cell2node), n_seen_max=n_seen.max().item())
-        # cellsvtime.append(len(ge.cell2node))
-        # deadvtime.append(done.sum().item())
-        
         data.update(dict(n_nodes=len(ge), n_cells=len(ge.cell2node), n_dead=n_dead, n_seen_max=n_seen_max))
         pbar.set_postfix(data)
         if args.track:
@@ -325,14 +296,13 @@ parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False,
 parser.add_argument("--freq_viz", type=int, default=50)
 parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--device", type=str, default='cuda:0')
+parser.add_argument("--device", type=str, default=None)
 
 parser.add_argument("--n_steps", type=int, default=1000)
 parser.add_argument("--obs_size", type=int, default=3)
 parser.add_argument("--n_envs", type=int, default=10)
 
 parser.add_argument("--freq_learn", type=int, default=None)
-# parser.add_argument("--learn", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--reward", type=str, default='log_n_seen')
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--n_updates_learn", type=int, default=100)
@@ -341,8 +311,7 @@ parser.add_argument("--coef_entropy", type=float, default=1e-2)
 
 
 def main():
-    # args = parser.parse_args()
-    args, uargs = parser.parse_known_args()
+    args = parser.parse_args()
     print(args)
     run(args)
 

@@ -3,6 +3,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
+
 class Node():
     def __init__(self, parent, traj, snapshot, obs, latent, done):
         self.parent = parent
@@ -27,7 +28,7 @@ class GoExplore(list):
         self.cell2node = {}
         self.cell2n_seen = defaultdict(lambda : 0)
         snapshot, obs, reward, done, info = self.env.reset()
-        node_root = Node(None, [], snapshot[0].cpu(), obs[0].cpu(), self.env.to_latent(snapshot, obs)[0], done[0].cpu())
+        node_root = Node(None, [], snapshot[0], obs[0].cpu(), self.env.to_latent(snapshot, obs)[0], done[0].cpu())
         self.node_root = node_root
         self.add_node(node_root)
         
@@ -68,11 +69,11 @@ class GoExplore(list):
                 # action, log_prob = action.cpu(), log_prob.cpu()
             snapshot_next, obs_next, reward, done_next, info = self.env.step(action)
             for i, traj in enumerate(trajs):
-                traj.append((snapshot[i].cpu(), obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
+                traj.append((snapshot[i], obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
             snapshot, obs, done = snapshot_next, obs_next, done_next
             
         latent = self.env.to_latent(snapshot, obs)
-        return [Node(nodes[i], trajs[i], snapshot[i].cpu(), obs[i].cpu(), latent[i], done[i].cpu()) for i in range(len(nodes))]
+        return [Node(nodes[i], trajs[i], snapshot[i], obs[i].cpu(), latent[i], done[i].cpu()) for i in range(len(nodes))]
     
     def explore_from(self, nodes, len_traj, n_trajs, add_nodes=True):
         for node in nodes:
@@ -83,3 +84,32 @@ class GoExplore(list):
             if add_nodes:
                 for node in nodes:
                     self.add_node(node)
+
+def calc_reward_dfs(ge, reduce1=np.max, reduce2=np.max, log=True):
+    """
+    Calculates a reward with DFS on the GoExplore tree.
+    """
+    node2prod = {}
+    def recurse(node):
+        novelty = -ge.cell2n_seen[node.latent]
+        if node.children:
+            for child in node.children:
+                recurse(child)
+            prods_children = [node2prod[child] for child in node.children]
+            if reduce2 is None:
+                prod = reduce1([novelty]+prods_children)
+            else:
+                prod = reduce1([novelty, reduce2(prods_children)])
+        else:
+            prod = novelty
+        node2prod[node] = prod
+    recurse(ge.node_root)
+    prod = torch.tensor([node2prod[node] for node in ge]).float()
+    return -(-prod).log() if log else prod
+
+def calc_reward_novelty(ge, log=True):
+    """
+    Calculates a reward using n_seen
+    """
+    n_seen = torch.tensor([ge.cell2n_seen[node.latent] for node in ge]).float()
+    return -n_seen.log() if log else -n_seen
