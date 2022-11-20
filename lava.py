@@ -222,7 +222,7 @@ parser.add_argument("--freq_viz", type=int, default=100)
 parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
-parser.add_argument("--n_steps", type=int, default=2000)
+parser.add_argument("--n_steps", type=int, default=1000)
 parser.add_argument("--n_envs", type=int, default=10)
 
 # learning parameters
