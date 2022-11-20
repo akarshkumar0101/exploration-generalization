@@ -183,8 +183,9 @@ def viz_exploration_strategy(ge, ex, n_ex=10):
     n_seen_low = n_seen[idx[:n_ex]]
     n_seen_high = n_seen[idx[-n_ex:]].flip(dims=(0,))
 
-    logits_low, _ = ex.get_logits_values(obs_low.to(ge.device)).cpu()
-    logits_high, _ = ex.get_logits_values(obs_high.to(ge.device)).cpu()
+    logits_low, _ = ex.get_logits_values(obs_low.to(ge.device))
+    logits_high, _ = ex.get_logits_values(obs_high.to(ge.device))
+    logits_low, logits_high = logits_low.cpu(), logits_high.cpu()
 
     fig, axs = plt.subplots(2, n_ex*2, figsize=(2*n_ex*2, 2.5*2))
     for i in range(n_ex):
