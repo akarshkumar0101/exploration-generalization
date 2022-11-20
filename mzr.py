@@ -92,13 +92,13 @@ class MZRevenge():
         info = None
         return snapshot, obs, reward, done, info
     
-    def to_latent(self, snapshot, obs):
+    def to_latent(self, snapshot, obs, ret_tuple=True):
         def to_latent_single(obs):
             # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
             obs = cv2.resize(obs, (self.latent_w, self.latent_h), interpolation=cv2.INTER_AREA)
             obs = (obs*self.latent_d).astype(np.uint8)
-            return tuple(obs.flatten())
-        return [to_latent_single(o) for o in obs.cpu().numpy()]
+            return tuple(obs.flatten()) if ret_tuple else obs
+        return [to_latent_single(o) for o in obs[:, 0, :, :].cpu().numpy()]
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -142,12 +142,74 @@ class ImitationExplorer(nn.Module):
             logits, values = torch.zeros_like(logits), torch.zeros_like(values)
         return logits, values
     
-    def get_action_and_value(self, x, action=None, ret_logits=False):
+    def get_action_and_value(self, x, action=None):
         logits, values = self.get_logits_values(x)
         dist = torch.distributions.Categorical(logits=logits)
         if action is None:
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), values
+
+def viz_ge_outliers(ge, n_ex=10):
+    cells = list(ge.cell2n_seen.keys())
+    n_seen = torch.tensor([ge.cell2n_seen[cell] for cell in cells])
+    idx = n_seen.argsort()
+    obs_low = torch.stack([ge.cell2node[cells[i]].obs for i in idx[:n_ex]])
+    n_seen_low = n_seen[idx[:n_ex]]
+    obs_high = torch.stack([ge.cell2node[cells[i]].obs for i in idx[-n_ex:]])
+    n_seen_high = n_seen[idx[-n_ex:]]
+    fig, axs = plt.subplots(2, n_ex, figsize=(2*n_ex, 2.5*2))
+    for i in range(n_ex):
+        axs[0, i].imshow(obs_low[i, 0].numpy())
+        axs[1, i].imshow(obs_high[-i-1, 0].numpy())
+        axs[0, i].set_title(f'{n_seen_low[i].item()}')
+        axs[1, i].set_title(f'{n_seen_high[-i-1].item()}')
+    axs[0, 0].set_ylabel('Lowest n_seen')
+    axs[1, 0].set_ylabel('Most n_seen')
+    plt.tight_layout()
+    return plt.gcf()
+
+def plot_ge_outlier_coverage(ge):
+    o = torch.stack([node.obs for node in ge.select_nodes(100)])
+    plt.imshow(o.max(dim=0).values.sum(dim=0).numpy())
+    return plt.gcf()
+
+def viz_exploration_strategy(ge, ex, n_ex=10):
+    cells = list(ge.cell2n_seen.keys())
+    n_seen = torch.tensor([ge.cell2n_seen[cell] for cell in cells])
+    idx = n_seen.argsort()
+
+    obs_low = torch.stack([ge.cell2node[cells[i]].obs for i in idx[:n_ex]])
+    obs_high = torch.stack([ge.cell2node[cells[i]].obs for i in idx[-n_ex:]]).flip(dims=(0,))
+    n_seen_low = n_seen[idx[:n_ex]]
+    n_seen_high = n_seen[idx[-n_ex:]].flip(dims=(0,))
+
+    logits_low, _ = ex.get_logits_values(obs_low)
+    logits_high, _ = ex.get_logits_values(obs_high)
+
+    fig, axs = plt.subplots(2, n_ex*2, figsize=(2*n_ex*2, 2.5*2))
+    for i in range(n_ex):
+        axs[0, i*2].imshow(obs_low[i, 0].numpy())
+        axs[1, i*2].imshow(obs_high[i, 0].numpy())
+        axs[0, i*2+1].bar(torch.arange(logits_low.shape[-1]), logits_low[i].softmax(dim=-1).tolist())
+        axs[1, i*2+1].bar(torch.arange(logits_high.shape[-1]), logits_high[i].softmax(dim=-1).tolist())
+        axs[0, i*2].set_title(f'{n_seen_low[i].item()}')
+        axs[1, i*2].set_title(f'{n_seen_high[i].item()}')
+    axs[0, 0].set_ylabel('Lowest n_seen')
+    axs[1, 0].set_ylabel('Most n_seen')
+    plt.tight_layout()
+    return plt.gcf()
+
+def viz_cells(ge, n_ex=10):
+    nodes = ge.select_nodes(n_ex)
+    obs = torch.stack([node.obs for node in nodes])
+    cells = ge.env.to_latent(None, obs, ret_tuple=False)
+
+    fig, axs = plt.subplots(2, n_ex, figsize=(2*n_ex, 2.5*2))
+    for i in range(n_ex):
+        axs[0, i].imshow(obs[i, 0].numpy())
+        axs[1, i].imshow(cells[i])
+    plt.tight_layout()
+    return plt.gcf()
 
 def run(args):
     np.random.seed(args.seed)
@@ -161,7 +223,7 @@ def run(args):
     
     env = MZRevenge(n_envs=args.n_envs, dead_screen=True).to(args.device)
     snapshot, obs, reward, done, info = env.reset()
-    explorer = ImitationExplorer(env, force_random=(args.freq_learn is None)).to(args.device)
+    explorer = ImitationExplorer(env, force_random=(args.learn_method=='none')).to(args.device)
     opt = torch.optim.Adam(explorer.parameters(), lr=args.lr)
     ge = GoExplore(env, explorer, args.device)
 
@@ -172,26 +234,25 @@ def run(args):
         nodes = ge.select_nodes(args.n_envs)
         ge.explore_from(nodes, 1, 10)
 
-        if args.freq_learn is not None and args.freq_learn>0 and i_step%args.freq_learn==0:
-            obs = torch.stack([trans[1] for node in ge for trans in node.traj])
-            action = torch.stack([trans[2] for node in ge for trans in node.traj])
-            mask_done = torch.stack([trans[4] for node in ge for trans in node.traj])
-            reward = calc_reward_novelty(ge)
-            reward = torch.stack([reward[i] for i, node in enumerate(ge) for trans in node.traj])
-            reward = (reward-reward[~mask_done].mean())/(reward[~mask_done].std()+1e-9)
-
-            bc.train_contrastive_bc(explorer, opt, obs, action, reward,
-                                    args.n_updates_learn, args.batch_size, 
-                                    args.coef_entropy, args.device, data, viz=False)
+        if args.learn_method!='none' and i_step>0 and i_step%args.freq_learn==0:
+            if args.learn_method=='bc_elite':
+                losses, entropies, logits_std = bc.train_bc_elite(ge, explorer, opt, args.n_nodes_select, args.n_learn_updates,
+                                                                  args.batch_size, args.coef_entropy, args.device)
+            elif args.learn_method=='bc_contrast':
+                losses, entropies, logits_std = bc.train_contrastive_bc(ge, explorer, opt, args.n_learn_updates, 
+                                                                        args.batch_size, args.coef_entropy, args.device)
+            data.update(loss_start=losses[0].item(), loss_end=losses[-1].item())
 
         n_dead = torch.stack([node.done for node in ge]).sum().item()
         n_seen_max = torch.tensor(list(ge.cell2n_seen.values())).max().item()
         data.update(dict(n_nodes=len(ge), n_cells=len(ge.cell2node), n_dead=n_dead, n_seen_max=n_seen_max))
         pbar.set_postfix(data)
         if args.track:
-            # if i_step>0 and i_step%args.freq_viz==0:
-                # data['coverage'] = plot_ge(ge)
-                # data['exploration_strategy'] = viz_exploration_strategy(args, explorer)
+            if i_step%args.freq_viz==0:
+                data['coverage'] = plot_ge_outlier_coverage(ge)
+                data['outliers'] = viz_ge_outliers(ge, n_ex=10)
+                data['exploration_strategy'] = viz_exploration_strategy(ge, explorer, n_ex=10)
+                data['cells'] = viz_cells(ge, n_ex=10)
             wandb.log(data)
             plt.close()
         
@@ -199,24 +260,26 @@ def run(args):
         run.finish()
     return locals()
         
-
 parser = argparse.ArgumentParser()
+# general parameters
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
-parser.add_argument("--freq_viz", type=int, default=50)
+parser.add_argument("--freq_viz", type=int, default=100)
 parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
-
-parser.add_argument("--n_steps", type=int, default=1000)
+parser.add_argument("--n_steps", type=int, default=2000)
 parser.add_argument("--n_envs", type=int, default=10)
 
-parser.add_argument("--freq_learn", type=int, default=None)
-parser.add_argument("--reward", type=str, default='log_n_seen')
+# learning parameters
+parser.add_argument("--learn_method", type=str, default='none',
+                    help='can be none|bc_elite|bc_contrast')
+parser.add_argument("--freq_learn", type=int, default=50)
+# parser.add_argument("--reward", type=str, default='log_n_seen')
 parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--n_updates_learn", type=int, default=100)
+parser.add_argument("--n_nodes_select", type=int, default=500)
+parser.add_argument("--n_learn_updates", type=int, default=30)
 parser.add_argument("--batch_size", type=int, default=4096)
 parser.add_argument("--coef_entropy", type=float, default=1e-2)
-
 
 def main():
     args = parser.parse_args()
@@ -225,3 +288,5 @@ def main():
 
 if __name__=='__main__':
     main()
+
+

@@ -1,10 +1,56 @@
 import matplotlib.pyplot as plt
 import torch
 
+import goexplore_discrete
 
-def train_contrastive_bc(net, opt, obs, action, reward,
-                         n_steps, batch_size=100, coef_entropy=1e-1,
-                         device=None, data=None, viz=False):
+
+def train_bc_elite(ge, net, opt, n_nodes_select, n_steps, batch_size=1000, coef_entropy=1e-1, device=None):
+    """
+    Train using Behavior Cloning
+    """
+    trajs = [node.get_full_trajectory() for node in ge.select_nodes(n_nodes_select)]
+    obs = torch.stack([trans[1] for traj in trajs for trans in traj])
+    action = torch.stack([trans[2] for traj in trajs for trans in traj])
+
+    net = net.to(device)
+    losses = []
+    entropies = []
+    logits_std = []
+    for i_batch in range(n_steps):
+        idx = torch.randperm(len(obs))[:batch_size]
+        b_obs, b_action = obs[idx].to(device), action[idx].to(device)
+        logits, values = net.get_logits_values(b_obs)
+        dist = torch.distributions.Categorical(logits=logits)
+        log_prob = dist.log_prob(b_action)
+        entropy = dist.entropy()
+        
+        # b_r.abs tells us how much to care about specific examples
+        loss_data = (-log_prob).mean()
+        loss_entropy = -entropy.mean()
+        
+        loss = loss_data + coef_entropy*loss_entropy
+
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        
+        losses.append(loss.item())
+        entropies.append(entropy.mean().item())
+        logits_std.append(logits.std().item())
+        
+    return torch.tensor(losses), torch.tensor(entropies), torch.tensor(logits_std)
+
+def train_contrastive_bc(ge, net, opt, n_steps, batch_size=1000, coef_entropy=1e-1, device=None):
+    obs = torch.stack([trans[1] for node in ge for trans in node.traj])
+    action = torch.stack([trans[2] for node in ge for trans in node.traj])
+    mask_done = torch.stack([trans[4] for node in ge for trans in node.traj])
+    reward = goexplore_discrete.calc_reward_novelty(ge)
+    reward = torch.stack([reward[i] for i, node in enumerate(ge) for trans in node.traj])
+    reward = (reward-reward[~mask_done].mean())/(reward[~mask_done].std()+1e-9)
+
+    return train_fancy_contrastive(net, opt, obs, action, reward, n_steps, batch_size, coef_entropy, device)
+
+def train_fancy_contrastive(net, opt, obs, action, reward, n_steps, batch_size, coef_entropy, device=None):
     """
     Train using contrastive Behavior Cloning
 
@@ -56,14 +102,14 @@ def train_contrastive_bc(net, opt, obs, action, reward,
         entropies.append(entropy.mean().item())
         logits_std.append(logits.std().item())
         
-    data.update(loss_start=losses[0], loss_end=losses[-1])
+    return torch.tensor(losses), torch.tensor(entropies), torch.tensor(logits_std)
 
-    if viz:
-        plt.figure(figsize=(15, 5))
-        plt.subplot(131); plt.plot(losses); plt.title('loss vs time')
-        plt.subplot(132); plt.plot(entropies); plt.title('entropy vs time')
-        plt.subplot(133); plt.plot(logits_std); plt.title('logits std vs time')
-        plt.show()
+    # if viz:
+    #     plt.figure(figsize=(15, 5))
+    #     plt.subplot(131); plt.plot(losses); plt.title('loss vs time')
+    #     plt.subplot(132); plt.plot(entropies); plt.title('entropy vs time')
+    #     plt.subplot(133); plt.plot(logits_std); plt.title('logits std vs time')
+    #     plt.show()
         
         # plt.plot(logits.softmax(dim=-1).mean(dim=-2).detach().cpu().numpy())
         # plt.hist(logits.argmax(dim=-1).detach().cpu().numpy())

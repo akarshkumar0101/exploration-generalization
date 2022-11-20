@@ -46,9 +46,6 @@ class LavaGrid():
         self.action2vec = self.action2vec.to(*args, **kwargs)
         return self
 
-    def to_list_tuple():
-        pass
-        
     def reset(self, snapshot=None):
         if snapshot is None:
             self.snapshot = torch.full((self.n_envs, 2), self.k, dtype=torch.long, device=self.map.device)
@@ -122,82 +119,13 @@ class ImitationExplorer(nn.Module):
             logits, values = torch.zeros_like(logits), torch.zeros_like(values)
         return logits, values
     
-    def get_action_and_value(self, x, action=None, ret_logits=False):
+    def get_action_and_value(self, x, action=None):
         logits, values = self.get_logits_values(x)
         dist = torch.distributions.Categorical(logits=logits)
         if action is None:
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), values
     
-def step_policy(ge, explorer, opt, calc_prod, n_steps, batch_size=100, coef_entropy=1e-1, viz=False, device=None, data=None):
-    # list of tuples (snapshot, obs, action, reward, done)
-    obs = torch.stack([trans[1] for node in ge for trans in node.traj])
-    action = torch.stack([trans[2] for node in ge for trans in node.traj])
-    # mask_done = torch.stack([trans[4] for node in ge for trans in node.traj])
-    mask_done = torch.stack([node.done for node in ge])
-    prod = calc_prod(ge)
-    prod_norm = (prod-prod[~mask_done].mean())/(prod[~mask_done].std()+1e-9)
-    r = prod_norm[1:]
-    
-    losses = []
-    entropies = []
-    logits_list = []
-    for i_batch in range(n_steps):
-        idx = torch.randperm(len(obs))[:batch_size]
-        b_obs, b_action, b_r = obs[idx].to(device), action[idx].to(device), r[idx].to(device)
-        # if norm_batch:
-            # b_prod = (b_prod-b_prod.mean())/(b_prod.std()+1e-9)
-            
-        logits, values = explorer.get_logits_values(b_obs)
-        # logits_aug = b_r[:, None]*logits
-        # logits_aug = (1./b_r[:, None])*logits
-        logits_aug = torch.sign(b_r[:, None])*logits
-        dist = torch.distributions.Categorical(logits=logits_aug)
-        log_prob = dist.log_prob(b_action)
-        entropy = dist.entropy()
-        
-        loss_data = (-log_prob*b_r.abs()).mean()
-        loss_entropy = -entropy.mean()
-        
-        loss = loss_data + coef_entropy*loss_entropy
-
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
-        
-        losses.append(loss.item())
-        entropies.append(entropy.mean().item())
-        logits_list.append(logits.mean().item())
-        
-        # pbar.set_postfix(loss=loss.item())
-    losses = torch.tensor(losses)
-    # print(f'Reduced loss from {losses[0].item()} to {losses[-1].item()}')
-    data.update(loss_start=losses[0].item(), loss_end=losses[-1].item())
-
-    if viz:
-        plt.figure(figsize=(15, 5))
-        plt.subplot(131); plt.plot(losses); plt.title('loss vs time')
-        plt.subplot(132); plt.plot(entropies); plt.title('entropy vs time')
-        plt.subplot(133); plt.plot(logits_list); plt.title('logits mean vs time')
-        plt.show()
-        
-        # plt.plot(logits.softmax(dim=-1).mean(dim=-2).detach().cpu().numpy())
-        # plt.hist(logits.argmax(dim=-1).detach().cpu().numpy())
-        # plt.ylim(.23, .27)
-        # plt.title('avg prob distribution')
-        # plt.show()
-        
-        # plt.scatter(b_action.detach().cpu().numpy(), log_prob.detach().cpu().numpy())
-        # plt.show()
-        # plt.scatter(b_prod.cpu().numpy(), loss1.detach().cpu().numpy())
-        # plt.show()
-        
-        # for i in range(4):
-            # print(f'Action {i}')
-            # print(log_probs[batch_actions==i].mean().item())
-
-
-
 def plot_ge(ge):
     cells = [cell for cell in ge.cell2node.keys() if cell!=(-1, -1)]
     snapshot = torch.stack([ge.cell2node[cell].snapshot for cell in cells])
@@ -234,7 +162,7 @@ def viz_exploration_strategy(args, explorer):
             plt.sca(axs.flatten()[i*2+0])
             plt.imshow(obs.cpu().numpy())
             plt.sca(axs.flatten()[i*2+1])
-            plt.bar(torch.arange(4), logits[0].softmax(dim=-1).tolist())
+            plt.bar(torch.arange(logits.shape[-1]), logits[0].softmax(dim=-1).tolist())
             # plt.ylim(0, 1)
             plt.tight_layout()
             i += 1
@@ -252,7 +180,7 @@ def run(args):
     
     env = LavaGrid(obs_size=args.obs_size, n_envs=args.n_envs, dead_screen=False).to(args.device)
     snapshot, obs, reward, done, info = env.reset()
-    explorer = ImitationExplorer(env, force_random=(args.freq_learn is None)).to(args.device)
+    explorer = ImitationExplorer(env, force_random=(args.learn_method=='none')).to(args.device)
     opt = torch.optim.Adam(explorer.parameters(), lr=args.lr)
     ge = GoExplore(env, explorer, args.device)
 
@@ -263,24 +191,21 @@ def run(args):
         nodes = ge.select_nodes(args.n_envs)
         ge.explore_from(nodes, 1, 10)
 
-        if args.freq_learn is not None and args.freq_learn>0 and i_step%args.freq_learn==0:
-            obs = torch.stack([trans[1] for node in ge for trans in node.traj])
-            action = torch.stack([trans[2] for node in ge for trans in node.traj])
-            mask_done = torch.stack([trans[4] for node in ge for trans in node.traj])
-            reward = calc_reward_novelty(ge)
-            reward = torch.stack([reward[i] for i, node in enumerate(ge) for trans in node.traj])
-            reward = (reward-reward[~mask_done].mean())/(reward[~mask_done].std()+1e-9)
-
-            bc.train_contrastive_bc(explorer, opt, obs, action, reward,
-                                    args.n_updates_learn, args.batch_size, 
-                                    args.coef_entropy, args.device, data, viz=False)
+        if args.learn_method!='none' and i_step>0 and i_step%args.freq_learn==0:
+            if args.learn_method=='bc_elite':
+                losses, entropies, logits_std = bc.train_bc_elite(ge, explorer, opt, args.n_nodes_select, args.n_learn_updates,
+                                                                  args.batch_size, args.coef_entropy, args.device)
+            elif args.learn_method=='bc_contrast':
+                losses, entropies, logits_std = bc.train_contrastive_bc(ge, explorer, opt, args.n_learn_updates, 
+                                                                        args.batch_size, args.coef_entropy, args.device)
+            data.update(loss_start=losses[0].item(), loss_end=losses[-1].item())
 
         n_dead = torch.stack([node.done for node in ge]).sum().item()
         n_seen_max = torch.tensor(list(ge.cell2n_seen.values())).max().item()
         data.update(dict(n_nodes=len(ge), n_cells=len(ge.cell2node), n_dead=n_dead, n_seen_max=n_seen_max))
         pbar.set_postfix(data)
         if args.track:
-            if i_step>0 and i_step%args.freq_viz==0:
+            if i_step%args.freq_viz==0:
                 data['coverage'] = plot_ge(ge)
                 data['exploration_strategy'] = viz_exploration_strategy(args, explorer)
             wandb.log(data)
@@ -289,26 +214,30 @@ def run(args):
     if args.track:
         run.finish()
     return locals()
-        
 
 parser = argparse.ArgumentParser()
+# general parameters
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
-parser.add_argument("--freq_viz", type=int, default=50)
+parser.add_argument("--freq_viz", type=int, default=100)
 parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
-
-parser.add_argument("--n_steps", type=int, default=1000)
-parser.add_argument("--obs_size", type=int, default=3)
+parser.add_argument("--n_steps", type=int, default=2000)
 parser.add_argument("--n_envs", type=int, default=10)
 
-parser.add_argument("--freq_learn", type=int, default=None)
-parser.add_argument("--reward", type=str, default='log_n_seen')
+# learning parameters
+parser.add_argument("--learn_method", type=str, default='none',
+                    help='can be none|bc_elite|bc_contrast')
+parser.add_argument("--freq_learn", type=int, default=50)
+# parser.add_argument("--reward", type=str, default='log_n_seen')
 parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--n_updates_learn", type=int, default=100)
+parser.add_argument("--n_nodes_select", type=int, default=500)
+parser.add_argument("--n_learn_updates", type=int, default=30)
 parser.add_argument("--batch_size", type=int, default=4096)
 parser.add_argument("--coef_entropy", type=float, default=1e-2)
 
+# lava paremeters
+parser.add_argument("--obs_size", type=int, default=3)
 
 def main():
     args = parser.parse_args()
