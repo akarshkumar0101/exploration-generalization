@@ -3,7 +3,6 @@ from distutils.util import strtobool
 
 import cv2
 import gym
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch

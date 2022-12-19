@@ -5,6 +5,23 @@ import torch
 
 
 class Node():
+    def __init__(self, parent, action, reward, done, snapshot, obs, latent):
+        self.parent = parent
+        self.children = []
+        
+        self.action = action
+        self.reward = reward
+        self.done = done
+
+        self.snapshot = snapshot
+        self.obs = obs
+        self.latent = latent
+        self.done = done
+        
+    def get_full_trajectory(self):
+        return ([] if self.parent is None else self.parent.get_full_trajectory()) + self.traj
+
+class Node():
     def __init__(self, parent, traj, snapshot, obs, latent, done):
         self.parent = parent
         self.children = []
@@ -51,12 +68,14 @@ class GoExplore(list):
         else:
             self.cell2node[node.latent] = node
     
-    def select_nodes(self, n_nodes):
+    def select_nodes(self, n_nodes, random=False):
         cells = list(self.cell2node.keys())
-        n_seen = np.array([self.cell2n_seen[cell] for cell in cells])
-        p = 1./np.sqrt(n_seen+1)
-        p = p/p.sum()
-        # p = None
+        if random:
+            p = None
+        else:
+            n_seen = np.array([self.cell2n_seen[cell] for cell in cells])
+            p = 1./np.sqrt(n_seen+1)
+            p = p/p.sum()
         return [self.cell2node[cells[i]] for i in np.random.choice(len(cells), size=n_nodes, p=p)]
     
     def explore_from_single(self, nodes, len_traj):
@@ -86,23 +105,19 @@ class GoExplore(list):
                 for node in nodes:
                     self.add_node(node)
 
-def calc_reward_dfs(ge, reduce1=np.max, reduce2=np.max, log=True):
+def calc_reward_dfs(ge, reduce=lambda x, childs: x, log=True):
     """
     Calculates a reward with DFS on the GoExplore tree.
     """
     node2prod = {}
     def recurse(node):
-        novelty = -ge.cell2n_seen[node.latent]
+        my_novelty = -ge.cell2n_seen[node.latent]
         if node.children:
             for child in node.children:
                 recurse(child)
-            prods_children = [node2prod[child] for child in node.children]
-            if reduce2 is None:
-                prod = reduce1([novelty]+prods_children)
-            else:
-                prod = reduce1([novelty, reduce2(prods_children)])
+            prod = reduce(my_novelty, [node2prod[child] for child in node.children])
         else:
-            prod = novelty
+            prod = my_novelty
         node2prod[node] = prod
     recurse(ge.node_root)
     prod = torch.tensor([node2prod[node] for node in ge]).float()
