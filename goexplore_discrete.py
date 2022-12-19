@@ -26,7 +26,8 @@ class GoExplore():
         self.device = device
 
         self.cell2node = {}
-        self.cell2n_seen = defaultdict(lambda : 0)
+        # self.cell2n_seen = defaultdict(lambda : 0)
+        self.cell2n_seen = {}
         snapshot, obs, reward, done, info = self.env.reset()
         cell = self.env.get_cell(obs)
         self.node_root = Node(None, [], snapshot[0], cell[0], done[0].item())
@@ -96,6 +97,8 @@ class GoExplore():
         
         for cellset in cellsets:
             for cell in cellset:
+                if cell not in self.cell2n_seen:
+                    self.cell2n_seen[cell] = 0
                 self.cell2n_seen[cell] += 1
     
     def step(self, n_nodes, len_traj):

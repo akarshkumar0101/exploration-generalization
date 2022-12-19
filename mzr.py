@@ -1,4 +1,5 @@
 import argparse
+import pickle
 from distutils.util import strtobool
 
 import cv2
@@ -284,7 +285,9 @@ def main(args):
             wandb.log(data)
             plt.close('all')
 
-            torch.save(f'results/ge_step_{i_step}.pt', ge)
+            if i_step%args.freq_save==0:
+                torch.save(ge, f'results/ge.pt')
+
         pbar.set_postfix({k: v for k, v in data.items() if isinstance(v, float)})
         
     if args.track:
@@ -300,6 +303,7 @@ parser.add_argument("--device", type=str, default=None)
 
 # viz parameters
 parser.add_argument("--freq_viz", type=int, default=100)
+parser.add_argument("--freq_save", type=int, default=100)
 
 # algorithm parameters
 parser.add_argument("--n_steps", type=int, default=1000)
