@@ -5,38 +5,21 @@ import torch
 
 
 class Node():
-    def __init__(self, parent, action, reward, done, snapshot, obs, latent):
-        self.parent = parent
-        self.children = []
-        
-        self.action = action
-        self.reward = reward
-        self.done = done
-
-        self.snapshot = snapshot
-        self.obs = obs
-        self.latent = latent
-        self.done = done
-        
-    def get_full_trajectory(self):
-        return ([] if self.parent is None else self.parent.get_full_trajectory()) + self.traj
-
-class Node():
-    def __init__(self, parent, traj, snapshot, obs, latent, done):
+    def __init__(self, parent, traj, snapshot, cell, done):
         self.parent = parent
         self.children = []
         
         self.traj = traj
 
         self.snapshot = snapshot
-        self.obs = obs
-        self.latent = latent
+        self.cell = cell
         self.done = done
         
-    def get_full_trajectory(self):
-        return ([] if self.parent is None else self.parent.get_full_trajectory()) + self.traj
+    def get_actions(self):
+        actions = self.snapshot
+        return actions
 
-class GoExplore(list):
+class GoExplore():
     def __init__(self, env, explorer, device=None):
         self.env = env
         self.explorer = explorer
@@ -45,65 +28,79 @@ class GoExplore(list):
         self.cell2node = {}
         self.cell2n_seen = defaultdict(lambda : 0)
         snapshot, obs, reward, done, info = self.env.reset()
-        node_root = Node(None, [], snapshot[0], obs[0].cpu(), self.env.to_latent(snapshot, obs)[0], done[0].cpu())
-        self.node_root = node_root
-        self.add_node(node_root)
+        cell = self.env.get_cell(obs)
+        self.node_root = Node(None, [], snapshot[0], cell[0], done[0].item())
+        self.add_node(self.node_root)
         
     def add_node(self, node):
-        self.cell2node[node.latent] = node
-        self.append(node)
-        if node.parent:
-            node.parent.children.append(node)
-        
-    def add_node(self, node):
-        self.cell2n_seen[node.latent] += 1
-        self.append(node)
-        if node.parent:
-            node.parent.children.append(node)
-            
-        if node.latent in self.cell2node:
-            node_old = self.cell2node[node.latent]
-            if len(node.get_full_trajectory())<len(node_old.get_full_trajectory()):
-                self.cell2node[node.latent] = node
+        if node.cell in self.cell2node:
+            node_old = self.cell2node[node.cell]
+            if len(node.get_actions())<len(node_old.get_actions()):
+                self.cell2node[node.cell] = node
         else:
-            self.cell2node[node.latent] = node
+            self.cell2node[node.cell] = node
     
-    def select_nodes(self, n_nodes, random=False):
+    def select_nodes(self, n_nodes, strategy='normal'):
         cells = list(self.cell2node.keys())
-        if random:
+        if strategy=='random':
             p = None
         else:
             n_seen = np.array([self.cell2n_seen[cell] for cell in cells])
             p = 1./np.sqrt(n_seen+1)
+            if strategy=='reverse':
+                p = 1/p
             p = p/p.sum()
         return [self.cell2node[cells[i]] for i in np.random.choice(len(cells), size=n_nodes, p=p)]
     
-    def explore_from_single(self, nodes, len_traj):
-        self.explorer = self.explorer.to(self.device)
-        trajs = [[] for _ in nodes] # list of tuples (snapshot, obs, action, reward, done)
+    # def explore_from_single(self, nodes, len_traj):
+    #     self.explorer = self.explorer.to(self.device)
+    #     # trajs = [[] for _ in nodes] # list of tuples (snapshot, obs, action, reward, done)
+    #     snapshot = [node.snapshot for node in nodes]
+    #     snapshot, obs, reward, done, info = self.env.reset(snapshot)
+    #     for i_trans in range(len_traj):
+    #         with torch.no_grad():
+    #             action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
+    #         snapshot_next, obs_next, reward, done_next, info = self.env.step(action.cpu())
+    #         # for i, traj in enumerate(trajs):
+    #         #     traj.append((snapshot[i], obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
+    #         # snapshot, obs, done = snapshot_next, obs_next, done_next
+    #     cell = self.env.get_cell(snapshot, obs)
+    #     return [Node(nodes[i], [], snapshot[i], obs[i].cpu(), cell[i], done[i].cpu()) for i in range(len(nodes))]
+    
+    # def explore_from(self, nodes, len_traj, n_trajs, add_nodes=True):
+    #     for node in nodes:
+    #         self.cell2n_seen[node.cell] += 1
+            
+    #     for _ in range(n_trajs):
+    #         nodes = self.explore_from_single(nodes, len_traj)
+    #         if add_nodes:
+    #             for node in nodes:
+    #                 self.add_node(node)
+
+    def explore_from(self, nodes, len_traj):
+        # self.explorer = self.explorer.to(self.device)
+
+        cellsets = [set(node.cell) for node in nodes]
         snapshot = [node.snapshot for node in nodes]
         snapshot, obs, reward, done, info = self.env.reset(snapshot)
         for i_trans in range(len_traj):
-            with torch.no_grad():
-                action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
-                # action, log_prob = action.cpu(), log_prob.cpu()
-            snapshot_next, obs_next, reward, done_next, info = self.env.step(action.cpu())
-            for i, traj in enumerate(trajs):
-                traj.append((snapshot[i], obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
-            snapshot, obs, done = snapshot_next, obs_next, done_next
-            
-        latent = self.env.to_latent(snapshot, obs)
-        return [Node(nodes[i], trajs[i], snapshot[i], obs[i].cpu(), latent[i], done[i].cpu()) for i in range(len(nodes))]
+            # with torch.no_grad():
+                # action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
+            # snapshot, obs, reward, done, info = self.env.step(action.cpu())
+            snapshot, obs, reward, done, info = self.env.step(self.env.action_space.sample())
+            cell = self.env.get_cell(obs)
+
+            for i in range(len(nodes)):
+                cellsets[i].add(cell[i])
+                self.add_node(Node(None, [], snapshot[i], cell[i], done[i].item()))
+        
+        for cellset in cellsets:
+            for cell in cellset:
+                self.cell2n_seen[cell] += 1
     
-    def explore_from(self, nodes, len_traj, n_trajs, add_nodes=True):
-        for node in nodes:
-            self.cell2n_seen[node.latent] += 1
-            
-        for _ in range(n_trajs):
-            nodes = self.explore_from_single(nodes, len_traj)
-            if add_nodes:
-                for node in nodes:
-                    self.add_node(node)
+    def step(self, n_nodes, len_traj):
+        nodes = self.select_nodes(n_nodes)
+        self.explore_from(nodes, len_traj)
 
 def calc_reward_dfs(ge, reduce=lambda x, childs: x, log=True):
     """
