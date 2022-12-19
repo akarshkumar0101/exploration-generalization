@@ -32,6 +32,7 @@ class GoExplore():
         cell = self.env.get_cell(obs)
         self.node_root = Node(None, [], snapshot[0], cell[0], done[0].item())
         self.add_node(self.node_root)
+        self.cell2n_seen[cell[0]] = 0
         
     def add_node(self, node):
         if node.cell in self.cell2node:
