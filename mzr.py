@@ -62,6 +62,9 @@ class GoExploreAtariWrapper(gym.Wrapper):
         done = self.env.unwrapped.ale.lives() < self.n_lives
         if done and self.dead_screen:
             obs = np.zeros_like(obs)
+        assert isinstance(self.actions, list)
+        for a in self.actions:
+            assert isinstance(a, int)
         snapshot = np.array(self.actions)
         obs, reward, done = torch.as_tensor(obs)/255., torch.as_tensor(reward), torch.as_tensor(done)
         return snapshot, obs, reward, done, info
@@ -128,8 +131,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class ImitationExplorer(nn.Module):
     def __init__(self, env, force_random=False):
         super().__init__()
-        self.n_inputs = np.prod(env.observation_space.shape)
-        self.n_outputs = env.action_space.n
+        self.n_inputs = np.prod(env.observation_space[0].shape)
+        self.n_outputs = env.action_space[0].n
         self.encoder = nn.Sequential(
             layer_init(nn.Conv2d(1, 10, 8, stride=4)),
             nn.ReLU(),
