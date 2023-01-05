@@ -13,6 +13,8 @@ import torch.optim as optim
 from einops import rearrange, repeat
 from torch.distributions.categorical import Categorical
 
+import utils
+
 
 def parse_args(envs, s=None):
     # fmt: off
@@ -116,35 +118,35 @@ def calc_gae(rewards, values, gamma=0.99, gae_lambda=0.95):
     returns = advantages + values_now
     return advantages, returns
 
-def calc_gae(rewards, values, next_value, dones, next_done, gamma=0.99, gae_lambda=0.95):
+def calc_gae(reward, value, next_value, done, next_done, gamma=0.99, gae_lambda=0.95):
     """
     Generalized Advantage Estimation
     Inputs:
-        - rewards of shape (num_envs, num_steps)
-        -  values of shape (num_envs, num_steps)
+        - reward of shape (num_envs, num_steps)
+        -  value of shape (num_envs, num_steps)
         -  next_value of shape (num_envs, )
-        -   dones of shape (num_envs, num_steps)
+        -   done of shape (num_envs, num_steps)
         -   next_done of shape (num_envs, )
     Returns:
-        - advantages of shape (num_envs, num_steps)
-        -    returns of shape (num_envs, num_steps)
+        - advantage of shape (num_envs, num_steps)
+        -    return of shape (num_envs, num_steps)
     """
     # bootstrap value if not done
-    num_envs, num_steps = rewards.shape
+    num_envs, num_steps = reward.shape
     with torch.no_grad():
-        advantages = torch.zeros_like(rewards)
+        advantage = torch.zeros_like(reward)
         lastgaelam = 0
         for t in reversed(range(num_steps)):
             if t == num_steps - 1:
                 nextnonterminal = 1.0 - next_done
                 nextvalues = next_value
             else:
-                nextnonterminal = 1.0 - dones[:, t + 1]
-                nextvalues = values[:, t + 1]
-            delta = rewards[:, t] + gamma * nextvalues * nextnonterminal - values[:, t]
-            advantages[:, t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-        returns = advantages + values
-    return advantages, returns
+                nextnonterminal = 1.0 - done[:, t + 1]
+                nextvalues = value[:, t + 1]
+            delta = reward[:, t] + gamma * nextvalues * nextnonterminal - value[:, t]
+            advantage[:, t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+        return_ = advantage + value
+    return advantage, return_
 
 def run_ppo_simple(agent, envs, args, callback_fn=None):
     random.seed(args.seed)
@@ -153,20 +155,25 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
     torch.backends.cudnn.deterministic = args.torch_deterministic
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    # env setup
+    # if not isinstance(envs.observation_space, gym.spaces.Dict):
+    #     envs = utils.DictObservationWrapper(envs)
+
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = agent.to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
-    # ALGO Logic: Storage setup
-    obss = torch.zeros((args.num_envs, args.num_steps) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_envs, args.num_steps) + envs.single_action_space.shape).to(device)
-    logprobs = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    rewards = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    entropies = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    values = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    dones = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data = {}
+    # observation space is a dict
+    obs_keys = list(envs.observation_space.keys())
+    for k, v in envs.observation_space.items():
+        data[k] = torch.zeros((args.num_envs, args.num_steps) + v.shape).to(device)
+    data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+envs.single_action_space.shape).to(device)
+    data['logprob'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data[ 'reward'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data['entropy'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data[  'value'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data[   'done'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
 
     num_updates = args.total_timesteps // args.batch_size
     for update in range(num_updates):
@@ -178,27 +185,26 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
         obs, info = envs.reset()
         done = torch.zeros(args.num_envs).to(device)
         for i_step in range(args.num_steps):
-            obss[:, i_step] = obs
-            dones[:, i_step] = done
+            for k, v in obs.items():
+                data[k][:, i_step] = v
+            data['done'][:, i_step] = done
 
             with torch.no_grad():
                 action, logprob, entropy, value = agent.get_action_and_value(obs)
             obs, reward, terminated, truncated, info = envs.step(action)
             done = torch.logical_or(terminated, truncated).float()
 
-            actions[:, i_step] = action
-            logprobs[:, i_step] = logprob
-            rewards[:, i_step] = reward
-            entropies[:, i_step] = entropy
-            values[:, i_step] = value
+            data[ 'action'][:, i_step] = action
+            data['logprob'][:, i_step] = logprob
+            data[ 'reward'][:, i_step] = reward
+            data['entropy'][:, i_step] = entropy
+            data[  'value'][:, i_step] = value
 
         value = agent.get_value(obs)
-        advantages, returns = calc_gae(rewards, values, value, dones, done, args.gamma, args.gae_lambda)
-        # advantages, returns = calc_gae(rewards, values, gamma=args.gamma, gae_lambda=args.gae_lambda)
-        goals = repeat(agent.goal, 'e g -> e t g', t=args.num_steps)
+        advantage, return_ = calc_gae(data['reward'], data['value'], value, data['done'], done, args.gamma, args.gae_lambda)
+        data['advantage'] = advantage
+        data['return'] = return_
 
-        data = dict(obss=obss, actions=actions, logprobs=logprobs, rewards=rewards, entropies=entropies,
-                    values=values, advantages=advantages, returns=returns, goals=goals)
         # flatten the batch
         b_data = {k: rearrange(v, 'e t ... -> (e t) ...') for k, v in data.items()}
 
@@ -208,16 +214,16 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
             for mb_inds in torch.randperm(args.batch_size).split(args.minibatch_size):
                 mb_data = {k: v[mb_inds] for k, v in b_data.items()}
 
-                mb_advantages = mb_data['advantages']
-                mb_values = mb_data['values']
-                mb_returns = mb_data['returns']
-                mb_logprobs = mb_data['logprobs']
-                mb_obss = mb_data['obss']
-                mb_actions = mb_data['actions']
-                mb_goals = mb_data['goals']
+                mb_obs_items = {k: mb_data[k] for k in obs_keys}
+                mb_advantage = mb_data['advantage']
+                mb_value = mb_data['value']
+                mb_return = mb_data['return']
+                mb_logprob = mb_data['logprob']
+                mb_action = mb_data['action']
 
-                _, mb_logprobs_new, mb_entropies_new, mb_values_new = agent.get_action_and_value(mb_obss, mb_actions.long(), mb_goals)
-                logratio = mb_logprobs_new - mb_logprobs
+                _, mb_logprobs_new, mb_entropies_new, mb_values_new = agent.get_action_and_value(**mb_obs_items, action=mb_action.long())
+
+                logratio = mb_logprobs_new - mb_logprob
                 ratio = logratio.exp()
 
                 with torch.no_grad():
@@ -227,23 +233,23 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
                     clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
                 if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                    mb_advantage = (mb_advantage - mb_advantage.mean()) / (mb_advantage.std() + 1e-8)
 
                 # Policy loss
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
+                pg_loss1 = -mb_advantage * ratio
+                pg_loss2 = -mb_advantage * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 # Value loss
                 mb_values_new = mb_values_new.view(-1)
                 if args.clip_vloss:
-                    v_loss_unclipped = (mb_values_new - mb_returns) ** 2
-                    v_clipped = mb_values + (mb_values_new - mb_values).clamp(-args.clip_coef, args.clip_coef)
-                    v_loss_clipped = (v_clipped - mb_returns) ** 2
+                    v_loss_unclipped = (mb_values_new - mb_return) ** 2
+                    v_clipped = mb_value + (mb_values_new - mb_value).clamp(-args.clip_coef, args.clip_coef)
+                    v_loss_clipped = (v_clipped - mb_return) ** 2
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                     v_loss = 0.5 * v_loss_max.mean()
                 else:
-                    v_loss = 0.5 * ((mb_values_new - mb_returns) ** 2).mean()
+                    v_loss = 0.5 * ((mb_values_new - mb_return) ** 2).mean()
 
                 entropy_loss = mb_entropies_new.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
@@ -257,7 +263,7 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
                 if approx_kl > args.target_kl:
                     break
 
-        y_pred, y_true = b_data['values'].cpu().numpy(), b_data['returns'].cpu().numpy()
+        y_pred, y_true = b_data['value'].cpu().numpy(), b_data['return'].cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
