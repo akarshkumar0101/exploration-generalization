@@ -169,15 +169,14 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
     dones = torch.zeros((args.num_envs, args.num_steps)).to(device)
 
     num_updates = args.total_timesteps // args.batch_size
-    for update in range(1, num_updates + 1):
+    for update in range(num_updates):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+            lr_now = (1.0 - update/num_updates) * args.learning_rate
+            optimizer.param_groups[0]["lr"] = lr_now
         
-        done = torch.zeros(args.num_envs).to(device)
         obs, info = envs.reset()
+        done = torch.zeros(args.num_envs).to(device)
         for i_step in range(args.num_steps):
             obss[:, i_step] = obs
             dones[:, i_step] = done
