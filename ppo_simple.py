@@ -148,7 +148,7 @@ def calc_gae(reward, value, next_value, done, next_done, gamma=0.99, gae_lambda=
         return_ = advantage + value
     return advantage, return_
 
-def run_ppo_simple(agent, envs, args, callback_fn=None):
+def run_ppo(agent, envs, args, callback_fn=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -166,8 +166,9 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
     data = {}
     # observation space is a dict
     obs_keys = list(envs.observation_space.keys())
-    for k, v in envs.observation_space.items():
+    for k, v in envs.single_observation_space.items():
         data[k] = torch.zeros((args.num_envs, args.num_steps) + v.shape).to(device)
+
     data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+envs.single_action_space.shape).to(device)
     data['logprob'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
     data[ 'reward'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
@@ -175,11 +176,11 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
     data[  'value'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
     data[   'done'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
 
-    num_updates = args.total_timesteps // args.batch_size
-    for update in range(num_updates):
+    n_updates = args.total_timesteps // args.batch_size
+    for i_update in range(n_updates):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
-            lr_now = (1.0 - update/num_updates) * args.learning_rate
+            lr_now = (1.0 - i_update/n_updates) * args.learning_rate
             optimizer.param_groups[0]["lr"] = lr_now
         
         obs, info = envs.reset()
@@ -190,7 +191,7 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
             data['done'][:, i_step] = done
 
             with torch.no_grad():
-                action, logprob, entropy, value = agent.get_action_and_value(obs)
+                action, logprob, entropy, value = agent.get_action_and_value(**obs)
             obs, reward, terminated, truncated, info = envs.step(action)
             done = torch.logical_or(terminated, truncated).float()
 
@@ -200,7 +201,7 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
             data['entropy'][:, i_step] = entropy
             data[  'value'][:, i_step] = value
 
-        value = agent.get_value(obs)
+        value = agent.get_value(**obs)
         advantage, return_ = calc_gae(data['reward'], data['value'], value, data['done'], done, args.gamma, args.gae_lambda)
         data['advantage'] = advantage
         data['return'] = return_
@@ -210,7 +211,7 @@ def run_ppo_simple(agent, envs, args, callback_fn=None):
 
         # Optimizing the policy and value network
         clipfracs = []
-        for epoch in range(args.update_epochs):
+        for i_epoch in range(args.update_epochs):
             for mb_inds in torch.randperm(args.batch_size).split(args.minibatch_size):
                 mb_data = {k: v[mb_inds] for k, v in b_data.items()}
 

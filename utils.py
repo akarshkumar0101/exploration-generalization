@@ -20,34 +20,40 @@ from collections import OrderedDict
 import gym
 
 
-class ToTensorWrapper(gym.Wrapper):
+class ToTensor(gym.Wrapper):
     def __init__(self, env, device=None, dtype=None):
         super().__init__(env)
         self.device = device
         self.dtype = dtype
+    
+    def as_tensor(self, obs):
+        if isinstance(obs, torch.Tensor):
+            return obs.to(device=self.device, dtype=self.dtype)
+        elif isinstance(obs, np.ndarray):
+            return torch.as_tensor(obs, device=self.device, dtype=self.dtype)
+        elif isinstance(obs, list):
+            return [self.as_tensor(o) for o in obs]
+        elif isinstance(obs, tuple):
+            return tuple(self.as_tensor(o) for o in obs)
+        elif isinstance(obs, dict):
+            return obs.__class__({k: self.as_tensor(v) for k, v in obs.items()})
 
     def reset(self):
         obs, info = self.env.reset()
-        obs = torch.as_tensor(obs, device=self.device, dtype=self.dtype)
+        obs = self.as_tensor(obs)
         return obs, info
     
     def step(self, action):
+        action = action.tolist()
         obs, reward, terminated, truncated, info = self.env.step(action)
-        if isinstance(obs, np.ndarray):
-            obs = torch.as_tensor(obs, device=self.device, dtype=self.dtype)
-        elif isinstance(obs, list):
-            obs = [torch.as_tensor(o, device=self.device, dtype=self.dtype) for o in obs]
-        elif isinstance(obs, tuple):
-            obs = tuple(torch.as_tensor(o, device=self.device, dtype=self.dtype) for o in obs)
-        elif isinstance(obs, dict):
-            obs = obs.__class__({k: torch.as_tensor(v, device=self.device, dtype=self.dtype) for k, v in obs.items()})
 
+        obs = self.as_tensor(obs)
         reward = torch.as_tensor(reward, device=self.device, dtype=self.dtype)
         terminated = torch.as_tensor(terminated, device=self.device, dtype=self.dtype)
         truncated = torch.as_tensor(truncated, device=self.device, dtype=self.dtype)
         return obs, reward, terminated, truncated, info
 
-class DictObservationWrapper(gym.wrappers.TransformObservation):
+class DictObservation(gym.wrappers.TransformObservation):
     def __init__(self, env):
         super().__init__(env, lambda obs: OrderedDict(obs=obs))
         self.observation_space = gym.spaces.Dict(obs=self.env.observation_space)
