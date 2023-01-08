@@ -3,11 +3,11 @@ import pickle
 from distutils.util import strtobool
 
 import cv2
-import gym
+import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from gym import spaces
+from gymnasium import spaces
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
@@ -15,6 +15,48 @@ from tqdm.auto import tqdm
 import bc
 import wandb
 from goexplore_discrete import GoExplore, Node, calc_reward_novelty
+
+
+class OneLife(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        terminated = self.env.unwrapped.ale.lives() < 6
+        return obs, reward, terminated, truncated, info
+
+class DeadScreen(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if terminated or truncated:
+            obs = np.zeros_like(obs)
+        return obs, reward, terminated, truncated, info
+
+class ResetState(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self, snapshot=None):
+        if snapshot is None:
+            obs, info = self.env.reset()
+            ale_state, action = self.env.ale.cloneState(), 0
+        else:
+            ale_state, action = snapshot
+            self.env.ale.restoreState(ale_state)
+
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info['snapshot'] = (ale_state, action)
+        return obs, info
+
+    def step(self, action):
+        ale_state = self.ale.cloneState()
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info['snapshot'] = (ale_state, action)
+        return obs, reward, terminated, truncated, info
+
+
 
 
 class GoExploreAtariWrapper(gym.Wrapper):
