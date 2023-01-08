@@ -1,4 +1,5 @@
 import argparse
+import copy
 import pickle
 from distutils.util import strtobool
 
@@ -14,7 +15,7 @@ from tqdm.auto import tqdm
 
 import bc
 import wandb
-from goexplore_discrete import GoExplore, Node, calc_reward_novelty
+from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
 
 class OneLife(gym.Wrapper):
@@ -22,7 +23,7 @@ class OneLife(gym.Wrapper):
         super().__init__(env)
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        terminated = self.env.unwrapped.ale.lives() < 6
+        terminated = self.env.ale.lives() < 6
         return obs, reward, terminated, truncated, info
 
 class DeadScreen(gym.Wrapper):
@@ -34,136 +35,87 @@ class DeadScreen(gym.Wrapper):
             obs = np.zeros_like(obs)
         return obs, reward, terminated, truncated, info
 
+def get_obs_cell(obs, latent_h=11, latent_w=8, latent_d=20, ret_tuple=True):
+    # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+    obs = cv2.resize(obs, (latent_w, latent_h), interpolation=cv2.INTER_AREA)
+    obs = (obs*latent_d).astype(np.uint8)
+    return tuple(obs.flatten()) if ret_tuple else obs
+
+class RGBCell(gym.Wrapper):
+    def __init__(self, env, latent_h=11, latent_w=8, latent_d=20):
+        super().__init__(env)
+        self.latent_h, self.latent_w, self.latent_d = latent_h, latent_w, latent_d
+
+    def reset(self):
+        obs, info = self.env.reset()
+        info['cell'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
+        info['cell_tuple'] = tuple(info['cell'].flatten())
+        return obs, info
+    
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info['cell'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
+        info['cell_tuple'] = tuple(info['cell'].flatten())
+        return obs, reward, terminated, truncated, info
+
 class ResetState(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
+        self.data = {}
 
-    def reset(self, snapshot=None):
-        if snapshot is None:
-            obs, info = self.env.reset()
-            ale_state, action = self.env.ale.cloneState(), 0
-        else:
-            ale_state, action = snapshot
-            self.env.ale.restoreState(ale_state)
+    # def reset(self, snapshot=None):
+    #     if snapshot is None:
+    #         obs, info = self.env.reset()
+    #         ale_state, action = self.env.ale.cloneState(), 0
+    #     else:
+    #         ale_state, action = snapshot
+    #         self.env.ale.restoreState(ale_state)
 
+    #     obs, reward, terminated, truncated, info = self.env.step(action)
+    #     info['snapshot'] = (ale_state, action)
+    #     return obs, info
+
+    def reset(self):
+        obs, info = self.env.reset()
+        ale_state, action = self.env.ale.cloneState(), 0
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info['snapshot'] = (ale_state, action)
+        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
+        for key, value in self.data.items():
+            info[key] = value
         return obs, info
+
+    def restore_snapshot(self, snapshot):
+        ale_state, action, data = snapshot
+        self.env.ale.restoreState(ale_state)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.data = copy.deepcopy(data)
+        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
+        for key, value in self.data.items():
+            info[key] = value
+        return obs, reward, terminated, truncated, info
 
     def step(self, action):
         ale_state = self.ale.cloneState()
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info['snapshot'] = (ale_state, action)
+        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
+        for key, value in self.data.items():
+            info[key] = value
         return obs, reward, terminated, truncated, info
 
-
-
-
-class GoExploreAtariWrapper(gym.Wrapper):
-    def __init__(self, env, dead_screen=True):
+class ActionHistory(gym.Wrapper):
+    def __init__(self, env):
         super().__init__(env)
-        self.n_lives = 6
-        self.dead_screen = dead_screen
+        assert hasattr(self, 'data')
 
-        self.actions = [] # actions that got me here
-        
-    # def reset(self, snapshot=None):
-    #     if snapshot is None:
-    #         obs, reward, done, info = self.env.reset()[0], 0, False, {}
-    #         done = self.env.unwrapped.ale.lives() < self.n_lives
-    #         if done:
-    #             obs = np.zeros_like(obs)
-    #         ale_state = self.env.ale.cloneState()
-    #     else:
-    #         (obs, reward, done, info, ale_state) = snapshot
-    #         self.env.ale.restoreState(ale_state)
-    #     snapshot = (obs, reward, done, info, ale_state)
-    #     obs, reward, done = torch.as_tensor(obs)/255., torch.as_tensor(reward), torch.as_tensor(done)
-    #     return snapshot, obs, reward, done, info
-
-    def reset(self, snapshot=None):
-        self.actions = []
-        obs, reward, done, info = self.env.reset()[0], 0, False, {}
-        if snapshot is not None:
-            self.actions = snapshot.tolist()
-            for action in self.actions:
-                obs, reward, done, _, info = self.env.step(action)
-
-        done = self.env.unwrapped.ale.lives() < self.n_lives
-        if done and self.dead_screen:
-            obs = np.zeros_like(obs)
-        snapshot = np.array(self.actions)
-        obs, reward, done = torch.as_tensor(obs)/255., torch.as_tensor(reward), torch.as_tensor(done)
-        return snapshot, obs, reward, done, info
-        
-
-    def step(self, action):
-        self.actions.append(action)
-        obs, reward, done, _, info = self.env.step(action)
-
-        done = self.env.unwrapped.ale.lives() < self.n_lives
-        if done and self.dead_screen:
-            obs = np.zeros_like(obs)
-        assert isinstance(self.actions, list)
-        for a in self.actions:
-            assert isinstance(a, int)
-        snapshot = np.array(self.actions)
-        obs, reward, done = torch.as_tensor(obs)/255., torch.as_tensor(reward), torch.as_tensor(done)
-        return snapshot, obs, reward, done, info
-
-class MZRevenge():
-    def __init__(self, n_envs=10, dead_screen=True, latent_h=11, latent_w=8, latent_d=20):
-        super().__init__()
-        self.n_envs = n_envs
-        self.dead_screen = dead_screen
-        self.latent_h, self.latent_w, self.latent_d = latent_h, latent_w, latent_d
-        
-        self.envs = [self.make_env() for _ in range(self.n_envs)]
-        
-        self.observation_space = gym.spaces.Tuple([env.observation_space for env in self.envs])
-        self.action_space = gym.spaces.Tuple([env.action_space for env in self.envs])
-
-        self.reset()
-        
-    def make_env(self):
-        env = gym.make('MontezumaRevengeDeterministic-v4', render_mode='rgb_array')
-        env = gym.wrappers.ResizeObservation(env, (21*5, 16*5))
-        env = gym.wrappers.GrayScaleObservation(env)
-        env = GoExploreAtariWrapper(env)
-        return env
-        
-    def to(self, *args, **kwargs):
-        return self
-        
-    def reset(self, snapshot=None):
-        if snapshot is None:
-            snapshot = [None] * self.n_envs
-        data = [env.reset(snap) for env, snap in zip(self.envs, snapshot)]
-        snapshot = [d[0] for d in data]
-        obs = torch.stack([d[1] for d in data])[:, None, :, :]
-        reward = torch.stack([d[2] for d in data])
-        done = torch.stack([d[3] for d in data])
-        info = None
-        return snapshot, obs, reward, done, info
+    def reset(self):
+        self.data['action_history'] = []
+        obs, info = self.env.reset()
+        return obs, info
     
     def step(self, action):
-        if isinstance(action, torch.Tensor):
-            action = action.tolist()
-        data = [env.step(a) for env, a in zip(self.envs, action)]
-        snapshot = [d[0] for d in data]
-        obs = torch.stack([d[1] for d in data])[:, None, :, :]
-        reward = torch.stack([d[2] for d in data])
-        done = torch.stack([d[3] for d in data])
-        info = None
-        return snapshot, obs, reward, done, info
-    
-    def get_cell(self, obs, ret_tuple=True):
-        def get_cell_single(obs):
-            # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
-            obs = cv2.resize(obs, (self.latent_w, self.latent_h), interpolation=cv2.INTER_AREA)
-            obs = (obs*self.latent_d).astype(np.uint8)
-            return tuple(obs.flatten()) if ret_tuple else obs
-        return [get_cell_single(o) for o in obs[:, 0, :, :].cpu().numpy()]
+        self.data['action_history'].append(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return obs, reward, terminated, truncated, info
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)

@@ -17,7 +17,7 @@ def normalize(a, devs=None):
 
 from collections import OrderedDict
 
-import gym
+import gymnasium as gym
 
 
 class ToTensor(gym.Wrapper):
