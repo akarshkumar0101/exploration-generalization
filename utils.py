@@ -42,13 +42,19 @@ class ToTensor(gym.Wrapper):
         obs, info = self.env.reset()
         obs = self.as_tensor(obs)
         return obs, info
+
+    def restore_snapshots(self, snapshots):
+        obs, reward, terminated, truncated, info = self.env.restore_snapshots(snapshots)
+        obs = self.as_tensor(obs)
+        reward = torch.as_tensor(reward, device=self.device, dtype=self.dtype)
+        terminated = torch.as_tensor(terminated, device=self.device, dtype=self.dtype)
+        truncated = torch.as_tensor(truncated, device=self.device, dtype=self.dtype)
+        return obs, reward, terminated, truncated, info
     
     def step(self, action):
         if isinstance(action, torch.Tensor):
             action = action.tolist()
-
         obs, reward, terminated, truncated, info = self.env.step(action)
-
         obs = self.as_tensor(obs)
         reward = torch.as_tensor(reward, device=self.device, dtype=self.dtype)
         terminated = torch.as_tensor(terminated, device=self.device, dtype=self.dtype)

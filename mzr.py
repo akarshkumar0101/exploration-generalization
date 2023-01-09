@@ -17,9 +17,49 @@ import wandb
 
 # from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
+class AtariResetState(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self):
+        obs, info = self.env.reset()
+        obs, reward, terminated, truncated, info = self.step(0) # call my own self
+        return obs, info
+    
+    def restore_snapshot(self, snapshot):
+        ale_state, action = snapshot
+        self.env.ale.restoreState(ale_state)
+        obs, reward, terminated, truncated, info = self.step(action) # call my own self
+        return obs, reward, terminated, truncated, info
+
+    def step(self, action):
+        ale_state = self.ale.cloneState()
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info['snapshot'] = (ale_state, action)
+        return obs, reward, terminated, truncated, info
+
+class Observation01(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        obs_space = self.observation_space
+        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/255., obs_space.shape, dtype=np.float32)
+    def reset(self):
+        obs, info = self.env.reset()
+        return self.observation(obs), info
+    def restore_snapshot(self, snapshot):
+        obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshot)
+        return self.observation(obs), reward, terminated, truncated, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return self.observation(obs), reward, terminated, truncated, info
+    def observation(self, obs):
+        return (obs/255.).astype(np.float32)
+
 class OneLife(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
+    def reset(self):
+        return self.env.reset()
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         terminated = self.env.ale.lives() < 6
@@ -28,19 +68,13 @@ class OneLife(gym.Wrapper):
 class DeadScreen(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
+    def reset(self):
+        return self.env.reset()
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         if terminated or truncated:
             obs = np.zeros_like(obs)
         return obs, reward, terminated, truncated, info
-
-class Observation01(gym.ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        obs_space = self.observation_space
-        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/255., obs_space.shape, dtype=np.float32)
-    def observation(self, obs):
-        return (obs/255.).astype(np.float32)
 
 def get_obs_cell(obs, latent_h=11, latent_w=8, latent_d=20, ret_tuple=True):
     # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
@@ -65,62 +99,46 @@ class ImageCellInfo(gym.Wrapper):
         info['cell'] = tuple(info['cell_img'].flatten())
         return obs, reward, terminated, truncated, info
 
-class AtariResetState(gym.Wrapper):
+class ActionHistory(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.data = {}
 
     def reset(self):
         obs, info = self.env.reset()
-        self.data['action_history'] = []
-        obs, reward, terminated, truncated, info = self.step(0) # call my own self
+        self.action_history = []
+        info['action_history'] = copy.copy(self.action_history)
+        info['snapshot'] = (info['snapshot'], copy.copy(self.action_history))
         return obs, info
-    
+
     def restore_snapshot(self, snapshot):
-        ale_state, data, action = snapshot
-        self.env.ale.restoreState(ale_state)
-        self.data = copy.deepcopy(data)
-        obs, reward, terminated, truncated, info = self.step(action) # call my own self
+        snapshot, action_history = snapshot
+        obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshot)
+        self.action_history = copy.copy(action_history)
+        info['action_history'] = copy.copy(self.action_history)
+        info['snapshot'] = (info['snapshot'], copy.copy(self.action_history))
         return obs, reward, terminated, truncated, info
-
-    def step(self, action):
-        ale_state, data = self.ale.cloneState(), copy.deepcopy(self.data)
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        info['snapshot'] = (ale_state, data, action)
-        return obs, reward, terminated, truncated, info
-
-def restore_snapshots(envs, snapshots):
-    actions = []
-    for env, snapshot in zip(envs.envs, snapshots):
-        ale_state, data, action = snapshot
-        env.ale.restoreState(ale_state)
-        env.data = copy.deepcopy(data)
-        actions.append(action)
-    obs, reward, terminated, truncated, info = envs.step(actions)
-    return obs, reward, terminated, truncated, info
-
-# class ActionHistory(gym.Wrapper):
-#     def __init__(self, env):
-#         super().__init__(env)
-
-#     def reset(self):
-#         obs, info = self.env.reset()
-#         self.data['action_history'] = []
-#         info['action_history'] = self.data['action_history']
-#         return obs, info
-
-#     def restore_snapshot(self, snapshot):
-#         ale_state, data, action = snapshot
-#         self.env.ale.restoreState(ale_state)
-#         self.data = copy.deepcopy(data)
-#         obs, reward, terminated, truncated, info = self.step(action) # call my own self
-#         return obs, reward, terminated, truncated, info
     
-#     def step(self, action):
-#         self.data['action_history'].append(action)
-#         obs, reward, terminated, truncated, info = self.env.step(action)
-#         info['action_history'] = self.data['action_history']
-#         return obs, reward, terminated, truncated, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.action_history.append(action)
+        info['action_history'] = copy.copy(self.action_history)
+        info['snapshot'] = (info['snapshot'], copy.copy(self.action_history))
+        return obs, reward, terminated, truncated, info
+
+class MyVectorEnv(gym.vector.SyncVectorEnv):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def restore_snapshots(self, snapshots):
+        o, r, t, tr, i = [], [], [], [], []
+        for env, snapshot in zip(self.envs, snapshots):
+            obs, reward, terminated, truncated, info = env.restore_snapshot(snapshot)
+            o.append(obs)
+            r.append(reward)
+            t.append(terminated)
+            tr.append(truncated)
+            i.append(info)
+        return np.stack(o), np.array(r), np.array(t), np.array(tr), i
 
 
 
