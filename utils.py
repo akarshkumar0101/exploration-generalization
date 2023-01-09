@@ -44,7 +44,9 @@ class ToTensor(gym.Wrapper):
         return obs, info
     
     def step(self, action):
-        action = action.tolist()
+        if isinstance(action, torch.Tensor):
+            action = action.tolist()
+
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         obs = self.as_tensor(obs)
@@ -57,3 +59,4 @@ class DictObservation(gym.wrappers.TransformObservation):
     def __init__(self, env):
         super().__init__(env, lambda obs: OrderedDict(obs=obs))
         self.observation_space = gym.spaces.Dict(obs=self.env.observation_space)
+

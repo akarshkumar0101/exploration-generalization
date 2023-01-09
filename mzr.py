@@ -8,15 +8,14 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from gymnasium import spaces
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
 
 import bc
 import wandb
-from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
+# from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
 class OneLife(gym.Wrapper):
     def __init__(self, env):
@@ -35,87 +34,95 @@ class DeadScreen(gym.Wrapper):
             obs = np.zeros_like(obs)
         return obs, reward, terminated, truncated, info
 
+class Observation01(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        obs_space = self.observation_space
+        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/255., obs_space.shape, dtype=np.float32)
+    def observation(self, obs):
+        return (obs/255.).astype(np.float32)
+
 def get_obs_cell(obs, latent_h=11, latent_w=8, latent_d=20, ret_tuple=True):
     # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
     obs = cv2.resize(obs, (latent_w, latent_h), interpolation=cv2.INTER_AREA)
-    obs = (obs*latent_d).astype(np.uint8)
+    obs = (obs*latent_d).astype(np.uint8, casting='unsafe')
     return tuple(obs.flatten()) if ret_tuple else obs
 
-class RGBCell(gym.Wrapper):
+class ImageCellInfo(gym.Wrapper):
     def __init__(self, env, latent_h=11, latent_w=8, latent_d=20):
         super().__init__(env)
         self.latent_h, self.latent_w, self.latent_d = latent_h, latent_w, latent_d
 
     def reset(self):
         obs, info = self.env.reset()
-        info['cell'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
-        info['cell_tuple'] = tuple(info['cell'].flatten())
+        info['cell_img'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
+        info['cell'] = tuple(info['cell_img'].flatten())
         return obs, info
     
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        info['cell'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
-        info['cell_tuple'] = tuple(info['cell'].flatten())
+        info['cell_img'] = get_obs_cell(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
+        info['cell'] = tuple(info['cell_img'].flatten())
         return obs, reward, terminated, truncated, info
 
-class ResetState(gym.Wrapper):
+class AtariResetState(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.data = {}
 
-    # def reset(self, snapshot=None):
-    #     if snapshot is None:
-    #         obs, info = self.env.reset()
-    #         ale_state, action = self.env.ale.cloneState(), 0
-    #     else:
-    #         ale_state, action = snapshot
-    #         self.env.ale.restoreState(ale_state)
-
-    #     obs, reward, terminated, truncated, info = self.env.step(action)
-    #     info['snapshot'] = (ale_state, action)
-    #     return obs, info
-
     def reset(self):
         obs, info = self.env.reset()
-        ale_state, action = self.env.ale.cloneState(), 0
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
-        for key, value in self.data.items():
-            info[key] = value
-        return obs, info
-
-    def restore_snapshot(self, snapshot):
-        ale_state, action, data = snapshot
-        self.env.ale.restoreState(ale_state)
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        self.data = copy.deepcopy(data)
-        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
-        for key, value in self.data.items():
-            info[key] = value
-        return obs, reward, terminated, truncated, info
-
-    def step(self, action):
-        ale_state = self.ale.cloneState()
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        info['snapshot'] = (ale_state, action, copy.deepcopy(self.data))
-        for key, value in self.data.items():
-            info[key] = value
-        return obs, reward, terminated, truncated, info
-
-class ActionHistory(gym.Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        assert hasattr(self, 'data')
-
-    def reset(self):
         self.data['action_history'] = []
-        obs, info = self.env.reset()
+        obs, reward, terminated, truncated, info = self.step(0) # call my own self
         return obs, info
     
-    def step(self, action):
-        self.data['action_history'].append(action)
-        obs, reward, terminated, truncated, info = self.env.step(action)
+    def restore_snapshot(self, snapshot):
+        ale_state, data, action = snapshot
+        self.env.ale.restoreState(ale_state)
+        self.data = copy.deepcopy(data)
+        obs, reward, terminated, truncated, info = self.step(action) # call my own self
         return obs, reward, terminated, truncated, info
+
+    def step(self, action):
+        ale_state, data = self.ale.cloneState(), copy.deepcopy(self.data)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        info['snapshot'] = (ale_state, data, action)
+        return obs, reward, terminated, truncated, info
+
+def restore_snapshots(envs, snapshots):
+    actions = []
+    for env, snapshot in zip(envs.envs, snapshots):
+        ale_state, data, action = snapshot
+        env.ale.restoreState(ale_state)
+        env.data = copy.deepcopy(data)
+        actions.append(action)
+    obs, reward, terminated, truncated, info = envs.step(actions)
+    return obs, reward, terminated, truncated, info
+
+# class ActionHistory(gym.Wrapper):
+#     def __init__(self, env):
+#         super().__init__(env)
+
+#     def reset(self):
+#         obs, info = self.env.reset()
+#         self.data['action_history'] = []
+#         info['action_history'] = self.data['action_history']
+#         return obs, info
+
+#     def restore_snapshot(self, snapshot):
+#         ale_state, data, action = snapshot
+#         self.env.ale.restoreState(ale_state)
+#         self.data = copy.deepcopy(data)
+#         obs, reward, terminated, truncated, info = self.step(action) # call my own self
+#         return obs, reward, terminated, truncated, info
+    
+#     def step(self, action):
+#         self.data['action_history'].append(action)
+#         obs, reward, terminated, truncated, info = self.env.step(action)
+#         info['action_history'] = self.data['action_history']
+#         return obs, reward, terminated, truncated, info
+
+
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
