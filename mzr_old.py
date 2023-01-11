@@ -17,6 +17,55 @@ import wandb
 
 # from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+class ImitationExplorer(nn.Module):
+    def __init__(self, env, force_random=False):
+        super().__init__()
+        self.n_inputs = np.prod(env.single_observation_space.shape)
+        self.n_outputs = env.single_action_space.n
+        self.encoder = nn.Sequential(
+            layer_init(nn.Conv2d(1, 10, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(10, 10, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(10, 10, 3, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(10, 10, 3, stride=2)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(20, 20)),
+            nn.ReLU(),
+        )
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(20, 20)),
+            nn.ReLU(),
+            layer_init(nn.Linear(20, 1)),
+        )
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(20, 20)),
+            nn.ReLU(),
+            layer_init(nn.Linear(20, self.n_outputs)),
+        )
+        self.force_random = force_random
+        
+    def get_logits_values(self, x):
+        x = self.encoder(x)
+        logits, values = self.actor(x), self.critic(x)
+        if self.force_random:
+            logits, values = torch.zeros_like(logits), torch.zeros_like(values)
+        return logits, values
+    
+    def get_action_and_value(self, x, action=None):
+        logits, values = self.get_logits_values(x)
+        dist = torch.distributions.Categorical(logits=logits)
+        if action is None:
+            action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), values
+
 def viz_ge_outliers(ge, n_ex=10):
     n_ex = ge.env.n_envs
     cells = list(ge.cell2node.keys())
