@@ -1,23 +1,21 @@
 from collections import defaultdict
 
+import gymnasium as gym
 import numpy as np
 import torch
 
+import mzr
+
 
 class Node():
-    def __init__(self, parent, traj, snapshot, cell, done):
+    def __init__(self, parent, info, terminated):
         self.parent = parent
         self.children = []
         
-        self.traj = traj
-
-        self.snapshot = snapshot
-        self.cell = cell
-        self.done = done
-        
-    def get_actions(self):
-        actions = self.snapshot
-        return actions
+        self.snapshot = info['snapshot']
+        self.cell = info['cell']
+        self.action_history = info['action_history']
+        self.terminated = terminated
 
 class GoExplore():
     def __init__(self, env, explorer, device=None):
@@ -26,18 +24,16 @@ class GoExplore():
         self.device = device
 
         self.cell2node = {}
-        # self.cell2n_seen = defaultdict(lambda : 0)
         self.cell2n_seen = {}
-        snapshot, obs, reward, done, info = self.env.reset()
-        cell = self.env.get_cell(obs)
-        self.node_root = Node(None, [], snapshot[0], cell[0], done[0].item())
+        obs, info = self.env.reset()
+        self.node_root = Node(None, info[0], False)
         self.add_node(self.node_root)
-        self.cell2n_seen[cell[0]] = 0
+        self.cell2n_seen[self.node_root.cell] = 0
         
     def add_node(self, node):
         if node.cell in self.cell2node:
             node_old = self.cell2node[node.cell]
-            if len(node.get_actions())<len(node_old.get_actions()):
+            if len(node.action_history)<len(node_old.action_history):
                 self.cell2node[node.cell] = node
         else:
             self.cell2node[node.cell] = node
@@ -80,21 +76,21 @@ class GoExplore():
     #                 self.add_node(node)
 
     def explore_from(self, nodes, len_traj):
-        # self.explorer = self.explorer.to(self.device)
+        import matplotlib.pyplot as plt
 
-        cellsets = [set(node.cell) for node in nodes]
-        snapshot = [node.snapshot for node in nodes]
-        snapshot, obs, reward, done, info = self.env.reset(snapshot)
+        # self.explorer = self.explorer.to(self.device)
+        cellsets = [set([node.cell]) for node in nodes]
+        snapshots = [node.snapshot for node in nodes]
+
+        obs, reward, terminated, truncated, info = self.env.restore_snapshots(snapshots)
         for i_trans in range(len_traj):
             # with torch.no_grad():
                 # action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
             # snapshot, obs, reward, done, info = self.env.step(action.cpu())
-            snapshot, obs, reward, done, info = self.env.step(self.env.action_space.sample())
-            cell = self.env.get_cell(obs)
-
+            obs, reward, terminated, truncated, info = self.env.step(self.env.action_space.sample())
             for i in range(len(nodes)):
-                cellsets[i].add(cell[i])
-                self.add_node(Node(None, [], snapshot[i], cell[i], done[i].item()))
+                cellsets[i].add(info[i]['cell'])
+                self.add_node(Node(None, info[i], terminated[i].item()))
         
         for cellset in cellsets:
             for cell in cellset:
@@ -105,6 +101,8 @@ class GoExplore():
     def step(self, n_nodes, len_traj):
         nodes = self.select_nodes(n_nodes)
         self.explore_from(nodes, len_traj)
+
+
 
 def calc_reward_dfs(ge, reduce=lambda x, childs: x, log=True):
     """

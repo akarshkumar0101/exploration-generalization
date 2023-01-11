@@ -5,7 +5,7 @@ import random
 import time
 from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -148,7 +148,7 @@ def calc_gae(reward, value, next_value, done, next_done, gamma=0.99, gae_lambda=
         return_ = advantage + value
     return advantage, return_
 
-def run_ppo(agent, envs, args, callback_fn=None):
+def run_ppo(agent, env, args, callback_fn=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -158,18 +158,18 @@ def run_ppo(agent, envs, args, callback_fn=None):
     # if not isinstance(envs.observation_space, gym.spaces.Dict):
     #     envs = utils.DictObservationWrapper(envs)
 
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    assert isinstance(env.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = agent.to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     data = {}
     # observation space is a dict
-    obs_keys = list(envs.observation_space.keys())
-    for k, v in envs.single_observation_space.items():
+    obs_keys = list(env.observation_space.keys())
+    for k, v in env.single_observation_space.items():
         data[k] = torch.zeros((args.num_envs, args.num_steps) + v.shape).to(device)
 
-    data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+envs.single_action_space.shape).to(device)
+    data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+env.single_action_space.shape).to(device)
     data['logprob'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
     data[ 'reward'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
     data['entropy'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
@@ -183,7 +183,7 @@ def run_ppo(agent, envs, args, callback_fn=None):
             lr_now = (1.0 - i_update/n_updates) * args.learning_rate
             optimizer.param_groups[0]["lr"] = lr_now
         
-        obs, info = envs.reset()
+        obs, info = env.reset()
         done = torch.zeros(args.num_envs).to(device)
         for i_step in range(args.num_steps):
             for k, v in obs.items():
@@ -192,7 +192,7 @@ def run_ppo(agent, envs, args, callback_fn=None):
 
             with torch.no_grad():
                 action, logprob, entropy, value = agent.get_action_and_value(**obs)
-            obs, reward, terminated, truncated, info = envs.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             done = torch.logical_or(terminated, truncated).float()
 
             data[ 'action'][:, i_step] = action
@@ -271,4 +271,4 @@ def run_ppo(agent, envs, args, callback_fn=None):
         if callback_fn is not None:
             callback_fn(**locals())
 
-    envs.close()
+    env.close()

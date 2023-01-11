@@ -17,6 +17,11 @@ import wandb
 
 # from goexplore_discrete import CellNode, GoExplore, calc_reward_novelty
 
+# TODO in the future:
+# put the restore_snapshot method into the reset(seed, options) method
+# and you can manually index the options list with the seed in the environment right before SyncVectorEnv
+# WAIT: reset will only return obs, info and ignore the needed reward terminated truncated signals we need
+
 class AtariResetState(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
@@ -58,8 +63,6 @@ class Observation01(gym.ObservationWrapper):
 class OneLife(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-    def reset(self):
-        return self.env.reset()
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         terminated = self.env.ale.lives() < 6
@@ -129,10 +132,29 @@ class MyVectorEnv(gym.vector.SyncVectorEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    def reset(self, *args, **kwargs):
+        o, i = [], []
+        for env in self.envs:
+            obs, info = env.reset()
+            o.append(obs)
+            i.append(info)
+        return np.stack(o), i
+        
     def restore_snapshots(self, snapshots):
         o, r, t, tr, i = [], [], [], [], []
         for env, snapshot in zip(self.envs, snapshots):
             obs, reward, terminated, truncated, info = env.restore_snapshot(snapshot)
+            o.append(obs)
+            r.append(reward)
+            t.append(terminated)
+            tr.append(truncated)
+            i.append(info)
+        return np.stack(o), np.array(r), np.array(t), np.array(tr), i
+
+    def step(self, action):
+        o, r, t, tr, i = [], [], [], [], []
+        for env, a in zip(self.envs, action):
+            obs, reward, terminated, truncated, info = env.step(a)
             o.append(obs)
             r.append(reward)
             t.append(terminated)

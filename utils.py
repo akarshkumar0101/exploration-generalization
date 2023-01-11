@@ -38,17 +38,17 @@ class ToTensor(gym.Wrapper):
         elif isinstance(obs, dict):
             return obs.__class__({k: self.as_tensor(v) for k, v in obs.items()})
 
-    def reset(self):
-        obs, info = self.env.reset()
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
         obs = self.as_tensor(obs)
         return obs, info
 
     def restore_snapshots(self, snapshots):
         obs, reward, terminated, truncated, info = self.env.restore_snapshots(snapshots)
         obs = self.as_tensor(obs)
-        reward = torch.as_tensor(reward, device=self.device, dtype=self.dtype)
-        terminated = torch.as_tensor(terminated, device=self.device, dtype=self.dtype)
-        truncated = torch.as_tensor(truncated, device=self.device, dtype=self.dtype)
+        reward = self.as_tensor(reward)
+        terminated = self.as_tensor(terminated)
+        truncated = self.as_tensor(truncated)
         return obs, reward, terminated, truncated, info
     
     def step(self, action):
@@ -56,9 +56,9 @@ class ToTensor(gym.Wrapper):
             action = action.tolist()
         obs, reward, terminated, truncated, info = self.env.step(action)
         obs = self.as_tensor(obs)
-        reward = torch.as_tensor(reward, device=self.device, dtype=self.dtype)
-        terminated = torch.as_tensor(terminated, device=self.device, dtype=self.dtype)
-        truncated = torch.as_tensor(truncated, device=self.device, dtype=self.dtype)
+        reward = self.as_tensor(reward)
+        terminated = self.as_tensor(terminated)
+        truncated = self.as_tensor(truncated)
         return obs, reward, terminated, truncated, info
 
 class DictObservation(gym.wrappers.TransformObservation):
