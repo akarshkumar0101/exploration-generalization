@@ -82,7 +82,7 @@ def get_cell_agent(obs):
     h, w, c = obs.shape
     y, x = np.where((obs[:, :, 0]==228))
     y, x = np.mean(y), np.mean(x)
-    cell = np.zeros((16, 16))
+    cell = np.zeros((16, 16), dtype=np.uint8)
     if not np.isnan(y) and not np.isnan(x):
         cell[int(y/h*16), int(x/w*16)] = 1
     return cell

@@ -28,7 +28,7 @@ class ImitationExplorer(nn.Module):
         self.n_inputs = np.prod(env.single_observation_space.shape)
         self.n_outputs = env.single_action_space.n
         self.encoder = nn.Sequential(
-            layer_init(nn.Conv2d(1, 10, 8, stride=4)),
+            layer_init(nn.Conv2d(4, 10, 8, stride=4)),
             nn.ReLU(),
             layer_init(nn.Conv2d(10, 10, 4, stride=2)),
             nn.ReLU(),
