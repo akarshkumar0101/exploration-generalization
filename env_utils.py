@@ -46,18 +46,28 @@ class DeterministicReplayReset(gym.Wrapper):
             obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
         return obs, reward, terminated, truncated, info
 
-class Observation01(gym.ObservationWrapper):
-    def __init__(self, env):
+class ObservationDivide(gym.ObservationWrapper):
+    def __init__(self, env, divide=255.):
         super().__init__(env)
         obs_space = self.observation_space
-        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/255., obs_space.shape, dtype=np.float32)
+        self.divide = divide
+        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/self.divide, obs_space.shape, dtype=np.float32)
     def observation(self, obs):
-        return (obs/255.).astype(np.float32)
+        return (obs/self.divide).astype(np.float32)
 
-class OneLife(gym.Wrapper):
+class AtariOneLife(gym.Wrapper):
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.obs, self.reward, self.terminated, self.info = obs, 0, False, info
+        return obs, info
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        terminated = self.env.ale.lives() < 6
+        if self.terminated:
+            obs, reward, terminated, truncated, info = self.obs, self.reward, self.terminated, False, self.info
+        else:
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            terminated = self.env.ale.lives() < 6
+            self.obs, self.reward, self.info = obs, reward, info
+            self.terminated = self.terminated or terminated
         return obs, reward, terminated, truncated, info
 
 # class DeadScreen(gym.Wrapper):
@@ -70,65 +80,6 @@ class OneLife(gym.Wrapper):
 #         if terminated or truncated:
 #             obs = np.zeros_like(obs)
 #         return obs, reward, terminated, truncated, info
-
-
-def get_cell_obs(obs, latent_h=11, latent_w=8, latent_d=20, ret_tuple=True):
-    # obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
-    obs = cv2.resize(obs, (latent_w, latent_h), interpolation=cv2.INTER_AREA)
-    obs = (obs*latent_d).astype(np.uint8, casting='unsafe')
-    return tuple(obs.flatten()) if ret_tuple else obs
-
-def get_cell_agent(obs):
-    h, w, c = obs.shape
-    y, x = np.where((obs[:, :, 0]==228))
-    y, x = np.mean(y), np.mean(x)
-    cell = np.zeros((16, 16), dtype=np.uint8)
-    if not np.isnan(y) and not np.isnan(x):
-        cell[int(y/h*16), int(x/w*16)] = 1
-    return cell
-
-def get_cell_inventory(obs):
-    y, x, c = obs.shape
-    # obs_key = obs[int(.47*y): int(.55*y), int(.05*x): int(.15*x), ...] # location of first key
-    obs_inventory = obs[int(.1*y): int(.22*y), int(.3*x): int(.65*x), ...]
-    cell = cv2.cvtColor(obs_inventory, cv2.COLOR_RGB2GRAY)
-    cell = cv2.resize(cell, (6, 3), interpolation=cv2.INTER_AREA)
-    cell = (cell/255. * 8).astype(np.uint8, casting='unsafe')
-    return cell
-
-class DomainCellInfo(gym.Wrapper):
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        cell_agent = get_cell_agent(obs)
-        cell_inventory = get_cell_inventory(obs)
-        info['cell'] = tuple(cell_agent.flatten()) + tuple(cell_inventory.flatten())
-        return obs, info
-    
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        cell_agent = get_cell_agent(obs)
-        cell_inventory = get_cell_inventory(obs)
-        # if (cell_inventory>0).any():
-            # print('FOUND THE KEY!!!')
-        info['cell'] = tuple(cell_agent.flatten()) + tuple(cell_inventory.flatten())
-        return obs, reward, terminated, truncated, info
-
-class ImageCellInfo(gym.Wrapper):
-    def __init__(self, env, latent_h=11, latent_w=8, latent_d=20):
-        super().__init__(env)
-        self.latent_h, self.latent_w, self.latent_d = latent_h, latent_w, latent_d
-
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        info['cell_img'] = get_cell_obs(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
-        info['cell'] = tuple(info['cell_img'].flatten())
-        return obs, info
-    
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        info['cell_img'] = get_cell_obs(obs, self.latent_h, self.latent_w, self.latent_d, ret_tuple=False)
-        info['cell'] = tuple(info['cell_img'].flatten())
-        return obs, reward, terminated, truncated, info
     
 class ZeroReward(gym.Wrapper):
     def step(self, action):
@@ -145,6 +96,20 @@ class TerminationReward(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
         if terminated:
             reward = reward + self.termination_reward
+        return obs, reward, terminated, truncated, info
+
+class CurrentTrajectoryStats(gym.Wrapper):
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.cumulative_reward, self.len_traj = 0, 0
+        info['cumulative_reward'], info['len_traj'] = self.cumulative_reward, self.len_traj
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.cumulative_reward += reward
+        self.len_traj += 1
+        info['cumulative_reward'], info['len_traj'] = self.cumulative_reward, self.len_traj
         return obs, reward, terminated, truncated, info
 
 class DecisionTransformerEnv(gym.Wrapper):
