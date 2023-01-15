@@ -23,12 +23,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class ImitationExplorer(nn.Module):
-    def __init__(self, env, force_random=False):
+    def __init__(self, env, force_random=False, num_frames=4):
         super().__init__()
         self.n_inputs = np.prod(env.single_observation_space.shape)
         self.n_outputs = env.single_action_space.n
         self.encoder = nn.Sequential(
-            layer_init(nn.Conv2d(4, 10, 8, stride=4)),
+            layer_init(nn.Conv2d(num_frames, 10, 8, stride=4)),
             nn.ReLU(),
             layer_init(nn.Conv2d(10, 10, 4, stride=2)),
             nn.ReLU(),

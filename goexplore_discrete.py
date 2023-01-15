@@ -28,6 +28,9 @@ class GoExplore():
         self.cell2n_seen[self.node_root.cell] = 0
         
     def add_node(self, node):
+        if node.terminated:
+            return
+
         if node.cell in self.cell2node:
             node_old = self.cell2node[node.cell]
             if len(node.snapshot)<len(node_old.snapshot):
@@ -49,7 +52,7 @@ class GoExplore():
         else:
             raise NotImplementedError
 
-        if 'inverse' in strategy:
+        if strategy is not None and 'inverse' in strategy:
             p = 1/p
 
         if p is not None:
@@ -95,6 +98,8 @@ class GoExplore():
             for i in range(len(nodes)):
                 cellsets[i].add(info['cell'][i])
                 self.add_node(Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item()))
+        # for i in range(len(nodes)):
+        #     self.add_node(Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item()))
         
         for cellset in cellsets:
             for cell in cellset:
