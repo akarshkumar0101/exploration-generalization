@@ -1,5 +1,6 @@
 import argparse
 import copy
+import os
 import pickle
 from distutils.util import strtobool
 from functools import partial
@@ -9,6 +10,7 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import wandb
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
@@ -16,7 +18,6 @@ from tqdm.auto import tqdm
 import bc
 import env_utils
 import goexplore_discrete
-import wandb
 
 
 def viz_count_distribution(ge, env0):
@@ -137,7 +138,8 @@ def main(args):
             wandb.log(data)
             plt.close('all')
             if i_step%args.freq_save==0:
-                torch.save(ge, f'results/ge.pt')
+                os.makedirs(f'data/{args.name}', exist_ok=True)
+                torch.save(ge, f'data/{args.name}/ge.pt')
 
         
     if args.track:
