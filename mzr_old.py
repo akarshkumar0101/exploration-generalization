@@ -8,6 +8,7 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from einops import repeat
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
@@ -23,48 +24,66 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class ImitationExplorer(nn.Module):
-    def __init__(self, env, force_random=False, num_frames=4):
+    def __init__(self, envs, num_frames=4):
         super().__init__()
-        self.n_inputs = np.prod(env.single_observation_space.shape)
-        self.n_outputs = env.single_action_space.n
         self.encoder = nn.Sequential(
-            layer_init(nn.Conv2d(num_frames, 10, 8, stride=4)),
+            layer_init(nn.Conv2d(num_frames, 32, 8, stride=4)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(10, 10, 4, stride=2)),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(10, 10, 3, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(10, 10, 3, stride=2)),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(20, 20)),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(20, 20)),
-            nn.ReLU(),
-            layer_init(nn.Linear(20, 1)),
-        )
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(20, 20)),
-            nn.ReLU(),
-            layer_init(nn.Linear(20, self.n_outputs)),
-        )
-        self.force_random = force_random
-        
-    def get_logits_values(self, x):
+        self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(512, 1), std=1)
+
+    def forward(self, x):
+        return self.get_dist_and_values(x)
+
+    def get_dist_and_values(self, x):
+        """
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        """
         x = self.encoder(x)
         logits, values = self.actor(x), self.critic(x)
-        if self.force_random:
-            logits, values = torch.zeros_like(logits), torch.zeros_like(values)
-        return logits, values
-    
-    def get_action_and_value(self, x, action=None):
-        logits, values = self.get_logits_values(x)
         dist = torch.distributions.Categorical(logits=logits)
-        if action is None:
-            action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), values
+        return dist, values[:, 0]
+
+    def act(self, x):
+        dist, _ = self.get_dist_and_values(x)
+        return dist.sample()
+
+class RandomExplorer(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.n_actions = envs.single_action_space.n
+
+    def forward(self, x):
+        return self.get_dist_and_values(x)
+
+    def get_dist_and_values(self, x):
+        """
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        """
+        logits = torch.zeros(len(x), self.n_actions, device=x.device)
+        values = torch.zeros(len(x), 1, device=x.device)
+        dist = torch.distributions.Categorical(logits=logits)
+        return dist, values[:, 0]
+
+    def act(self, x):
+        dist, _ = self.get_dist_and_values(x)
+        return dist.sample()
+
+
+
+
 
 def viz_ge_outliers(ge, n_ex=10):
     n_ex = ge.env.n_envs

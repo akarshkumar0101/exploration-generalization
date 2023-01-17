@@ -75,7 +75,7 @@ def make_single_env(frame_stack=1):
     env = gym.make('ALE/MontezumaRevenge-v5', frameskip=4, repeat_action_probability=0.0)
     # env = gym.make('MontezumaRevengeDeterministic-v4')
     env = env_utils.StoreObsInfo(env)
-    env = gym.wrappers.ResizeObservation(env, (21*5, 16*5))
+    env = gym.wrappers.ResizeObservation(env, (84, 84))
     env = gym.wrappers.GrayScaleObservation(env)
     env = env_utils.ObservationDivide(env, 255.)
     env = env_utils.AtariOneLife(env)
@@ -116,9 +116,8 @@ def main(args):
     pbar = tqdm(range(args.n_steps))
     for i_step in pbar:
         data = {}
-        strategy = 'inverse_sqrt'# if i%3==0 else ('inverse_abs' if i%3==1 else 'inverse_square')
 
-        nodes = ge.select_nodes(env.num_envs, strategy=strategy)
+        nodes = ge.select_nodes(env.num_envs, beta=args.select_beta)
         ge.explore_from(nodes, args.len_traj)
 
         if i_step%10==0:
@@ -157,6 +156,7 @@ parser.add_argument("--freq_viz", type=int, default=100)
 parser.add_argument("--freq_save", type=int, default=100)
 
 # algorithm parameters
+parser.add_argument("--select_beta", type=float, default=-0.5)
 parser.add_argument("--n_steps", type=int, default=1000)
 parser.add_argument("--n_envs", type=int, default=32)
 parser.add_argument("--len_traj", type=int, default=15)

@@ -15,10 +15,8 @@ class Node():
         self.terminated = terminated
 
 class GoExplore():
-    def __init__(self, env, explorer=None, device=None):
+    def __init__(self, env):
         self.env = env
-        self.explorer = explorer
-        self.device = device
 
         self.cell2node = {}
         self.cell2n_seen = {}
@@ -38,71 +36,40 @@ class GoExplore():
         else:
             self.cell2node[node.cell] = node
     
-    def select_nodes(self, n_nodes, strategy='inverse_sqrt'):
+    def select_nodes(self, n_nodes, beta=-0.5):
+        """
+        beta =  0.0 is p ~ 1 (uniform)
+        beta = -0.5 is p ~ 1/sqrt(n_seen)
+        beta = -1.0 is p ~ 1/n_seen
+        beta = -2.0 is p ~ 1/n_seen**2
+        """
         cells = list(self.cell2node.keys())
-        n_seen = np.array([self.cell2n_seen[cell] for cell in cells])
-        if strategy is None:
-            p = None
-        elif 'sqrt' in strategy:
-            p = np.sqrt(n_seen+1)
-        elif 'abs' in strategy:
-            p = n_seen+1
-        elif 'square' in strategy:
-            p = n_seen**2+1
-        else:
-            raise NotImplementedError
-
-        if strategy is not None and 'inverse' in strategy:
-            p = 1/p
-
-        if p is not None:
-            p = p/p.sum()
-        return [self.cell2node[cells[i]] for i in np.random.choice(len(cells), size=n_nodes, p=p)]
+        nodes = list(self.cell2node.values())
+        n_seen = torch.as_tensor([self.cell2n_seen[cell] for cell in cells])
+        p = (beta*n_seen.log()).softmax(dim=0)
+        return np.random.choice(nodes, size=n_nodes, p=p.numpy())
     
-    # def explore_from_single(self, nodes, len_traj):
-    #     self.explorer = self.explorer.to(self.device)
-    #     # trajs = [[] for _ in nodes] # list of tuples (snapshot, obs, action, reward, done)
-    #     snapshot = [node.snapshot for node in nodes]
-    #     snapshot, obs, reward, done, info = self.env.reset(snapshot)
-    #     for i_trans in range(len_traj):
-    #         with torch.no_grad():
-    #             action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
-    #         snapshot_next, obs_next, reward, done_next, info = self.env.step(action.cpu())
-    #         # for i, traj in enumerate(trajs):
-    #         #     traj.append((snapshot[i], obs[i].cpu(), action[i].cpu(), reward[i].cpu(), done[i].cpu()))
-    #         # snapshot, obs, done = snapshot_next, obs_next, done_next
-    #     cell = self.env.get_cell(snapshot, obs)
-    #     return [Node(nodes[i], [], snapshot[i], obs[i].cpu(), cell[i], done[i].cpu()) for i in range(len(nodes))]
-    
-    # def explore_from(self, nodes, len_traj, n_trajs, add_nodes=True):
-    #     for node in nodes:
-    #         self.cell2n_seen[node.cell] += 1
-            
-    #     for _ in range(n_trajs):
-    #         nodes = self.explore_from_single(nodes, len_traj)
-    #         if add_nodes:
-    #             for node in nodes:
-    #                 self.add_node(node)
-
-    def explore_from(self, nodes, len_traj):
-        # self.explorer = self.explorer.to(self.device)
-        cellsets = [set([node.cell]) for node in nodes]
+    def explore_from(self, nodes, len_traj, agent_explorer=None):
         snapshots = [node.snapshot for node in nodes]
+        nodes_visited = [[] for node in nodes]
 
         obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshots)
         for i_trans in range(len_traj):
-            # with torch.no_grad():
-                # action, log_prob, entropy, values = self.explorer.get_action_and_value(obs.to(self.device))
-            # snapshot, obs, reward, done, info = self.env.step(action.cpu())
-            obs, reward, terminated, truncated, info = self.env.step(self.env.action_space.sample())
+            if agent_explorer is None:
+                action = self.env.action_space.sample()
+            else:
+                with torch.no_grad():
+                    action = agent_explorer.act(obs)
+            obs, reward, terminated, truncated, info = self.env.step(action)
+
             for i in range(len(nodes)):
-                cellsets[i].add(info['cell'][i])
-                self.add_node(Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item()))
-        # for i in range(len(nodes)):
-        #     self.add_node(Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item()))
-        
-        for cellset in cellsets:
-            for cell in cellset:
+                node = Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item())
+                nodes_visited[i].append(node)
+
+        for nodes_traj in nodes_visited:
+            for node in nodes_traj:
+                self.add_node(node)
+            for cell in set([node.cell for node in nodes_traj]):
                 if cell not in self.cell2n_seen:
                     self.cell2n_seen[cell] = 0
                 self.cell2n_seen[cell] += 1
