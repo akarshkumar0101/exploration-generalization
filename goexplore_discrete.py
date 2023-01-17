@@ -46,7 +46,7 @@ class GoExplore():
         cells = list(self.cell2node.keys())
         nodes = list(self.cell2node.values())
         n_seen = torch.as_tensor([self.cell2n_seen[cell] for cell in cells])
-        p = (beta*n_seen.log()).softmax(dim=0)
+        p = (beta*(n_seen+1).log()).softmax(dim=0)
         return np.random.choice(nodes, size=n_nodes, p=p.numpy())
     
     def explore_from(self, nodes, len_traj, agent_explorer=None):

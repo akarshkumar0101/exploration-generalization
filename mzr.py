@@ -120,7 +120,7 @@ def main(args):
         nodes = ge.select_nodes(env.num_envs, beta=args.select_beta)
         ge.explore_from(nodes, args.len_traj)
 
-        if i_step%10==0:
+        if i_step<30 or i_step%10==0:
             data['unique_cells']    = len(ge.cell2node)
             data['unique_xys']      = len(set([cell[0:2] for cell in ge.cell2node]))
             data['unique_rooms']    = len(set([cell[2:4] for cell in ge.cell2node]))
