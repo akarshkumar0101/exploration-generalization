@@ -83,7 +83,7 @@ def run_ge(seed, grids):
     return ge
 
 n_procs = 35
-n_seeds = 35
+n_seeds = 6000
 maze_size = 71
 
 ge_batch_size = 100
@@ -100,7 +100,6 @@ if __name__ == '__main__':
         print('Time to generate mazes: ', time_end-time_start)
 
     grids = np.load('data/grids.npy')
-    pbar = tqdm(total=n_seeds)
     run_ge_fn = partial(run_ge, grids=grids)
     with Pool(n_procs) as p:
         time_start = time.time()
