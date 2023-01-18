@@ -77,7 +77,10 @@ def run_ge(seed, grids):
     for e in env.envs:
         e.seed(seed)
     ge = goexplore_discrete.GoExplore(env)
-    for i in range(ge_steps):
+    pbar = range(ge_steps)
+    if seed==0:
+        pbar = tqdm(pbar)
+    for i in pbar:
         nodes = ge.select_nodes(ge_batch_size, beta=-2.)
         ge.explore_from(nodes, 15)
     return ge
