@@ -49,9 +49,9 @@ class GoExplore():
         p = (beta*(n_seen+1).log()).softmax(dim=0)
         return np.random.choice(nodes, size=n_nodes, p=p.numpy())
     
-    def explore_from(self, nodes, len_traj, agent_explorer=None):
+    def explore_from(self, nodes, len_traj, agent_explorer=None, save_nodes='all_encountered'):
         snapshots = [node.snapshot for node in nodes]
-        nodes_visited = [[] for node in nodes]
+        nodes_visited = [[node] for node in nodes]
 
         obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshots)
         for i_trans in range(len_traj):
@@ -67,9 +67,13 @@ class GoExplore():
                 nodes_visited[i].append(node)
 
         for nodes_traj in nodes_visited:
-            for node in nodes_traj:
-                self.add_node(node)
+            if save_nodes=='all_encountered':
+                for node in nodes_traj:
+                    self.add_node(node)
+            else:
+                self.add_node(nodes_traj[-1])
             for cell in set([node.cell for node in nodes_traj]):
+            # for cell in [node.cell for node in nodes_traj]:
                 if cell not in self.cell2n_seen:
                     self.cell2n_seen[cell] = 0
                 self.cell2n_seen[cell] += 1

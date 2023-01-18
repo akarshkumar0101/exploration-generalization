@@ -154,8 +154,8 @@ parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
 
 # viz parameters
-parser.add_argument("--freq_viz", type=int, default=100)
-parser.add_argument("--freq_save", type=int, default=100)
+parser.add_argument("--freq_viz", type=int, default=20)
+parser.add_argument("--freq_save", type=int, default=50)
 
 # algorithm parameters
 parser.add_argument("--select_beta", type=float, default=-0.5)
