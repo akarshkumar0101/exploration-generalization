@@ -65,7 +65,7 @@ def make_single_env(grids, frame_stack=1):
 def make_env(grids, n_envs, frame_stack=1, auto_reset=False):
     make_env_fn = partial(make_single_env, grids=grids, frame_stack=frame_stack)
     env = env_utils.RestorableSyncVectorEnv([make_env_fn for i in range(n_envs)], auto_reset=auto_reset)
-    env = env_utils.ToTensor(env)
+    env = env_utils.ToTensor(env, device=None, dtype=torch.float32)
     return env
 
 def gen_maze(seed):
@@ -87,7 +87,7 @@ n_seeds = 10
 maze_size = 71
 
 ge_batch_size = 100
-ge_steps = 100
+ge_steps = 50
 
 if __name__ == '__main__':
     with Pool(n_procs) as p:

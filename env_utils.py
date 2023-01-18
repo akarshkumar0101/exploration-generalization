@@ -125,7 +125,7 @@ class ObservationDivide(gym.ObservationWrapper):
         super().__init__(env)
         obs_space = self.observation_space
         self.divide = divide
-        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/self.divide, obs_space.shape, dtype=np.float32)
+        self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/self.divide, obs_space.shape, dtype=np.float64)
     def observation(self, obs):
         return (obs/self.divide).astype(np.float32)
 
