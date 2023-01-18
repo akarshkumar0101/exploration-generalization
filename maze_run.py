@@ -82,8 +82,8 @@ def run_ge(seed, grids):
         ge.explore_from(nodes, 15)
     return ge
 
-n_procs = 10
-n_seeds = 10
+n_procs = 35
+n_seeds = 35
 maze_size = 71
 
 ge_batch_size = 100
