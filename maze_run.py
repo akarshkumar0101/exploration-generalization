@@ -72,25 +72,24 @@ def gen_maze(seed):
     np.random.seed(seed)
     return maze.generate_maze(maze_size, maze_size)
 
-def run_ge(seed, grids):
+def run_ge(seed, grids, pbar=None):
     env = make_env(grids, ge_batch_size, 4)
     for e in env.envs:
         e.seed(seed)
     ge = goexplore_discrete.GoExplore(env)
-    pbar = range(ge_steps)
-    if seed==0:
-        pbar = tqdm(pbar)
-    for i in pbar:
+    for i in range(ge_steps):
         nodes = ge.select_nodes(ge_batch_size, beta=-2.)
         ge.explore_from(nodes, 15)
+    if pbar is not None:
+        pbar.update(1)
     return ge
 
 n_procs = 35
-n_seeds = 35
-maze_size = 71
+n_seeds = 1000
+maze_size = 11
 
 ge_batch_size = 100
-ge_steps = 50
+ge_steps = 10
 
 if __name__ == '__main__':
     with Pool(n_procs) as p:
@@ -103,7 +102,8 @@ if __name__ == '__main__':
         print('Time to generate mazes: ', time_end-time_start)
 
     grids = np.load('data/grids.npy')
-    run_ge_fn = partial(run_ge, grids=grids)
+    pbar = tqdm(total=n_seeds)
+    run_ge_fn = partial(run_ge, grids=grids, pbar=pbar)
     with Pool(n_procs) as p:
         time_start = time.time()
         ges = p.map(run_ge_fn, np.arange(n_seeds))
