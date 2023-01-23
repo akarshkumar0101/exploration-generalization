@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 import env_utils
 import goexplore_discrete
-import maze
+import maze_old
 
 
 class MazeEnv(gym.Env):
@@ -70,7 +70,7 @@ def make_env(grids, n_envs, frame_stack=1, auto_reset=False):
 
 def gen_maze(seed):
     np.random.seed(seed)
-    return maze.generate_maze(maze_size, maze_size)
+    return maze_old.generate_maze(maze_size, maze_size)
 
 def run_ge(seed, grids):
     env = make_env(grids, ge_batch_size, 4)

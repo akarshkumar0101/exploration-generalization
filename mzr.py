@@ -10,7 +10,6 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import wandb
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
@@ -18,6 +17,7 @@ from tqdm.auto import tqdm
 import bc
 import env_utils
 import goexplore_discrete
+import wandb
 
 
 def viz_count_distribution(ge, env0):
@@ -74,6 +74,7 @@ def viz_ge_outliers(ge, env0):
 
 def make_single_env(frame_stack=1):
     env = gym.make('ALE/MontezumaRevenge-v5', frameskip=4, repeat_action_probability=0.0)
+    env = env_utils.EasierMRActionSpace(env)
     # env = gym.make('MontezumaRevengeDeterministic-v4')
     env = env_utils.StoreObsInfo(env)
     env = gym.wrappers.ResizeObservation(env, (84, 84))
@@ -93,7 +94,7 @@ def make_env(n_envs, frame_stack=1, auto_reset=False):
     make_env_fn = partial(make_single_env, frame_stack=frame_stack)
     env = env_utils.RestorableSyncVectorEnv([make_env_fn for i in range(n_envs)], auto_reset=auto_reset)
     # env = gym.wrappers.VectorListInfo(env)
-    env = env_utils.ToTensor(env)
+    env = env_utils.ToTensor(env, device=None, dtype=torch.float32)
     return env
 
 

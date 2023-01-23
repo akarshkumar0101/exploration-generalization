@@ -103,14 +103,14 @@ class DeterministicReplayReset(gym.Wrapper):
         obs, info = self.env.reset(*args, **kwargs)
         self.snapshot = []
         if self.snapshot_in_info:
-            info['snapshot'] = copy.copy(self.snapshot)
+            info['snapshot'] = np.array(self.snapshot)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.snapshot.append(action)
         if self.snapshot_in_info:
-            info['snapshot'] = copy.copy(self.snapshot)
+            info['snapshot'] = np.array(self.snapshot)
         return obs, reward, terminated, truncated, info
 
     def restore_snapshot(self, snapshot, *args, **kwargs):
@@ -119,6 +119,50 @@ class DeterministicReplayReset(gym.Wrapper):
         for action in snapshot:
             obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
         return obs, reward, terminated, truncated, info
+
+class DeterministicAtariReset(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        obs, reward, terminated, truncated, info = self.step(0)
+        return obs, info
+
+    def step(self, action):
+        snapshot = self.get_env_variables(self)
+        snapshot['ale_state'] = self.ale.cloneState()
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        snapshot['action'] = action
+        info['snapshot'] = snapshot
+        return obs, reward, terminated, truncated, info
+
+    def restore_snapshot(self, snapshot, *args, **kwargs):
+        self.set_env_variables(self, snapshot)
+        self.ale.restoreState(snapshot['ale_state'])
+        obs, reward, terminated, truncated, info = self.step(snapshot['action']) # call my own method, not self.env's
+        return obs, reward, terminated, truncated, info
+
+    def get_env_variables(self, env, ignore_classes=['AtariEnv']):
+        snapshot = {}
+        while hasattr(env, 'env'):
+            env = env.env
+            classstr = type(env).__name__
+            classkeys = set(env.__dict__.keys())
+            classkeys = {i for i in classkeys if not i.startswith('_') and i!='env'}
+            classdata = {key: getattr(env, key) for key in classkeys}
+            if classstr not in ignore_classes and len(classdata)>0:
+                snapshot.update({classstr: classdata})
+        return snapshot
+
+    def set_env_variables(self, env, snapshot):
+        while hasattr(env, 'env'):
+            env = env.env
+            classstr = type(env).__name__
+            if classstr in snapshot:
+                classdata = snapshot[classstr]
+                for key, value in classdata.items():
+                    setattr(env, key, value)
 
 class ObservationDivide(gym.ObservationWrapper):
     def __init__(self, env, divide=255.):
@@ -130,18 +174,21 @@ class ObservationDivide(gym.ObservationWrapper):
         return (obs/self.divide).astype(np.float32)
 
 class AtariOneLife(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.terminated_data = None
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        self.obs, self.reward, self.terminated, self.info = obs, 0, False, info
+        self.terminated_data = None
         return obs, info
     def step(self, action):
-        if self.terminated:
-            obs, reward, terminated, truncated, info = self.obs, self.reward, self.terminated, False, self.info
-        else:
+        if self.terminated_data is None:
             obs, reward, terminated, truncated, info = self.env.step(action)
             terminated = self.env.ale.lives() < 6
-            self.obs, self.reward, self.info = obs, reward, info
-            self.terminated = self.terminated or terminated
+            if terminated:
+                self.terminated_data = obs, reward, terminated, truncated, info
+        else:
+            obs, reward, terminated, truncated, info = self.terminated_data
         return obs, reward, terminated, truncated, info
 
 # class DeadScreen(gym.Wrapper):
@@ -172,7 +219,12 @@ class TerminationReward(gym.Wrapper):
             reward = reward + self.termination_reward
         return obs, reward, terminated, truncated, info
 
-class CurrentTrajectoryStats(gym.Wrapper):
+# class CurrentTrajectoryStats(gym.Wrapper):
+class CumulativeReward(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.cumulative_reward, self.len_traj = 0, 0
+
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         self.cumulative_reward, self.len_traj = 0, 0
@@ -186,53 +238,112 @@ class CurrentTrajectoryStats(gym.Wrapper):
         info['cumulative_reward'], info['len_traj'] = self.cumulative_reward, self.len_traj
         return obs, reward, terminated, truncated, info
 
+class ActionHistory(gym.Wrapper):
+    def __init__(self, env, max_len=None):
+        super().__init__(env)
+        self.action_history = []
+        self.max_len = max_len
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.action_history = []
+        info['action_history'] = np.array(self.action_history)
+        return obs, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.action_history.append(action)
+        if self.max_len is not None:
+            self.action_history = self.action_history[-self.max_len:]
+        info['action_history'] = np.array(self.action_history)
+        return obs, reward, terminated, truncated, info
+
+class RewardHistory(gym.Wrapper):
+    def __init__(self, env, max_len=None):
+        super().__init__(env)
+        self.reward_history = []
+        self.max_len = max_len
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.reward_history = []
+        info['reward_history'] = np.array(self.reward_history)
+        return obs, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.reward_history.append(reward)
+        if self.max_len is not None:
+            self.reward_history = self.reward_history[-self.max_len:]
+        info['reward_history'] = np.array(self.reward_history)
+        return obs, reward, terminated, truncated, info
+
+class ObservationHistory(gym.Wrapper):
+    def __init__(self, env, max_len=None):
+        super().__init__(env)
+        self.observation_history = []
+        self.max_len = max_len
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.observation_history = [obs]
+        info['observation_history'] = np.stack(self.observation_history)
+        return obs, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.observation_history.append(obs)
+        if self.max_len is not None:
+            self.observation_history = self.observation_history[-self.max_len:]
+        info['observation_history'] = np.stack(self.observation_history)
+        return obs, reward, terminated, truncated, info
+
+
 class DecisionTransformerEnv(gym.Wrapper):
     def __init__(self, env, n_obs=4):
-        super().__init__(env)
         self.n_obs = n_obs
         self.n_rewards = n_obs-1
+        if not hasattr(env, 'action_history'):
+            self.env = ActionHistory(env, max_len=n_obs)
+        if not hasattr(env, 'reward_history'):
+            self.env = RewardHistory(env, max_len=n_obs)
+        if not hasattr(env, 'observation_history'):
+            self.env = ObservationHistory(env, max_len=n_obs)
+        super().__init__(env)
         # obs_space = self.observation_space
         # new_shape = (n_obs,)+obs_space.shape
         # self.observation_space = gym.spaces.Box(obs_space.low, obs_space.high/255., new_shape, dtype=np.float32)
     
     def update_info(self, info):
-        obs_list = self.obs_list
-        action_list = self.action_list
-        reward_list = self.reward_list
+        pass
+        # obs_list = self.obs_list
+        # action_list = self.action_list
+        # reward_list = self.reward_list
 
-        padding = self.n_obs-len(obs_list)
-        obs_list = obs_list + [np.zeros_like(obs_list[0]) for _ in range(padding)]
-        action_list = action_list + [-1 for _ in range(padding)]
-        reward_list = reward_list + [np.nan for _ in range(padding)]
+        # padding = self.n_obs-len(obs_list)
+        # obs_list = obs_list + [np.zeros_like(obs_list[0]) for _ in range(padding)]
+        # action_list = action_list + [-1 for _ in range(padding)]
+        # reward_list = reward_list + [np.nan for _ in range(padding)]
 
-        mask = [True for _ in range(self.n_obs-padding)] + [False for _ in range(padding)]
+        # mask = [True for _ in range(self.n_obs-padding)] + [False for _ in range(padding)]
 
-        info['obs_list'] = np.stack(obs_list)
-        info['action_list'] = np.array(action_list)
-        info['reward_list'] = np.array(reward_list)
-        info['mask'] = np.array(mask)
+        # info['obs_list'] = np.stack(obs_list)
+        # info['action_list'] = np.array(action_list)
+        # info['reward_list'] = np.array(reward_list)
+        # info['mask'] = np.array(mask)
         
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        self.obs_list = [obs]
-        self.action_list = []
-        self.reward_list = []
         self.update_info(info)
         return obs, info
     
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-
-        self.obs_list.append(obs)
-        self.action_list.append(action)
-        self.reward_list.append(reward)
-
-        self.obs_list = self.obs_list[-self.n_obs:]
-        self.action_list = self.action_list[-self.n_rewards:]
-        self.reward_list = self.reward_list[-self.n_rewards:]
-
         self.update_info(info)
         return obs, reward, terminated, truncated, info
+
+class EasierMRActionSpace(gym.ActionWrapper):
+    # NOOP FIRE UP RIGHT LEFT DOWN RIGHTFIRE LEFTFIRE
+    underlying_actions = [0, 1, 2, 3, 4, 5, 11, 12]
+    def __init__(self, env):
+        super().__init__(env)
+        self.action_space = gym.spaces.Discrete(len(self.underlying_actions))
+    def action(self, action):
+        return self.underlying_actions[action]
 
 # class MyVectorEnv(gym.vector.SyncVectorEnv):
 #     def __init__(self, *args, **kwargs):

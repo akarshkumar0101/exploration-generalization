@@ -18,12 +18,14 @@ class GoExplore():
     def __init__(self, env):
         self.env = env
 
-        self.cell2node = {}
-        self.cell2n_seen = {}
+        self.cell2node = {} # the node
+        self.cell2n_seen = {} # the number of times I've seen this cell
+        self.cell2prod = {} # number of times this cell has not produced a new cell recently
         obs, info = self.env.reset()
         self.node_root = Node(None, info['snapshot'][0], info['cell'][0], False)
         self.add_node(self.node_root)
         self.cell2n_seen[self.node_root.cell] = 0
+        self.cell2prod[self.node_root.cell] = 0
         
     def add_node(self, node):
         if node.terminated:
@@ -45,11 +47,12 @@ class GoExplore():
         """
         cells = list(self.cell2node.keys())
         nodes = list(self.cell2node.values())
-        n_seen = torch.as_tensor([self.cell2n_seen[cell] for cell in cells])
-        p = (beta*(n_seen+1).log()).softmax(dim=0)
+        x = torch.as_tensor([self.cell2n_seen[cell] for cell in cells])
+        # x = torch.as_tensor([self.cell2prod[cell] for cell in cells])
+        p = (beta*(x+1).log()).softmax(dim=0)
         return np.random.choice(nodes, size=n_nodes, p=p.numpy())
     
-    def explore_from(self, nodes, len_traj, agent_explorer=None, save_nodes='all_encountered'):
+    def explore_from(self, nodes, len_traj, agent_explorer=None):
         snapshots = [node.snapshot for node in nodes]
         nodes_visited = [[node] for node in nodes]
 
@@ -67,16 +70,32 @@ class GoExplore():
                 nodes_visited[i].append(node)
 
         for nodes_traj in nodes_visited:
-            if save_nodes=='all_encountered':
-                for node in nodes_traj:
-                    self.add_node(node)
-            else:
-                self.add_node(nodes_traj[-1])
-            for cell in set([node.cell for node in nodes_traj]):
-            # for cell in [node.cell for node in nodes_traj]:
+            nodes_traj = [node for node in nodes_traj if not node.terminated]
+            nodes_traj = nodes_traj[:-2] # we can't ensure the future is not dead
+
+            for node in nodes_traj:
+                self.add_node(node)
+
+            cells_traj = [node.cell for node in nodes_traj]
+            cells_traj_set = set(cells_traj)
+            is_novel_traj = not cells_traj_set.issubset(set(self.cell2node.keys()))
+
+            for cell in cells_traj_set:
                 if cell not in self.cell2n_seen:
                     self.cell2n_seen[cell] = 0
                 self.cell2n_seen[cell] += 1
+
+            for cell in cells_traj_set:
+                if is_novel_traj or cell not in self.cell2prod:
+                    self.cell2prod[cell] = 0
+                else:
+                    self.cell2prod[cell] += 1
+
+            # for cell in cells_traj_set:
+            # # for cell in cells_traj:
+            #     if cell not in self.cell2n_seen:
+            #         self.cell2n_seen[cell] = 0
+            #     self.cell2n_seen[cell] += 1
     
     def step(self, n_nodes, len_traj):
         nodes = self.select_nodes(n_nodes)
