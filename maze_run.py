@@ -49,9 +49,9 @@ parser.add_argument("--n_mazes", type=int, default=100)
 parser.add_argument("--maze_size", type=int, default=50)
 parser.add_argument("--obs_size", type=int, default=5)
 parser.add_argument("--frame_stack", type=int, default=4)
-parser.add_argument("--ge_batch_size", type=int, default=32)
-parser.add_argument("--ge_steps", type=int, default=50)
-parser.add_argument("--ge_len_traj", type=int, default=20)
+parser.add_argument("--ge_steps", type=int, default=100)
+parser.add_argument("--ge_batch_size", type=int, default=128)
+parser.add_argument("--ge_len_traj", type=int, default=30)
 parser.add_argument("--ge_beta", type=float, default=-2.0)
 
 if __name__ == '__main__':
