@@ -1,109 +1,84 @@
+import argparse
 import time
+from distutils.util import strtobool
 from functools import partial
 from multiprocessing import Pool
 
 import gymnasium as gym
+import maze
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
 import env_utils
 import goexplore_discrete
-import maze_old
+import maze_env
 
 
-class MazeEnv(gym.Env):
-    def __init__(self, grids, obs_size=5):
-        self.obs_size = obs_size
-        self.moves = np.array([[-1, 0], [1, 0], [0, -1], [0, 1]])
-        self.observation_space = gym.spaces.Box(low=0, high=2, shape=(obs_size*2+1, obs_size*2+1), dtype=np.uint8)
-        self.action_space = gym.spaces.Discrete(len(self.moves))
-        self.grids = grids
-
-        self.seed(0)
-
-    def seed(self, seed=0):
-        self.my_seed = seed
-
-    def reset(self, seed=None, options=None):
-        if seed is None:
-            seed = self.my_seed
-        obs_size = self.obs_size
-        height, width = self.grids[0].shape
-        self.grid = np.zeros((height+obs_size*2, width+obs_size*2), dtype=np.uint8)
-        self.grid[obs_size:-obs_size, obs_size:-obs_size] = self.grids[seed]
-
-        self.yx = np.array([self.obs_size, self.obs_size])
-        y, x = self.yx
-        obs = self.grid[y-self.obs_size:y+self.obs_size+1, x-self.obs_size:x+self.obs_size+1].copy()
-        obs[len(obs)//2, len(obs)//2] = 2 # agent
-        info = {'cell': (y, x)}
-        return obs, info
-
-    def step(self, action):
-        yx = self.yx + self.moves[action]
-        if self.grid[yx[0], yx[1]]==1:
-            self.yx = yx
-        else: # hit a wall
-            pass
-        y, x = self.yx
-        obs = self.grid[y-self.obs_size:y+self.obs_size+1, x-self.obs_size:x+self.obs_size+1].copy()
-        obs[len(obs)//2, len(obs)//2] = 2 # agent
-        reward = 0
-        terminated, truncated = False, False
-        info = {'cell': (y, x)}
-        return obs, reward, terminated, truncated, info
-def make_single_env(grids, frame_stack=1):
-    env = MazeEnv(grids, obs_size=5)
-    env = env_utils.StoreObsInfo(env)
-    # env = gym.wrappers.ResizeObservation(env, (84, 84))
-    env = env_utils.ObservationDivide(env, 2.)
+def make_single_env(maze, obs_size, frame_stack):
+    env = maze_env.MazeEnv(maze, obs_size=obs_size)
+    # env = env_utils.StoreObsInfo(env)
     env = gym.wrappers.FrameStack(env, frame_stack)
     env = env_utils.DeterministicReplayReset(env)
     return env
 
-def make_env(grids, n_envs, frame_stack=1, auto_reset=False):
-    make_env_fn = partial(make_single_env, grids=grids, frame_stack=frame_stack)
+def make_env(n_envs, auto_reset=False, **kwargs):
+    make_env_fn = partial(make_single_env, **kwargs)
     env = env_utils.RestorableSyncVectorEnv([make_env_fn for i in range(n_envs)], auto_reset=auto_reset)
     env = env_utils.ToTensor(env, device=None, dtype=torch.float32)
     return env
 
-def gen_maze(seed):
-    np.random.seed(seed)
-    return maze_old.generate_maze(maze_size, maze_size)
-
-def run_ge(seed, grids):
-    env = make_env(grids, ge_batch_size, 4)
-    for e in env.envs:
-        e.seed(seed)
+def run_goexplore(maze, obs_size, frame_stack, ge_batch_size, ge_steps, ge_len_traj, ge_beta):
+    env = make_env(ge_batch_size, maze=maze, obs_size=obs_size, frame_stack=frame_stack)
     ge = goexplore_discrete.GoExplore(env)
     for i in range(ge_steps):
-        nodes = ge.select_nodes(ge_batch_size, beta=-2.)
-        ge.explore_from(nodes, 15)
+        nodes = ge.select_nodes(ge_batch_size, beta=ge_beta)
+        ge.explore_from(nodes, ge_len_traj)
     return ge
 
-n_procs = 35
-n_seeds = 6000
-maze_size = 71
+parser = argparse.ArgumentParser()
+# # general parameters
+# parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+# parser.add_argument("--name", type=str, default=None)
+parser.add_argument("--seed", type=int, default=0)
+# parser.add_argument("--device", type=str, default=None)
 
-ge_batch_size = 100
-ge_steps = 50
+# algorithm parameters
+parser.add_argument("--n_procs", type=int, default=35)
+parser.add_argument("--n_mazes", type=int, default=100)
+parser.add_argument("--maze_size", type=int, default=50)
+parser.add_argument("--obs_size", type=int, default=5)
+parser.add_argument("--frame_stack", type=int, default=4)
+parser.add_argument("--ge_batch_size", type=int, default=32)
+parser.add_argument("--ge_steps", type=int, default=50)
+parser.add_argument("--ge_len_traj", type=int, default=20)
+parser.add_argument("--ge_beta", type=float, default=-2.0)
 
 if __name__ == '__main__':
-    with Pool(n_procs) as p:
-        time_start = time.time()
-        grids = p.map(gen_maze, np.arange(n_seeds))
-        grids = np.stack(grids)
-        np.save('data/grids.npy', grids)
-        print('Grids shape: ', grids.shape)
-        time_end = time.time()
-        print('Time to generate mazes: ', time_end-time_start)
+    args = parser.parse_args()
 
-    grids = np.load('data/grids.npy')
-    run_ge_fn = partial(run_ge, grids=grids)
-    with Pool(n_procs) as p:
-        time_start = time.time()
-        ges = p.map(run_ge_fn, np.arange(n_seeds))
-        torch.save(ges, 'data/ges.pt')
-        time_end = time.time()
-        print('Time to run GEs: ', time_end-time_start)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    print('Generating mazes...')
+    mazes_train = maze_env.generate_mazes(args.maze_size, args.maze_size, args.n_mazes, maze.Maze.Create.PRIM, tqdm=tqdm)
+    mazes_test = maze_env.generate_mazes(args.maze_size, args.maze_size, args.n_mazes, maze.Maze.Create.PRIM, tqdm=tqdm)
+    torch.save(mazes_train, 'data/mazes_train.pt')
+    torch.save(mazes_test, 'data/mazes_test.pt')
+    print('Done generating mazes.')
+
+    print('Running Go-Explore on mazes...')
+    time_start = time.time()
+    with Pool(args.n_procs) as pool:
+        run_ge_fn = partial(run_goexplore, obs_size=args.obs_size,
+                            frame_stack=args.frame_stack, ge_batch_size=args.ge_batch_size,
+                            ge_steps=args.ge_steps, ge_len_traj=args.ge_len_traj, ge_beta=args.ge_beta)
+        # ges = pool.map(run_ge_fn, mazes_train)
+        ges = list(tqdm(pool.imap(run_ge_fn, mazes_train), total=len(mazes_train)))
+
+    print('Done running Go-Explore on mazes.')
+    print('Saving Go-Explore results...')
+    torch.save(ges, 'data/ges.pt')
+    print('Done saving Go-Explore results.')
+    time_end = time.time()
+    print('Time to run+save Go-Explore results: {:.2f} minutes'.format((time_end - time_start) / 60))

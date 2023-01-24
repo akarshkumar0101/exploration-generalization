@@ -95,22 +95,16 @@ class StoreObsInfo(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 class DeterministicReplayReset(gym.Wrapper):
-    def __init__(self, env, snapshot_in_info=True):
-        super().__init__(env)
-        self.snapshot_in_info = snapshot_in_info
-
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         self.snapshot = []
-        if self.snapshot_in_info:
-            info['snapshot'] = np.array(self.snapshot)
+        info['snapshot'] = np.array(self.snapshot)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.snapshot.append(action)
-        if self.snapshot_in_info:
-            info['snapshot'] = np.array(self.snapshot)
+        info['snapshot'] = np.array(self.snapshot)
         return obs, reward, terminated, truncated, info
 
     def restore_snapshot(self, snapshot, *args, **kwargs):
