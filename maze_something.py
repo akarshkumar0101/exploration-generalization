@@ -113,7 +113,7 @@ def get_state_coverage(mazes_test, agent=None):
     for i_maze, maze in enumerate(tqdm(mazes_test)):
         env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
         obs, info = env.reset()
-        for i_trans in range(100):
+        for i_trans in range(1000):
             cells[i_maze].add(info['cell'][0])
             statecov[i_maze].append(len(cells[i_maze]))
             obs, reward, terminated, truncated, info = env.step(agent.act(obs))
@@ -125,7 +125,7 @@ def get_video(agent, maze):
     env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
     maze_full = env.envs[0].maze
     obs, info = env.reset()
-    for i_trans in range(500):
+    for i_trans in range(1000):
         y, x = info['cell'][0]
         left = obs[0, -1].cpu().numpy()
         left = (left+1).clip(0, 1)*255
@@ -188,7 +188,7 @@ parser.add_argument("--device", type=str, default=None)
 # algorithm parameters
 parser.add_argument("--n_nodes", type=int, default=100)
 
-parser.add_argument("--n_batches", type=int, default=100)
+parser.add_argument("--n_batches", type=int, default=10000)
 parser.add_argument("--batch_size", type=int, default=2048)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--coef_entropy", type=float, default=0.0)
@@ -235,7 +235,7 @@ def main(args):
 
     print('Plotting Videos')
     if args.track:
-        for maze in tqdm(mazes_test[:10]):
+        for maze in tqdm(mazes_test[:25]):
             video_random = get_video(agent_random, maze)
             video_agent = get_video(agent, maze)
             wandb.log({
@@ -243,7 +243,7 @@ def main(args):
                 'video_agent': wandb.Video(video_agent.transpose(0, 3, 1, 2).astype(np.uint8), fps=4)
             })
 
-
 if __name__=='__main__':
     args = parser.parse_args()
     main(args)
+    
