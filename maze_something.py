@@ -186,6 +186,8 @@ parser.add_argument("--device", type=str, default=None)
 # parser.add_argument("--freq_viz", type=int, default=100)
 # parser.add_argument("--freq_save", type=int, default=100)
 # algorithm parameters
+parser.add_argument("--n_nodes", type=int, default=100)
+
 parser.add_argument("--n_batches", type=int, default=100)
 parser.add_argument("--batch_size", type=int, default=2048)
 parser.add_argument("--lr", type=float, default=1e-3)
@@ -201,7 +203,7 @@ def main(args):
         plt.close('all')
 
     print(f'Creating BC dataset from {len(ges)} Go-Explore runs.')
-    x_train, y_train = create_bc_dataset(ges, 100, 10)
+    x_train, y_train = create_bc_dataset(ges, args.n_nodes, 10)
     print(f'x_train.shape: {x_train.shape}, y_train.shape: {y_train.shape}')
 
     agent_random = RandomExplorer(ges[0].env)
