@@ -38,17 +38,17 @@ class GoExplore():
         else:
             self.cell2node[node.cell] = node
     
-    def select_nodes(self, n_nodes, beta=-0.5):
+    def select_nodes(self, n_nodes, beta=-0.5, condition=lambda node: True):
         """
         beta =  0.0 is p ~ 1 (uniform)
         beta = -0.5 is p ~ 1/sqrt(n_seen)
         beta = -1.0 is p ~ 1/n_seen
         beta = -2.0 is p ~ 1/n_seen**2
         """
-        cells = list(self.cell2node.keys())
-        nodes = list(self.cell2node.values())
-        x = torch.as_tensor([self.cell2n_seen[cell] for cell in cells])
-        # x = torch.as_tensor([self.cell2prod[cell] for cell in cells])
+        if condition is None:
+            condition = lambda node: True
+        nodes = [node for node in self.cell2node.values() if condition(node)]
+        x = torch.as_tensor([self.cell2n_seen[node.cell] for node in nodes])
         p = (beta*(x+1).log()).softmax(dim=0)
         return np.random.choice(nodes, size=n_nodes, p=p.numpy())
     
