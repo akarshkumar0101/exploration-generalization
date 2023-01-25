@@ -110,7 +110,7 @@ def create_bc_dataset(ges, n_nodes=10, n_samples_per_node=10, beta=-2.0):
 def get_state_coverage(mazes_test, agent=None):
     cells = [set() for _ in mazes_test]
     statecov = [[] for _ in mazes_test]
-    for i_maze, maze in enumerate(mazes_test):
+    for i_maze, maze in enumerate(tqdm(mazes_test)):
         env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
         obs, info = env.reset()
         for i_trans in range(100):
@@ -196,7 +196,9 @@ parser.add_argument("--coef_entropy", type=float, default=0.0)
 def main(args):
     if args.track:
         wandb.init()
+    print('Loading Go-Explore runs.')
     ges = torch.load('data/ges.pt')
+    print('Done.')
 
     if args.track:
         wandb.log({'viz_ge': viz_ge_node_selection(ges)})
