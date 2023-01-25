@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import maze
 import numpy as np
 import torch
+import wandb
 from torch import nn
 from tqdm.auto import tqdm
 
 import env_utils
 import goexplore_discrete
 import maze_run
-import wandb
 from maze_env import MazeEnv
 from maze_run import make_env, make_single_env
 from mzr_old import layer_init
@@ -65,7 +65,8 @@ class ImitationExplorer(nn.Module):
         return dist.sample()
 
 
-def train_bc_agent(agent, x_train, y_train, batch_size=32, n_batches=10, lr=1e-3, coef_entropy=0.0, device=None, tqdm=None):
+def train_bc_agent(agent, x_train, y_train, batch_size=32, n_batches=10, lr=1e-3, coef_entropy=0.0, device=None, tqdm=None, wandb=None):
+    agent = agent.to(device)
     loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
     opt = torch.optim.Adam(agent.parameters(), lr=lr)
     pbar = range(n_batches)
@@ -83,6 +84,8 @@ def train_bc_agent(agent, x_train, y_train, batch_size=32, n_batches=10, lr=1e-3
         loss.backward()
         opt.step()
         pbar.set_postfix(loss_bc=loss_bc.item(), entropy=loss_entropy.item())
+        if wandb:
+            wandb.log({'loss_bc': loss_bc.item(), 'entropy': loss_entropy.item()})
 
 def create_bc_dataset(ges, n_nodes=10, n_samples_per_node=10, beta=-2.0):
     x, y = [], []
@@ -104,14 +107,13 @@ def create_bc_dataset(ges, n_nodes=10, n_samples_per_node=10, beta=-2.0):
     x, y = torch.as_tensor(x).float(), torch.as_tensor(y).long()
     return x, y
 
-
 def get_state_coverage(mazes_test, agent=None):
     cells = [set() for _ in mazes_test]
     statecov = [[] for _ in mazes_test]
     for i_maze, maze in enumerate(mazes_test):
         env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
         obs, info = env.reset()
-        for i_trans in range(1000):
+        for i_trans in range(5000):
             cells[i_maze].add(info['cell'][0])
             statecov[i_maze].append(len(cells[i_maze]))
             obs, reward, terminated, truncated, info = env.step(agent.act(obs))
@@ -123,7 +125,7 @@ def get_video(agent, maze):
     env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
     maze_full = env.envs[0].maze
     obs, info = env.reset()
-    for i_trans in range(1000):
+    for i_trans in range(500):
         y, x = info['cell'][0]
         left = obs[0, -1].cpu().numpy()
         left = (left+1).clip(0, 1)*255
@@ -156,27 +158,47 @@ def viz_ge_node_selection(ges):
     return fig
 
 def viz_statecov(statecov_random, statecov_agent):
-    fig = plt.figure(figsize=(20, 20))
+    fig = plt.figure(figsize=(10, 10))
     mean = statecov_random.mean(axis=0)
     std = statecov_random.std(axis=0)
-    plt.plot(mean, label='random')
+    plt.plot(mean, label='Random Agent')
     plt.fill_between(range(len(mean)), mean - std, mean + std, alpha=0.2)
     mean = statecov_agent.mean(axis=0)
     std = statecov_agent.std(axis=0)
-    plt.plot(mean, label='intelligent')
+    plt.plot(mean, label='Exploration-Distilled Agent')
     plt.fill_between(range(len(mean)), mean - std, mean + std, alpha=0.2)
     plt.title('State Coverage vs Environment Steps')
-    plt.ylabel('State Coverage')
+    plt.ylabel('Number of Unique States Visited')
     plt.xlabel('Number of Environment Steps')
     plt.legend()
     return fig
 
-def main():
-    wandb.init()
+import argparse
+from distutils.util import strtobool
+
+parser = argparse.ArgumentParser()
+# general parameters
+parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+parser.add_argument("--name", type=str, default=None)
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--device", type=str, default=None)
+# viz parameters
+# parser.add_argument("--freq_viz", type=int, default=100)
+# parser.add_argument("--freq_save", type=int, default=100)
+# algorithm parameters
+parser.add_argument("--n_batches", type=int, default=100)
+parser.add_argument("--batch_size", type=int, default=2048)
+parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--coef_entropy", type=float, default=0.0)
+
+def main(args):
+    if args.track:
+        wandb.init()
     ges = torch.load('data/ges.pt')
 
-    wandb.log({'viz_ge': viz_ge_node_selection(ges)})
-    plt.close('all')
+    if args.track:
+        wandb.log({'viz_ge': viz_ge_node_selection(ges)})
+        plt.close('all')
 
     print(f'Creating BC dataset from {len(ges)} Go-Explore runs.')
     x_train, y_train = create_bc_dataset(ges, 100, 10)
@@ -186,7 +208,11 @@ def main():
     agent = ImitationExplorer(ges[0].env)
 
     print('Training agent with BC')
-    train_bc_agent(agent, x_train, y_train, batch_size=2048, n_batches=100, tqdm=tqdm)
+    train_bc_agent(agent, x_train, y_train,
+                   batch_size=args.batch_size, n_batches=args.n_batches,
+                   lr=args.lr, coef_entropy=args.coef_entropy,
+                   device=args.device, tqdm=tqdm, wandb=wandb if args.track else None)
+    agent = agent.to('cpu')
 
     print('Loading test mazes')
     mazes_test = torch.load('data/mazes_test.pt')
@@ -195,19 +221,27 @@ def main():
     # env = maze_run.make_env(1, maze=maze, obs_size=obs_size, frame_stack=frame_stack
     # TODO: run go-explore for mazes_test and evaluate bc loss on that dataset
 
+    print('Evaluating State Coverages')
     statecov_random = get_state_coverage(mazes_test, agent_random) 
     statecov_agent = get_state_coverage(mazes_test, agent) 
-    wandb.log({'viz_state_coverage': wandb.Image(viz_statecov(statecov_random, statecov_agent))})
-    plt.close('all')
+    print('Plotting State Coverages')
+    if args.track:
+        wandb.log({'viz_state_coverage': wandb.Image(viz_statecov(statecov_random, statecov_agent))})
+        plt.close('all')
 
-    for maze in mazes_test:
-        video_random = get_video(agent_random, maze)
-        video_agent = get_video(agent, maze)
-        wandb.log({
-            'video_random': wandb.Video(video_random.transpose(0, 3, 1, 2).astype(np.uint8), fps=4),
-            'video_agent': wandb.Video(video_agent.transpose(0, 3, 1, 2).astype(np.uint8), fps=4)
-        })
+    print('Plotting Videos')
+    if args.track:
+        mazes = np.random.choice(len(mazes_test), min(25, len(mazes_test)), replace=False)
+        mazes = [mazes_test[i] for i in mazes]
+        for maze in mazes:
+            video_random = get_video(agent_random, maze)
+            video_agent = get_video(agent, maze)
+            wandb.log({
+                'video_random': wandb.Video(video_random.transpose(0, 3, 1, 2).astype(np.uint8), fps=4),
+                'video_agent': wandb.Video(video_agent.transpose(0, 3, 1, 2).astype(np.uint8), fps=4)
+            })
 
 
 if __name__=='__main__':
-    main()
+    args = parser.parse_args()
+    main(args)
