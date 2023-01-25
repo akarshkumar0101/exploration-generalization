@@ -3,9 +3,8 @@ from distutils.util import strtobool
 
 import numpy as np
 import torch
-from tqdm.auto import tqdm
-
 import wandb
+from tqdm.auto import tqdm
 
 parser = argparse.ArgumentParser()
 # general parameters
