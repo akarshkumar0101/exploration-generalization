@@ -195,7 +195,7 @@ parser.add_argument("--coef_entropy", type=float, default=0.0)
 
 def main(args):
     if args.track:
-        wandb.init()
+        run = wandb.init(config=args, name=args.name, save_code=True)
     print('Loading Go-Explore runs.')
     ges = torch.load('data/ges.pt')
     print('Done.')
@@ -235,7 +235,7 @@ def main(args):
 
     print('Plotting Videos')
     if args.track:
-        for maze in mazes_test[:10]:
+        for maze in tqdm(mazes_test[:10]):
             video_random = get_video(agent_random, maze)
             video_agent = get_video(agent, maze)
             wandb.log({

@@ -10,6 +10,7 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import wandb
 from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
@@ -17,7 +18,6 @@ from tqdm.auto import tqdm
 import bc
 import env_utils
 import goexplore_discrete
-import wandb
 
 
 def viz_count_distribution(ge, env0):
