@@ -113,7 +113,7 @@ def get_state_coverage(mazes_test, agent=None):
     for i_maze, maze in enumerate(mazes_test):
         env = maze_run.make_env(1, maze=maze, obs_size=5, frame_stack=4)
         obs, info = env.reset()
-        for i_trans in range(5000):
+        for i_trans in range(100):
             cells[i_maze].add(info['cell'][0])
             statecov[i_maze].append(len(cells[i_maze]))
             obs, reward, terminated, truncated, info = env.step(agent.act(obs))
@@ -233,9 +233,7 @@ def main(args):
 
     print('Plotting Videos')
     if args.track:
-        mazes = np.random.choice(len(mazes_test), min(25, len(mazes_test)), replace=False)
-        mazes = [mazes_test[i] for i in mazes]
-        for maze in mazes:
+        for maze in mazes_test[:10]:
             video_random = get_video(agent_random, maze)
             video_agent = get_video(agent, maze)
             wandb.log({
