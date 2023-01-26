@@ -157,7 +157,6 @@ class TerminationReward(gym.Wrapper):
             reward = reward + self.termination_reward
         return obs, reward, terminated, truncated, info
 
-# class CurrentTrajectoryStats(gym.Wrapper):
 class CumulativeReward(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)

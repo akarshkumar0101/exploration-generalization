@@ -10,6 +10,7 @@ import wandb
 from torch import nn
 from tqdm.auto import tqdm
 
+import bc
 import env_utils
 import goexplore_discrete
 import maze_run
@@ -63,29 +64,6 @@ class ImitationExplorer(nn.Module):
     def act(self, x):
         dist, _ = self.get_dist_and_values(x)
         return dist.sample()
-
-
-def train_bc_agent(agent, x_train, y_train, batch_size=32, n_batches=10, lr=1e-3, coef_entropy=0.0, device=None, tqdm=None, wandb=None):
-    agent = agent.to(device)
-    loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
-    opt = torch.optim.Adam(agent.parameters(), lr=lr)
-    pbar = range(n_batches)
-    if tqdm is not None:
-        pbar = tqdm(pbar)
-    for i_batch in pbar:
-        idxs_batch = torch.randperm(len(x_train))[:batch_size]
-        x_batch, y_batch = x_train[idxs_batch].float().to(device), y_train[idxs_batch].long().to(device)
-        dist, values = agent.get_dist_and_values(x_batch)
-
-        loss_bc = loss_fn(dist.logits, y_batch).mean()
-        loss_entropy = dist.entropy().mean()
-        loss = loss_bc - coef_entropy * loss_entropy
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
-        pbar.set_postfix(loss_bc=loss_bc.item(), entropy=loss_entropy.item())
-        if wandb:
-            wandb.log({'loss_bc': loss_bc.item(), 'entropy': loss_entropy.item()})
 
 def create_bc_dataset(ges, n_nodes=10, n_samples_per_node=10, beta=-2.0):
     x, y = [], []
@@ -212,10 +190,13 @@ def main(args):
     agent = ImitationExplorer(ges[0].env)
 
     print('Training agent with BC')
-    train_bc_agent(agent, x_train, y_train,
+    def callback_fn(loss_bc, loss_entropy, **kwargs):
+        if args.track:
+            wandb.log({'loss_bc': loss_bc.item(), 'loss_entropy': loss_entropy.item()})
+    bc.train_bc_agent(agent, x_train, y_train,
                    batch_size=args.batch_size, n_batches=args.n_batches,
                    lr=args.lr, coef_entropy=args.coef_entropy,
-                   device=args.device, tqdm=tqdm, wandb=wandb if args.track else None)
+                   device=args.device, tqdm=tqdm, callback_fn=callback_fn)
     agent = agent.to('cpu')
 
     print('Loading test mazes')

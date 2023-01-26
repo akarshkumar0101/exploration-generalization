@@ -6,13 +6,14 @@ import torch
 
 
 class Node():
-    def __init__(self, parent, snapshot, cell, terminated):
+    def __init__(self, parent, cell, snapshot, cumulative_reward, len_traj):
         self.parent = parent
         self.children = []
         
         self.snapshot = snapshot
         self.cell = cell
-        self.terminated = terminated
+        self.cumulative_reward = cumulative_reward
+        self.len_traj = len_traj
 
 class GoExplore():
     def __init__(self, env):
@@ -22,18 +23,17 @@ class GoExplore():
         self.cell2n_seen = {} # the number of times I've seen this cell
         self.cell2prod = {} # number of times this cell has not produced a new cell recently
         obs, info = self.env.reset()
-        self.node_root = Node(None, info['snapshot'][0], info['cell'][0], False)
+        self.node_root = Node(None, info['cell'][0], info['snapshot'][0],
+                              info['cumulative_reward'][0], info['len_traj'][0])
         self.add_node(self.node_root)
         self.cell2n_seen[self.node_root.cell] = 0
         self.cell2prod[self.node_root.cell] = 0
         
     def add_node(self, node):
-        if node.terminated:
-            return
-
         if node.cell in self.cell2node:
             node_old = self.cell2node[node.cell]
-            if len(node.snapshot)<len(node_old.snapshot):
+            if node.cumulative_reward>node_old.cumulative_reward or \
+               (node.cumulative_reward==node_old.cumulative_reward and node.len_traj<node_old.len_traj):
                 self.cell2node[node.cell] = node
         else:
             self.cell2node[node.cell] = node
@@ -66,12 +66,14 @@ class GoExplore():
             obs, reward, terminated, truncated, info = self.env.step(action)
 
             for i in range(len(nodes)):
-                node = Node(None, info['snapshot'][i], info['cell'][i], terminated[i].item())
-                nodes_visited[i].append(node)
+                if not terminated[i].item():
+                    node = Node(None, info['cell'][i], info['snapshot'][i],
+                                info['cumulative_reward'][i], info['len_traj'][i])
+                    nodes_visited[i].append(node)
 
         for nodes_traj in nodes_visited:
-            nodes_traj = [node for node in nodes_traj if not node.terminated]
-            nodes_traj = nodes_traj[:-2] # we can't ensure the future is not dead
+            # nodes_traj = [node for node in nodes_traj if not node.terminated]
+            nodes_traj = nodes_traj[:-2] # we ensure the future is not dead
 
             for node in nodes_traj:
                 self.add_node(node)

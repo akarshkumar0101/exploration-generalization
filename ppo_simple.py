@@ -169,12 +169,12 @@ def run_ppo(agent, env, args, callback_fn=None):
     for k, v in env.single_observation_space.items():
         data[k] = torch.zeros((args.num_envs, args.num_steps) + v.shape).to(device)
 
-    data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+env.single_action_space.shape).to(device)
-    data['logprob'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    data[ 'reward'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    data['entropy'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    data[  'value'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
-    data[   'done'] = torch.zeros((args.num_envs, args.num_steps)).to(device)
+    data[ 'action'] = torch.zeros((args.num_envs, args.num_steps)+env.single_action_space.shape, device=device)
+    data['logprob'] = torch.zeros((args.num_envs, args.num_steps), device=device)
+    data[ 'reward'] = torch.zeros((args.num_envs, args.num_steps), device=device)
+    data['entropy'] = torch.zeros((args.num_envs, args.num_steps), device=device)
+    data[  'value'] = torch.zeros((args.num_envs, args.num_steps), device=device)
+    data[   'done'] = torch.zeros((args.num_envs, args.num_steps), device=device)
 
     n_updates = args.total_timesteps // args.batch_size
     for i_update in range(n_updates):
@@ -184,7 +184,7 @@ def run_ppo(agent, env, args, callback_fn=None):
             optimizer.param_groups[0]["lr"] = lr_now
         
         obs, info = env.reset()
-        done = torch.zeros(args.num_envs).to(device)
+        done = torch.zeros(args.num_envs, device=device)
         for i_step in range(args.num_steps):
             for k, v in obs.items():
                 data[k][:, i_step] = v

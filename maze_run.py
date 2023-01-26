@@ -15,11 +15,10 @@ import goexplore_discrete
 import maze_env
 
 
-def make_single_env(maze, obs_size, frame_stack):
-    env = maze_env.MazeEnv(maze, obs_size=obs_size)
-    # env = env_utils.StoreObsInfo(env)
+def make_single_env(maze, path, obs_size, reward_sparsity, frame_stack):
+    env = maze_env.MazeEnv(maze=maze, path=path, obs_size=obs_size, reward_sparsity=reward_sparsity)
     env = gym.wrappers.FrameStack(env, frame_stack)
-    env = env_utils.DeterministicReplayReset(env)
+    env = env_utils.DeterministicReplayReset(env) # TODO: change this to wrapper
     return env
 
 def make_env(n_envs, auto_reset=False, **kwargs):
@@ -61,10 +60,22 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
     print('Generating mazes...')
-    mazes_train = maze_env.generate_mazes(args.maze_size, args.maze_size, args.n_mazes, maze.Maze.Create.PRIM, tqdm=tqdm)
-    mazes_test = maze_env.generate_mazes(args.maze_size, args.maze_size, args.n_mazes, maze.Maze.Create.PRIM, tqdm=tqdm)
+
+    maze_data_train = [maze_env.generate_maze_data(n_rows=50, n_cols=50) for _ in tqdm(range(args.n_mazes))]
+    maze_data_test  = [maze_env.generate_maze_data(n_rows=50, n_cols=50) for _ in tqdm(range(args.n_mazes))]
+    for maze_id, maze_data in enumerate(maze_data_train):
+        torch.save(maze_data, f'data/maze_data_train/{id:05d}.pt')
+    for maze_id, maze_data in enumerate(maze_data_test):
+        torch.save(maze_data, f'data/maze_data_test/{id:05d}.pt')
+
+
+
+    x_train, y_train = create_reward_maximization_dataset(maze_data_train)
+    x_train, y_train = create_exploration_dataset(maze_data_train)
+
+
     torch.save(mazes_train, 'data/mazes_train.pt')
-    torch.save(mazes_test, 'data/mazes_test.pt')
+    torch.save(mazes_test,  'data/mazes_test.pt')
     print('Done generating mazes.')
 
     print('Running Go-Explore on mazes...')
@@ -82,3 +93,36 @@ if __name__ == '__main__':
     print('Done saving Go-Explore results.')
     time_end = time.time()
     print('Time to run+save Go-Explore results: {:.2f} minutes'.format((time_end - time_start) / 60))
+
+def create_reward_maximization_dataset(maze_data):
+    pass
+
+def create_exploration_dataset(maze_data):
+    pass
+
+# def train_agent_ppo(maze_data, agent):
+    # env = make_env()
+    # pass
+
+# - Create reward-maximization (RM) dataset of trajectories
+#     - For env in train_envs:
+#         - Run PPO for T steps
+#         - Store example trajectories
+        
+# - Create exploration (E) dataset of trajectories
+#     - For env in train_env:
+#         - Run exploration algorithm for T steps
+#         - Store example trajectories
+        
+# - Distill RM-dataset into policy: RM-prior
+# - Distill E-dataset into policy: E-prior
+
+# For env in test_envs:
+#     - Fine-tune RM-prior on env
+#     - Evaluate reward
+
+# For env in test_envs:
+#     - Fine-tune E-prior on env
+#     - Evaluate reward
+
+
