@@ -3,6 +3,7 @@ import copy
 import cv2
 import gymnasium as gym
 import numpy as np
+import torch
 
 
 class MRDomainCellInfo(gym.Wrapper):
@@ -98,13 +99,13 @@ class DeterministicReplayReset(gym.Wrapper):
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         self.snapshot = []
-        info['snapshot'] = np.array(self.snapshot)
+        # info['snapshot'] = np.array(self.snapshot)
         return obs, info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.snapshot.append(action)
-        info['snapshot'] = np.array(self.snapshot)
+        # info['snapshot'] = np.array(self.snapshot)
         return obs, reward, terminated, truncated, info
 
     def restore_snapshot(self, snapshot, *args, **kwargs):
@@ -114,49 +115,122 @@ class DeterministicReplayReset(gym.Wrapper):
             obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
         return obs, reward, terminated, truncated, info
 
-class DeterministicAtariReset(gym.Wrapper):
-    def __init__(self, env):
+    def get_snapshot(self):
+        return np.array(self.snapshot)
+
+# class DeterministicAtariReset(gym.Wrapper):
+#     def __init__(self, env):
+#         super().__init__(env)
+
+#     def reset(self, *args, **kwargs):
+#         obs, info = self.env.reset(*args, **kwargs)
+#         obs, reward, terminated, truncated, info = self.step(0)
+#         return obs, info
+
+#     def step(self, action):
+#         snapshot = self.get_env_variables(self)
+#         snapshot['ale_state'] = self.ale.cloneState()
+#         obs, reward, terminated, truncated, info = self.env.step(action)
+#         snapshot['action'] = action
+#         info['snapshot'] = snapshot
+#         return obs, reward, terminated, truncated, info
+
+#     def restore_snapshot(self, snapshot, *args, **kwargs):
+#         self.set_env_variables(self, snapshot)
+#         self.ale.restoreState(snapshot['ale_state'])
+#         obs, reward, terminated, truncated, info = self.step(snapshot['action']) # call my own method, not self.env's
+#         return obs, reward, terminated, truncated, info
+
+#     def get_env_variables(self, env, ignore_classes=['AtariEnv']):
+#         snapshot = {}
+#         while hasattr(env, 'env'):
+#             env = env.env
+#             classstr = type(env).__name__
+#             classkeys = set(env.__dict__.keys())
+#             classkeys = {i for i in classkeys if not i.startswith('_') and i!='env'}
+#             classdata = {key: getattr(env, key) for key in classkeys}
+#             if classstr not in ignore_classes and len(classdata)>0:
+#                 snapshot.update({classstr: classdata})
+#         return snapshot
+
+#     def set_env_variables(self, env, snapshot):
+#         while hasattr(env, 'env'):
+#             env = env.env
+#             classstr = type(env).__name__
+#             if classstr in snapshot:
+#                 classdata = snapshot[classstr]
+#                 for key, value in classdata.items():
+#                     setattr(env, key, value)
+
+class ALEState(gym.Wrapper):
+    def __getattr__(self, name):
+        if name=='ale_state':
+            print('cloning atari state')
+            return self.env.ale.cloneState()
+        else:
+            return super().__getattr__(name)
+    def __setattr__(self, name, value):
+        if name=='ale_state':
+            print('setting atari state')
+            self.env.ale.restoreState(value)
+        else:
+            super().__setattr__(name, value)
+
+class DeterministicRestoreReset(gym.Wrapper):
+    def __init__(self, env, classname2vars):
         super().__init__(env)
+        self.classname2vars = classname2vars
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        obs, reward, terminated, truncated, info = self.step(0)
+        self.obs, self.reward, self.terminated, self.truncated, self.info = obs, 0, False, False, info
         return obs, info
 
     def step(self, action):
-        snapshot = self.get_env_variables(self)
-        snapshot['ale_state'] = self.ale.cloneState()
         obs, reward, terminated, truncated, info = self.env.step(action)
-        snapshot['action'] = action
-        info['snapshot'] = snapshot
+        self.obs, self.reward, self.terminated, self.truncated, self.info = obs, reward, terminated, truncated, info
         return obs, reward, terminated, truncated, info
 
     def restore_snapshot(self, snapshot, *args, **kwargs):
         self.set_env_variables(self, snapshot)
-        self.ale.restoreState(snapshot['ale_state'])
-        obs, reward, terminated, truncated, info = self.step(snapshot['action']) # call my own method, not self.env's
-        return obs, reward, terminated, truncated, info
+        return tuple(snapshot[key] for key in ['obs', 'reward', 'terminated', 'truncated', 'info'])
 
-    def get_env_variables(self, env, ignore_classes=['AtariEnv']):
+    def get_snapshot(self):
+        snapshot = self.get_env_variables()
+        snapshot.update(dict(obs=self.obs, reward=self.reward, terminated=self.terminated,
+                             truncated=self.truncated, info=self.info))
+        return snapshot
+
+    def get_env_variables(self):
+        env = self
         snapshot = {}
         while hasattr(env, 'env'):
             env = env.env
-            classstr = type(env).__name__
-            classkeys = set(env.__dict__.keys())
-            classkeys = {i for i in classkeys if not i.startswith('_') and i!='env'}
-            classdata = {key: getattr(env, key) for key in classkeys}
-            if classstr not in ignore_classes and len(classdata)>0:
-                snapshot.update({classstr: classdata})
+            classname = type(env).__name__
+            if classname in self.classname2vars:
+                vars = self.classname2vars[classname]
+                data = {key: copy.copy(getattr(env, key)) for key in vars}
+                snapshot[classname] = data
         return snapshot
 
     def set_env_variables(self, env, snapshot):
+        env = self
+        snapshot = {}
         while hasattr(env, 'env'):
             env = env.env
-            classstr = type(env).__name__
-            if classstr in snapshot:
-                classdata = snapshot[classstr]
-                for key, value in classdata.items():
+            classname = type(env).__name__
+            if classname in snapshot:
+                for key, value in snapshot[classname].items():
                     setattr(env, key, value)
+
+    def print_env_variables(self):
+        env = self
+        while hasattr(env, 'env'):
+            env = env.env
+            keys = env.__dict__.keys()
+            keys = [i for i in keys if not i.startswith('_') and i!='env'] 
+            print(f'{type(env).__name__:25s}: {keys}')
+
 
 class ObservationDivide(gym.ObservationWrapper):
     def __init__(self, env, divide=255.):
@@ -494,14 +568,16 @@ class RestorableSyncVectorEnv(gym.vector.SyncVectorEnv):
 
 
 
-
-import torch
-
-
 class ToTensor(gym.Wrapper):
     def __init__(self, env, device=None, dtype=None):
         super().__init__(env)
         self.device = device
+        self.dtype = dtype
+
+    def set_device(self, device):
+        self.device = device
+
+    def set_dtype(self, dtype):
         self.dtype = dtype
     
     def as_tensor(self, obs):
