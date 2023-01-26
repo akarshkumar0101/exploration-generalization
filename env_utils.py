@@ -7,6 +7,12 @@ import torch
 
 
 class MRDomainCellInfo(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.y, self.x = 0, 0
+        self.roomx, self.roomy = 0, 0
+        self.inventory = None
+
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
 
@@ -95,143 +101,6 @@ class StoreObsInfo(gym.Wrapper):
         info[self.key_name] = obs
         return obs, reward, terminated, truncated, info
 
-class DeterministicReplayReset(gym.Wrapper):
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        self.snapshot = []
-        # info['snapshot'] = np.array(self.snapshot)
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        self.snapshot.append(action)
-        # info['snapshot'] = np.array(self.snapshot)
-        return obs, reward, terminated, truncated, info
-
-    def restore_snapshot(self, snapshot, *args, **kwargs):
-        obs, info = self.reset(*args, **kwargs) # call my own method, not self.env's
-        reward, terminated, truncated = 0, False, False
-        for action in snapshot:
-            obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
-        return obs, reward, terminated, truncated, info
-
-    def get_snapshot(self):
-        return np.array(self.snapshot)
-
-# class DeterministicAtariReset(gym.Wrapper):
-#     def __init__(self, env):
-#         super().__init__(env)
-
-#     def reset(self, *args, **kwargs):
-#         obs, info = self.env.reset(*args, **kwargs)
-#         obs, reward, terminated, truncated, info = self.step(0)
-#         return obs, info
-
-#     def step(self, action):
-#         snapshot = self.get_env_variables(self)
-#         snapshot['ale_state'] = self.ale.cloneState()
-#         obs, reward, terminated, truncated, info = self.env.step(action)
-#         snapshot['action'] = action
-#         info['snapshot'] = snapshot
-#         return obs, reward, terminated, truncated, info
-
-#     def restore_snapshot(self, snapshot, *args, **kwargs):
-#         self.set_env_variables(self, snapshot)
-#         self.ale.restoreState(snapshot['ale_state'])
-#         obs, reward, terminated, truncated, info = self.step(snapshot['action']) # call my own method, not self.env's
-#         return obs, reward, terminated, truncated, info
-
-#     def get_env_variables(self, env, ignore_classes=['AtariEnv']):
-#         snapshot = {}
-#         while hasattr(env, 'env'):
-#             env = env.env
-#             classstr = type(env).__name__
-#             classkeys = set(env.__dict__.keys())
-#             classkeys = {i for i in classkeys if not i.startswith('_') and i!='env'}
-#             classdata = {key: getattr(env, key) for key in classkeys}
-#             if classstr not in ignore_classes and len(classdata)>0:
-#                 snapshot.update({classstr: classdata})
-#         return snapshot
-
-#     def set_env_variables(self, env, snapshot):
-#         while hasattr(env, 'env'):
-#             env = env.env
-#             classstr = type(env).__name__
-#             if classstr in snapshot:
-#                 classdata = snapshot[classstr]
-#                 for key, value in classdata.items():
-#                     setattr(env, key, value)
-
-class ALEState(gym.Wrapper):
-    def __getattr__(self, name):
-        if name=='ale_state':
-            print('cloning atari state')
-            return self.env.ale.cloneState()
-        else:
-            return super().__getattr__(name)
-    def __setattr__(self, name, value):
-        if name=='ale_state':
-            print('setting atari state')
-            self.env.ale.restoreState(value)
-        else:
-            super().__setattr__(name, value)
-
-class DeterministicRestoreReset(gym.Wrapper):
-    def __init__(self, env, classname2vars):
-        super().__init__(env)
-        self.classname2vars = classname2vars
-
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        self.obs, self.reward, self.terminated, self.truncated, self.info = obs, 0, False, False, info
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        self.obs, self.reward, self.terminated, self.truncated, self.info = obs, reward, terminated, truncated, info
-        return obs, reward, terminated, truncated, info
-
-    def restore_snapshot(self, snapshot, *args, **kwargs):
-        self.set_env_variables(self, snapshot)
-        return tuple(snapshot[key] for key in ['obs', 'reward', 'terminated', 'truncated', 'info'])
-
-    def get_snapshot(self):
-        snapshot = self.get_env_variables()
-        snapshot.update(dict(obs=self.obs, reward=self.reward, terminated=self.terminated,
-                             truncated=self.truncated, info=self.info))
-        return snapshot
-
-    def get_env_variables(self):
-        env = self
-        snapshot = {}
-        while hasattr(env, 'env'):
-            env = env.env
-            classname = type(env).__name__
-            if classname in self.classname2vars:
-                vars = self.classname2vars[classname]
-                data = {key: copy.copy(getattr(env, key)) for key in vars}
-                snapshot[classname] = data
-        return snapshot
-
-    def set_env_variables(self, env, snapshot):
-        env = self
-        snapshot = {}
-        while hasattr(env, 'env'):
-            env = env.env
-            classname = type(env).__name__
-            if classname in snapshot:
-                for key, value in snapshot[classname].items():
-                    setattr(env, key, value)
-
-    def print_env_variables(self):
-        env = self
-        while hasattr(env, 'env'):
-            env = env.env
-            keys = env.__dict__.keys()
-            keys = [i for i in keys if not i.startswith('_') and i!='env'] 
-            print(f'{type(env).__name__:25s}: {keys}')
-
-
 class ObservationDivide(gym.ObservationWrapper):
     def __init__(self, env, divide=255.):
         super().__init__(env)
@@ -257,7 +126,8 @@ class AtariOneLife(gym.Wrapper):
                 self.terminated_data = obs, reward, terminated, truncated, info
         else:
             obs, reward, terminated, truncated, info = self.terminated_data
-        return obs, reward, terminated, truncated, info
+        # we need deep copy because future envs will alter it, and we want to maintain original
+        return obs, reward, terminated, truncated, copy.deepcopy(info)
 
 # class DeadScreen(gym.Wrapper):
 #     def __init__(self, env):
@@ -413,49 +283,116 @@ class EasierMRActionSpace(gym.ActionWrapper):
     def action(self, action):
         return self.underlying_actions[action]
 
-# class MyVectorEnv(gym.vector.SyncVectorEnv):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
+class DeterministicReplayReset(gym.Wrapper):
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.snapshot = []
+        info['snapshot'] = self.get_snapshot()
+        return obs, info
 
-#     def reset(self, *args, **kwargs):
-#         o, i = [], []
-#         for env in self.envs:
-#             obs, info = env.reset()
-#             o.append(obs)
-#             i.append(info)
-#         return np.stack(o), i
-        
-#     def restore_snapshots(self, snapshots):
-#         o, r, t, tr, i = [], [], [], [], []
-#         for env, snapshot in zip(self.envs, snapshots):
-#             obs, reward, terminated, truncated, info = env.restore_snapshot(snapshot)
-#             o.append(obs)
-#             r.append(reward)
-#             t.append(terminated)
-#             tr.append(truncated)
-#             i.append(info)
-#         return np.stack(o), np.array(r), np.array(t), np.array(tr), i
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.snapshot.append(action)
+        info['snapshot'] = self.get_snapshot()
+        return obs, reward, terminated, truncated, info
 
-#     def step(self, action):
-#         o, r, t, tr, i = [], [], [], [], []
-#         for env, a in zip(self.envs, action):
-#             obs, reward, terminated, truncated, info = env.step(a)
-#             o.append(obs)
-#             r.append(reward)
-#             t.append(terminated)
-#             tr.append(truncated)
-#             i.append(info)
-#         return np.stack(o), np.array(r), np.array(t), np.array(tr), i
+    def restore_snapshot(self, snapshot, *args, **kwargs):
+        obs, info = self.reset(*args, **kwargs) # call my own method, not self.env's
+        reward, terminated, truncated = 0, False, False
+        for action in snapshot:
+            obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
+        return obs, reward, terminated, truncated, info
 
+    def get_snapshot(self):
+        return np.array(self.snapshot)
 
+class ALEState(gym.Wrapper):
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        del info['frame_number']
+        return obs, info
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        del info['frame_number']
+        return obs, reward, terminated, truncated, info
 
-# def restore_snapshots(envs, snapshots, *args, **kwargs):
-#     obs, info = envs.reset(*args, **kwargs)
-#     for env, snapshot in zip(envs.envs, snapshots):
-#         obs, reward, terminated, truncated, info = env.restore_snapshot(snapshot)
-#     # for action in snapshot:
-#         # obs, reward, terminated, truncated, info = self.step(action) # call my own method, not self.env's
-#     return obs, reward, terminated, truncated, info
+    def __getattr__(self, name):
+        if name=='ale_state':
+            return self.env.clone_state(include_rng=True)
+        else:
+            return super().__getattr__(name)
+    def __setattr__(self, name, value):
+        if name=='ale_state':
+            self.env.restore_state(value)
+        else:
+            super().__setattr__(name, value)
+
+class DeterministicRestoreReset(gym.Wrapper):
+    def __init__(self, env, class2keys):
+        super().__init__(env)
+        self.class2keys = class2keys
+        self.env_vars, self.action = {}, None
+        self.create_class2env()
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.env_vars, self.action = {}, None
+        info['snapshot'] = self.get_snapshot()
+        return obs, info
+
+    def step(self, action):
+        self.env_vars = self.get_env_variables()
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.action = action
+        info['snapshot'] = self.get_snapshot()
+        return obs, reward, terminated, truncated, info
+
+    def restore_snapshot(self, snapshot, *args, **kwargs):
+        if snapshot['action'] is None:
+            obs, info = self.reset(*args, **kwargs) # call my own method, not self.env's
+            return obs, 0, False, False, info
+        else:
+            self.set_env_variables(snapshot)
+            return self.step(snapshot['action']) # call my own method, not self.env's
+
+    def get_snapshot(self):
+        snapshot = self.env_vars
+        snapshot['action'] = self.action
+        return snapshot
+
+    def create_class2env(self):
+        self.class2env = {}
+        env = self
+        while hasattr(env, 'env'):
+            env = env.env
+            classname = type(env).__name__
+            if classname in self.class2keys:
+                self.class2env[classname] = env
+                if self.class2keys[classname] is None:
+                    keys = [key for key in env.__dict__.keys() if not key.startswith('_') and key!='env']
+                    self.class2keys[classname] = keys
+
+    def get_env_variables(self):
+        env_vars = {}
+        for classname, keys in self.class2keys.items():
+            env = self.class2env[classname]
+            env_vars[classname] = {key: copy.deepcopy(getattr(env, key)) for key in keys}
+        return env_vars
+
+    def set_env_variables(self, env_vars):
+        for classname, keys in self.class2keys.items():
+            env = self.class2env[classname]
+            for key in keys:
+                setattr(env, key, copy.deepcopy(env_vars[classname][key]))
+
+    def print_env_variables(self):
+        env = self
+        while hasattr(env, 'env'):
+            env = env.env
+            keys = env.__dict__.keys()
+            keys = [i for i in keys if not i.startswith('_') and i!='env'] 
+            print(f'{type(env).__name__:25s}: {keys}')
+
 
 # altered from https://github.com/Farama-Foundation/Gymnasium/blob/c52ef43a1bc56bec7c2adea5130f8119a4d58065/gymnasium/vector/sync_vector_env.py#L67
 from copy import deepcopy
@@ -467,25 +404,6 @@ class RestorableSyncVectorEnv(gym.vector.SyncVectorEnv):
     def __init__(self, *args, auto_reset=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.auto_reset = auto_reset
-
-    # def reset(self, *args, **kwargs):
-    #     o, i = [], []
-    #     for env in self.envs:
-    #         obs, info = env.reset()
-    #         o.append(obs)
-    #         i.append(info)
-    #     return np.stack(o), i
-        
-    # def restore_snapshots(self, snapshots):
-    #     o, r, t, tr, i = [], [], [], [], []
-    #     for env, snapshot in zip(self.envs, snapshots):
-    #         obs, reward, terminated, truncated, info = env.restore_snapshot(snapshot)
-    #         o.append(obs)
-    #         r.append(reward)
-    #         t.append(terminated)
-    #         tr.append(truncated)
-    #         i.append(info)
-    #     return np.stack(o), np.array(r), np.array(t), np.array(tr), i
 
     def restore_snapshot(self, snapshots, *args, **kwargs):
         obs, info = self.reset(*args, **kwargs)
@@ -518,17 +436,6 @@ class RestorableSyncVectorEnv(gym.vector.SyncVectorEnv):
             np.copy(self._truncateds),
             infos,
         )
-
-    # def step(self, action):
-    #     o, r, t, tr, i = [], [], [], [], []
-    #     for env, a in zip(self.envs, action):
-    #         obs, reward, terminated, truncated, info = env.step(a)
-    #         o.append(obs)
-    #         r.append(reward)
-    #         t.append(terminated)
-    #         tr.append(truncated)
-    #         i.append(info)
-    #     return np.stack(o), np.array(r), np.array(t), np.array(tr), i
 
     def step_wait(self):
         """Steps through each of the environments returning the batched results.
