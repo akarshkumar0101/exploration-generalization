@@ -299,6 +299,7 @@ def main(args):
         agent = ImitationExplorer(env, args.frame_stack)
     else:
         agent = RandomExplorer(env)
+    agent = agent.to(args.device)
 
     pbar = tqdm(range(args.n_steps))
     for i_step in pbar:
