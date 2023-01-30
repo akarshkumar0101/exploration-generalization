@@ -33,9 +33,9 @@ def main(args):
     for i_step in pbar:
         data = dict(loss=1.1, reward=0.0)
 
-        # if i_step%args.freq_viz==0:
+        # if args.track and i_step%args.freq_viz==0:
             # data['viz'] = wandb.Image(...)
-        # if i_step%args.freq_save==0:
+        # if args.track and i_step%args.freq_save==0:
             # torch.save(...)
 
         pbar.set_postfix({k: v for k, v in data.items() if isinstance(v, int) or isinstance(v, float)})

@@ -405,6 +405,7 @@ class RestorableSyncVectorEnv(gym.vector.SyncVectorEnv):
         self.auto_reset = auto_reset
 
     def restore_snapshot(self, snapshots, *args, **kwargs):
+        assert isinstance(snapshots, list)
         obs, info = self.reset(*args, **kwargs)
         observations, infos = [], {}
         for i, (env, snapshot) in enumerate(zip(self.envs, snapshots)):
@@ -504,6 +505,7 @@ class ToTensor(gym.Wrapper):
         return obs, info
 
     def restore_snapshot(self, snapshots, *args, **kwargs):
+        assert isinstance(snapshots, list)
         obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshots, *args, **kwargs)
         obs = self.as_tensor(obs)
         reward = self.as_tensor(reward)

@@ -15,7 +15,7 @@ def train_bc_agent(agent, x_train, y_train, batch_size=32, n_steps=10, lr=1e-3, 
     opt = torch.optim.Adam(agent.parameters(), lr=lr)
     pbar = range(n_steps)
     if tqdm is not None:
-        pbar = tqdm(pbar)
+        pbar = tqdm(pbar, leave=False)
     for i_step in pbar:
         idxs_batch = torch.randperm(len(x_train))[:batch_size]
         x_batch, y_batch = x_train[idxs_batch].float().to(device), y_train[idxs_batch].long().to(device)
@@ -30,7 +30,8 @@ def train_bc_agent(agent, x_train, y_train, batch_size=32, n_steps=10, lr=1e-3, 
         opt.step()
 
         pbar.set_postfix(loss_bc=loss_bc.item(), entropy=loss_entropy.item())
-        callback_fn(i_step=i_step, **locals())
+        if callback_fn is not None:
+            callback_fn(**locals())
 
 def train_bc_elite(ge, net, opt, n_nodes_select, n_steps, batch_size=1000, coef_entropy=1e-1, device=None, tqdm=None):
     """

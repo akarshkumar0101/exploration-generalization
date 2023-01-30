@@ -57,6 +57,12 @@ class GoExplore():
         nodes_visited = [[node] for node in nodes]
 
         obs, reward, terminated, truncated, info = self.env.restore_snapshot(snapshots)
+
+        for node, cell, cr, lt in zip(nodes, info['cell'], info['cumulative_reward'], info['len_traj']):
+            assert node.cell==cell
+            assert node.cumulative_reward==cr
+            assert node.len_traj==lt
+
         for i_trans in range(len_traj):
             if agent_explorer is None:
                 action = self.env.action_space.sample()

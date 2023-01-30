@@ -69,7 +69,6 @@ def create_bc_dataset(ges, n_nodes=10, n_samples_per_node=10, beta=-2.0):
     x, y = [], []
     for ge in tqdm(ges):
         env = ge.env.envs[0]
-
         nodes = ge.select_nodes(n_nodes, beta=beta, condition=lambda node: len(node.snapshot)>n_samples_per_node)
         for node in nodes:
             x_node, y_node = [], []

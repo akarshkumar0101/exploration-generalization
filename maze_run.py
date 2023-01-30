@@ -53,6 +53,12 @@ parser.add_argument("--ge_batch_size", type=int, default=32)
 parser.add_argument("--ge_len_traj", type=int, default=20)
 parser.add_argument("--ge_beta", type=float, default=-2.0)
 
+
+
+def main():
+    pass
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
@@ -68,11 +74,8 @@ if __name__ == '__main__':
     for maze_id, maze_data in enumerate(maze_data_test):
         torch.save(maze_data, f'data/maze_data_test/{id:05d}.pt')
 
-
-
     x_train, y_train = create_reward_maximization_dataset(maze_data_train)
     x_train, y_train = create_exploration_dataset(maze_data_train)
-
 
     torch.save(mazes_train, 'data/mazes_train.pt')
     torch.save(mazes_test,  'data/mazes_test.pt')
