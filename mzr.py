@@ -342,8 +342,6 @@ def main(args):
                 torch.save(ge, f'data/{args.name}/ge.pt')
 
         pbar.set_postfix({k: v for k, v in data.items() if isinstance(v, int) or isinstance(v, float)})
-        if args.track:
-            wandb.log(data)
 
     if args.track:
         run.finish()
