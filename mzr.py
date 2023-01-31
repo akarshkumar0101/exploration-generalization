@@ -293,6 +293,7 @@ def main(args):
 
     env = make_env(args.n_envs, args.frame_stack, device=args.device)
     env1 = make_env(1, args.frame_stack, device=args.device)
+    env1_cpu = make_env(1, args.frame_stack, device='cpu')
     env_viz = make_env(8, args.frame_stack, device=args.device)
 
     ge = goexplore_discrete.GoExplore(env)
@@ -310,7 +311,7 @@ def main(args):
         ge.explore_from(nodes, args.len_traj, agent)
 
         if args.freq_learn is not None and i_step>0 and i_step%args.freq_learn==0:
-            x_train, y_train = create_bc_dataset(ge, env1, args.n_nodes_dataset,
+            x_train, y_train = create_bc_dataset(ge, env1_cpu, args.n_nodes_dataset,
                                                  beta=args.beta_dataset, tqdm=tqdm)
             bc.train_bc_agent(agent, x_train, y_train, batch_size=args.batch_size,
                               n_steps=args.n_steps_learn, lr=args.lr,
