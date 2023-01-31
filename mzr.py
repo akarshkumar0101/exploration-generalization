@@ -268,7 +268,7 @@ parser.add_argument("--beta", type=float, default=-0.5)
 parser.add_argument("--freq_learn", type=int, default=None) # 100
 parser.add_argument("--n_nodes_dataset", type=int, default=200)
 parser.add_argument("--beta_dataset", type=float, default=-0.5)
-parser.add_argument("--batch_size", type=int, default=2048)
+parser.add_argument("--batch_size", type=int, default=512)
 parser.add_argument("--n_steps_learn", type=int, default=50)
 parser.add_argument("--coef_entropy", type=float, default=1e-2)
 parser.add_argument("--lr", type=float, default=1e-3)
