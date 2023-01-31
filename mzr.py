@@ -127,11 +127,11 @@ def viz_ge_outliers(ge, env1):
         plt.title(f'Visit Count: {ge.cell2n_seen[node.cell]}')
     return plt.gcf()
 
-def viz_explorer_behavior(ge, agent=None, nodes_start=None, n_envs=4, n_trajs=16, n_trajs_video=8, max_traj_len=100, tqdm=None):
+def viz_explorer_behavior(ge, env, agent=None, nodes_start=None, n_trajs=16, n_trajs_video=8, max_traj_len=100, tqdm=None):
+    n_envs = env.n_envs
     assert n_trajs % n_envs == 0
     assert n_trajs_video % n_envs == 0
 
-    env = make_env(n_envs, 4)
     if agent is None:
         agent = RandomExplorer(env)
 
@@ -292,6 +292,7 @@ def main(args):
 
     env = make_env(args.n_envs, args.frame_stack, device=args.device)
     env1 = make_env(1, args.frame_stack, device=args.device)
+    env_viz = make_env(8, args.frame_stack, device=args.device)
 
     ge = goexplore_discrete.GoExplore(env)
 
@@ -325,7 +326,7 @@ def main(args):
         if args.track:
             if i_step%args.freq_viz==0:
                 nodes_start = None
-                fig, video = viz_explorer_behavior(ge, agent, nodes_start, n_envs=8, n_trajs=16, n_trajs_video=8, max_traj_len=50, tqdm=None)
+                fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=16, n_trajs_video=8, max_traj_len=50, tqdm=None)
                 video = rearrange(video, 't h w c -> t c h w')
                 data['explorer analysis'] = fig
                 data['explorer video'] = wandb.Video(video, fps=15, format='gif')
