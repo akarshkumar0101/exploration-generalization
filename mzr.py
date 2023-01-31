@@ -256,22 +256,22 @@ parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
 
 # viz parameters
-parser.add_argument("--freq_viz", type=int, default=50)
-parser.add_argument("--freq_save", type=int, default=None)
+parser.add_argument("--freq_viz", type=int, default=100)
+parser.add_argument("--freq_save", type=int, default=100)
 
 # algorithm parameters
-parser.add_argument("--n_steps", type=int, default=1000)
-parser.add_argument("--n_envs", type=int, default=8)
+parser.add_argument("--n_steps", type=int, default=5000)
+parser.add_argument("--n_envs", type=int, default=32)
 parser.add_argument("--len_traj", type=int, default=100)
-parser.add_argument("--beta", type=float, default=-1.0)
+parser.add_argument("--beta", type=float, default=-0.5)
 
-parser.add_argument("--freq_learn", type=int, default=None)
-parser.add_argument("--n_nodes_dataset", type=int, default=50)
+parser.add_argument("--freq_learn", type=int, default=None) # 100
+parser.add_argument("--n_nodes_dataset", type=int, default=200)
 parser.add_argument("--beta_dataset", type=float, default=-0.5)
 parser.add_argument("--batch_size", type=int, default=2048)
-parser.add_argument("--n_steps_learn", type=int, default=30)
+parser.add_argument("--n_steps_learn", type=int, default=50)
 parser.add_argument("--coef_entropy", type=float, default=1e-2)
-parser.add_argument("--lr", type=float, default=2e-3)
+parser.add_argument("--lr", type=float, default=1e-3)
 
 parser.add_argument("--frame_stack", type=int, default=4)
 
@@ -289,6 +289,7 @@ def main(args):
 
     if args.track:
         run = wandb.init(config=args, name=args.name, save_code=True)
+    args.name = run.name
 
     env = make_env(args.n_envs, args.frame_stack, device=args.device)
     env1 = make_env(1, args.frame_stack, device=args.device)
@@ -326,28 +327,31 @@ def main(args):
         if args.track:
             if i_step%args.freq_viz==0:
                 nodes_start = None
-                fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=32, n_trajs_video=16, max_traj_len=300, tqdm=None)
+                fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=32, n_trajs_video=16, max_traj_len=300, tqdm=tqdm)
                 video = rearrange(video, '(a b) t h w c -> t (a h) (b w) c', a=4, b=4)
                 data['explorer analysis'] = wandb.Image(fig)
                 data['explorer video'] = wandb.Video(rearrange(video, 't h w c -> t c h w'), fps=15, format='gif')
 
                 data['outliers'] = wandb.Image(viz_ge_outliers(ge, env1))
 
-                for beta in [-0.5, -1.0, -1.5, -2.0]:
+                for beta in [0.0, -0.5, -1.0, -1.5]:
                     data[f'selection: {beta=}'] = wandb.Image(viz_count_distribution(ge, env1, beta=beta))
 
                 data['histogram of n_seen'] = wandb.Histogram(list(ge.cell2n_seen.values()))
                 data['histogram of len_traj'] = wandb.Histogram([node.len_traj for node in ge.cell2node.values()])
+                data['histogram of cum_rew'] = wandb.Histogram([node.cumulative_reward for node in ge.cell2node.values()])
             wandb.log(data)
             plt.close('all')
-            if args.freq_save is not None and i_step>0 and i_step%args.freq_save==0:
+            if args.track and args.freq_save is not None and i_step>0 and i_step%args.freq_save==0:
                 os.makedirs(f'data/{args.name}', exist_ok=True)
-                torch.save(ge, f'data/{args.name}/ge.pt')
+                torch.save(agent.cpu(), f'data/{args.name}/agent.pt')
+                agent = agent.to(args.device) # back to device
 
         pbar.set_postfix({k: v for k, v in data.items() if isinstance(v, int) or isinstance(v, float)})
 
     if args.track:
         run.finish()
+
     return locals()
 
 
