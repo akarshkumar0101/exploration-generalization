@@ -128,7 +128,7 @@ def viz_ge_outliers(ge, env1):
     return plt.gcf()
 
 def viz_explorer_behavior(ge, env, agent=None, nodes_start=None, n_trajs=16, n_trajs_video=8, max_traj_len=100, tqdm=None):
-    n_envs = env.n_envs
+    n_envs = env.num_envs
     assert n_trajs % n_envs == 0
     assert n_trajs_video % n_envs == 0
 
