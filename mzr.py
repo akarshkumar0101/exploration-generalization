@@ -288,7 +288,7 @@ def main(args):
     torch.manual_seed(args.seed)
 
     if args.track:
-        run = wandb.init(config=args, name=args.name, save_code=True)
+        run = wandb.init(config=args, project='mzr-goexplore', name=args.name, save_code=True)
         args.name = run.name
 
     env = make_env(args.n_envs, args.frame_stack, device=args.device)
