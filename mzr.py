@@ -289,7 +289,7 @@ def main(args):
 
     if args.track:
         run = wandb.init(config=args, name=args.name, save_code=True)
-    args.name = run.name
+        args.name = run.name
 
     env = make_env(args.n_envs, args.frame_stack, device=args.device)
     env1 = make_env(1, args.frame_stack, device=args.device)
