@@ -34,6 +34,14 @@ def generate_maze_data(n_rows=50, n_cols=50, algorithm=maze.Maze.Create.PRIM):
 
 class MazeEnv(gym.Env):
     def __init__(self, maze, path, obs_size=5, reward_sparsity=10):
+        """
+        maze, path come from generate_maze_data.
+
+        obs_size is the size of the observation window around the agent.
+
+        reward_sparsity is the number of steps between rewards,
+        if the agent is following the shortest path to the end.
+        """
         self.maze_ori = maze[1:-1, 1:-1]
         h, w = self.maze_ori.shape
         self.maze = np.full((h+obs_size*2, w+obs_size*2), fill_value=-1, dtype=np.int8)
@@ -50,11 +58,13 @@ class MazeEnv(gym.Env):
         self.yx = np.array(self.path[0]) # starting position
 
         self.reward_sparsity = reward_sparsity
-        self.reward_map = np.zeros_like(self.maze)
+        self.reward_map_original = np.zeros_like(self.maze) # grid of where the rewards are
         for y, x in self.path[1::reward_sparsity]:
-            self.reward_map[y, x] = 1
+            self.reward_map_original[y, x] = 1
+        self.reward_map = self.reward_map_original.copy()
 
     def reset(self, *args, **kwargs):
+        self.reward_map = self.reward_map_original.copy() # reset rewards
         self.yx = np.array(self.path[0]) # starting position
         y, x = self.yx
         obs = self.maze[y-self.obs_size:y+self.obs_size+1, x-self.obs_size:x+self.obs_size+1].copy()
@@ -71,7 +81,7 @@ class MazeEnv(gym.Env):
         obs[len(obs)//2, len(obs)//2] = 1 # agent
         info = {'cell': (y, x)}
         reward = self.reward_map[y, x] # get reward
-        self.reward_map[y, x] = 0 # remove reward; already got it
+        self.reward_map[y, x] = 0 # remove reward; already got reward
         terminated, truncated = (y, x)==self.path[-1], False
         return obs, reward, terminated, truncated, info
 

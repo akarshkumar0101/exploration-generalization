@@ -191,7 +191,9 @@ def run_ppo(agent, env, args, callback_fn=None):
             data['done'][:, i_step] = done
 
             with torch.no_grad():
-                action, logprob, entropy, value = agent.get_action_and_value(**obs)
+                dist, values = agent.get_dist_and_values(**obs)
+                action = dist.sample()
+                logprob, entropy = dist.log_prob(action), dist.entropy()
             obs, reward, terminated, truncated, info = env.step(action)
             done = torch.logical_or(terminated, truncated).float()
 
@@ -201,7 +203,7 @@ def run_ppo(agent, env, args, callback_fn=None):
             data['entropy'][:, i_step] = entropy
             data[  'value'][:, i_step] = value
 
-        value = agent.get_value(**obs)
+        _, value = agent.get_dist_and_values(**obs)
         advantage, return_ = calc_gae(data['reward'], data['value'], value, data['done'], done, args.gamma, args.gae_lambda)
         data['advantage'] = advantage
         data['return'] = return_
@@ -222,7 +224,9 @@ def run_ppo(agent, env, args, callback_fn=None):
                 mb_logprob = mb_data['logprob']
                 mb_action = mb_data['action']
 
-                _, mb_logprobs_new, mb_entropies_new, mb_values_new = agent.get_action_and_value(**mb_obs_items, action=mb_action.long())
+                mb_dist, mb_values_new = agent.get_dist_and_values(**mb_obs_items)
+                mb_logprobs_new = mb_dist.log_prob(mb_action)
+                mb_entropies_new = mb_dist.entropy()
 
                 logratio = mb_logprobs_new - mb_logprob
                 ratio = logratio.exp()
