@@ -326,10 +326,10 @@ def main(args):
         if args.track:
             if i_step%args.freq_viz==0:
                 nodes_start = None
-                fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=16, n_trajs_video=8, max_traj_len=50, tqdm=None)
-                video = rearrange(video, 't h w c -> t c h w')
+                fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=32, n_trajs_video=16, max_traj_len=50, tqdm=None)
+                video = rearrange(video, '(a b) t h w c -> t (a h) (b w) c', a=4, b=4)
                 data['explorer analysis'] = fig
-                data['explorer video'] = wandb.Video(video, fps=15, format='gif')
+                data['explorer video'] = wandb.Video(rearrange(video, 't h w c -> t c h w'), fps=15, format='gif')
 
                 data['outliers'] = viz_ge_outliers(ge, env1)
                 data['count dist'] = viz_count_distribution(ge, env1, beta=args.beta)
