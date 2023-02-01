@@ -10,14 +10,14 @@ class MRDomainCellInfo(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.y, self.x = 0, 0
-        self.roomx, self.roomy = 0, 0
+        self.roomx, self.roomy = 4, 3
         self.inventory = None
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
 
         self.y, self.x = self.get_agent_yx(info['obs_ori'])
-        self.roomx, self.roomy = 0, 0
+        self.roomx, self.roomy = 4, 3
         self.inventory = None
 
         self.update_info(info['obs_ori'], info)

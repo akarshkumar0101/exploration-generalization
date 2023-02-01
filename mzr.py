@@ -1,7 +1,5 @@
 import argparse
-import copy
 import os
-import pickle
 from distutils.util import strtobool
 from functools import partial
 
@@ -12,7 +10,6 @@ import numpy as np
 import torch
 import wandb
 from einops import rearrange
-from matplotlib import cm
 from torch import nn
 from tqdm.auto import tqdm
 
@@ -257,10 +254,10 @@ parser.add_argument("--device", type=str, default=None)
 
 # viz parameters
 parser.add_argument("--freq_viz", type=int, default=100)
-parser.add_argument("--freq_save", type=int, default=100)
+parser.add_argument("--freq_save", type=int, default=250)
 
 # algorithm parameters
-parser.add_argument("--n_steps", type=int, default=5000)
+parser.add_argument("--n_steps", type=int, default=1001)
 parser.add_argument("--n_envs", type=int, default=32)
 parser.add_argument("--len_traj", type=int, default=100)
 parser.add_argument("--beta", type=float, default=-0.5)
@@ -319,14 +316,16 @@ def main(args):
                               device=args.device, tqdm=tqdm, callback_fn=None)
 
         # if i_step<30 or i_step%10==0:
+        data['i_step']          = i_step
         data['unique_cells']    = len(ge.cell2node)
         data['unique_xys']      = len(set([cell[0:2] for cell in ge.cell2node]))
         data['unique_rooms']    = len(set([cell[2:4] for cell in ge.cell2node]))
         data['unique_keys']     = len(set([cell[4: ] for cell in ge.cell2node]))
         data['unique_roomkeys'] = len(set([cell[2: ] for cell in ge.cell2node]))
+        data['highest_score']   = np.max([node.cumulative_reward for node in ge.cell2node.values()])
 
         if args.track:
-            if i_step%args.freq_viz==0:
+            if i_step>0 and i_step%args.freq_viz==0:
                 nodes_start = None
                 fig, video = viz_explorer_behavior(ge, env_viz, agent, nodes_start, n_trajs=32, n_trajs_video=16, max_traj_len=300, tqdm=tqdm)
                 video = rearrange(video, '(a b) t h w c -> t (a h) (b w) c', a=4, b=4)
@@ -335,7 +334,7 @@ def main(args):
 
                 data['outliers'] = wandb.Image(viz_ge_outliers(ge, env1))
 
-                for beta in [0.0, -0.5, -1.0, -1.5]:
+                for beta in [args.beta, args.beta_dataset]:
                     data[f'selection: {beta=}'] = wandb.Image(viz_count_distribution(ge, env1, beta=beta))
 
                 data['histogram of n_seen'] = wandb.Histogram(list(ge.cell2n_seen.values()))
@@ -343,10 +342,12 @@ def main(args):
                 data['histogram of cum_rew'] = wandb.Histogram([node.cumulative_reward for node in ge.cell2node.values()])
             wandb.log(data)
             plt.close('all')
+
             if args.track and args.freq_save is not None and i_step>0 and i_step%args.freq_save==0:
                 os.makedirs(f'data/{args.name}', exist_ok=True)
                 torch.save(agent.cpu(), f'data/{args.name}/agent.pt')
                 agent = agent.to(args.device) # back to device
+                torch.save(ge, f'data/{args.name}/ge.pt')
 
         pbar.set_postfix({k: v for k, v in data.items() if isinstance(v, int) or isinstance(v, float)})
 
