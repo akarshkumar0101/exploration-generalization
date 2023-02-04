@@ -46,9 +46,9 @@ def parse_args():
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=128,
+    parser.add_argument("--num-envs", type=int, default=64,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=128,
+    parser.add_argument("--num-steps", type=int, default=256,
         help="the number of steps to run in each environment per policy rollout")
     parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggle learning rate annealing for policy and value networks")
@@ -86,7 +86,7 @@ def parse_args():
         help="coefficient of intrinsic reward")
     parser.add_argument("--int-gamma", type=float, default=0.99,
         help="Intrinsic reward discount rate")
-    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=50,
+    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=3, # TODO defualt was 50
         help="number of iterations to initialize the observations normalization parameters")
 
     args = parser.parse_args()
@@ -400,21 +400,21 @@ if __name__ == "__main__":
             target_next_feature = rnd_model.target(rnd_next_obs)
             predict_next_feature = rnd_model.predictor(rnd_next_obs)
             curiosity_rewards[step] = ((target_next_feature - predict_next_feature).pow(2).sum(1) / 2).data
-            for idx, d in enumerate(done):
-                if d and info["lives"][idx] == 0:
-                    avg_returns.append(info["r"][idx])
-                    epi_ret = np.average(avg_returns)
-                    print(
-                        f"global_step={global_step}, episodic_return={info['r'][idx]}, curiosity_reward={np.mean(curiosity_rewards[step].cpu().numpy())}"
-                    )
-                    writer.add_scalar("charts/avg_episodic_return", epi_ret, global_step)
-                    writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
-                    writer.add_scalar(
-                        "charts/episode_curiosity_reward",
-                        curiosity_rewards[step][idx],
-                        global_step,
-                    )
-                    writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
+            # for idx, d in enumerate(done):
+            #     if d and info["lives"][idx] == 0:
+            #         avg_returns.append(info["r"][idx])
+            #         epi_ret = np.average(avg_returns)
+            #         print(
+            #             f"global_step={global_step}, episodic_return={info['r'][idx]}, curiosity_reward={np.mean(curiosity_rewards[step].cpu().numpy())}"
+            #         )
+            #         writer.add_scalar("charts/avg_episodic_return", epi_ret, global_step)
+            #         writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
+            #         writer.add_scalar(
+            #             "charts/episode_curiosity_reward",
+            #             curiosity_rewards[step][idx],
+            #             global_step,
+            #         )
+            #         writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
 
         curiosity_reward_per_env = np.array(
             [discounted_reward.update(reward_per_step) for reward_per_step in curiosity_rewards.cpu().data.numpy().T]
@@ -554,6 +554,7 @@ if __name__ == "__main__":
                     break
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
+        writer.add_scalar("charts/avg_reward", rewards.mean().item(), global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
