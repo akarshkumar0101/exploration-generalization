@@ -51,7 +51,7 @@ def parse_args():
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=256,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggle learning rate annealing for policy and value networks")
     parser.add_argument("--gamma", type=float, default=0.999,
         help="the discount factor gamma")
@@ -298,7 +298,7 @@ if __name__ == "__main__":
     device = args.device
 
     # env setup
-    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=f'data/videos/{run_name}')
+    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=f'videos/{run_name}')
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -346,7 +346,7 @@ if __name__ == "__main__":
             next_ob = []
     print("End to initialize...")
 
-    for update in range(1, num_updates + 1):
+    for update in tqdm(range(1, num_updates + 1)):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
@@ -557,7 +557,6 @@ if __name__ == "__main__":
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
         writer.add_scalar("losses/fwd_loss", forward_loss.item(), global_step)
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
