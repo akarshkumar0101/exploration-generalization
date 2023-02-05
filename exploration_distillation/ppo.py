@@ -315,7 +315,8 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs, _ = envs.reset()
+    next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
@@ -323,7 +324,7 @@ if __name__ == "__main__":
     next_ob = []
     for step in tqdm(range(args.num_steps * args.num_iterations_obs_norm_init)):
         acs = np.random.randint(0, envs.single_action_space.n, size=(args.num_envs,))
-        s, r, d, _ = envs.step(acs)
+        s, r, d, _, _ = envs.step(acs)
         next_ob += s[:, 3, :, :].reshape([-1, 1, 84, 84]).tolist()
 
         if len(next_ob) % (args.num_steps * args.num_envs) == 0:
@@ -357,7 +358,7 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, done, _, info = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
             rnd_next_obs = (
