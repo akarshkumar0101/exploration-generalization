@@ -298,7 +298,7 @@ if __name__ == "__main__":
     device = args.device
 
     # env setup
-    video_folder = f'videos/{run_name}' if args.track else None
+    video_folder = f'data/videos/{run_name}' if args.track else None
     videos_old = set()
     envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=video_folder)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
@@ -543,11 +543,11 @@ if __name__ == "__main__":
             idxs = torch.randperm(len(b_obs))[:200]
             s_obs, s_actions = b_obs[idxs], b_actions[idxs]
             s_ext_val, s_int_val = b_ext_values[idxs], b_int_values[idxs]
-            os.makedirs(                f'{run_name}/update_{update:05d}/', exist_ok=True)
-            torch.save(s_obs.cpu(),     f'{run_name}/update_{update:05d}/obs.pt')
-            torch.save(s_actions.cpu(), f'{run_name}/update_{update:05d}/actions.pt')
-            torch.save(s_ext_val.cpu(), f'{run_name}/update_{update:05d}/ext_val.pt')
-            torch.save(s_int_val.cpu(), f'{run_name}/update_{update:05d}/int_val.pt')
+            os.makedirs(                f'data/{run_name}/update_{update:05d}/', exist_ok=True)
+            torch.save(s_obs.cpu(),     f'data/{run_name}/update_{update:05d}/obs.pt')
+            torch.save(s_actions.cpu(), f'data/{run_name}/update_{update:05d}/actions.pt')
+            torch.save(s_ext_val.cpu(), f'data/{run_name}/update_{update:05d}/ext_val.pt')
+            torch.save(s_int_val.cpu(), f'data/{run_name}/update_{update:05d}/int_val.pt')
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if args.track:
