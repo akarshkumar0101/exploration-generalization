@@ -5,6 +5,7 @@ import random
 import time
 from collections import deque
 from distutils.util import strtobool
+from functools import partial
 
 import cv2
 # import envpool
@@ -40,7 +41,7 @@ def parse_args():
         help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="procgen-caveflyer-v0",
+    parser.add_argument("--env-id", type=str, default="procgen-coinrun-v0",
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=32000000,
         help="total timesteps of the experiments")
@@ -58,7 +59,7 @@ def parse_args():
         help="the lambda for the general advantage estimation")
     parser.add_argument("--num-minibatches", type=int, default=4,
         help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=3,
+    parser.add_argument("--update-epochs", type=int, default=4,
         help="the K epochs to update the policy")
     parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles advantages normalization")
@@ -66,7 +67,7 @@ def parse_args():
         help="the surrogate clipping coefficient")
     parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-    parser.add_argument("--ent-coef", type=float, default=0.01,
+    parser.add_argument("--ent-coef", type=float, default=0.001,
         help="coefficient of the entropy")
     parser.add_argument("--vf-coef", type=float, default=0.5,
         help="coefficient of the value function")
@@ -249,9 +250,8 @@ def make_single_env(env_name='procgen-coinrun-v0', level_id=0, seed=0, video_fol
     return env
 
 def make_env(n_envs=10, env_name='procgen-coinrun-v0', level_id=0, video_folder=None):
-    env_fns = [lambda: make_single_env(env_name=env_name, level_id=level_id,
-                       seed=seed, video_folder=video_folder if seed==0 else None)
-               for seed in range(n_envs)]
+    env_fns = [partial(make_single_env, env_name=env_name, level_id=level_id,
+                       seed=seed, video_folder=video_folder if seed==0 else None) for seed in range(n_envs)]
     env =  gym.vector.SyncVectorEnv(env_fns)
     return env
 
