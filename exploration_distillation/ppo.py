@@ -219,13 +219,26 @@ class MyProcgenEnv(gym.Wrapper):
         self.observation_space = gym.spaces.Box(low=os.low, high=os.high, shape=os.shape, dtype=np.float32)
         self.action_space = gym.spaces.Discrete(env.action_space.n)
 
+        self.last_obs = None
+
+    def __getattr__(self, name: str):
+        if name=='render_mode':
+            return 'rgb_array'
+        return super().__getattr__(name)
+
     def reset(self, *args, **kwargs):
         obs = self.env.reset()
+        self.last_obs = obs
         return obs, {}
 
     def step(self, *args, **kwargs):
         obs, reward, done, info = self.env.step(*args, **kwargs)
+        self.last_obs = obs
         return obs, reward, done, False, info
+    
+    def render(self):
+        return self.last_obs
+
 class RescaleObservation(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
