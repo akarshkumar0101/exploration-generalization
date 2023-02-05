@@ -122,14 +122,14 @@ def calc_gae(reward, value, next_value, done, next_done, gamma=0.99, gae_lambda=
     """
     Generalized Advantage Estimation
     Inputs:
-        - reward of shape (num_envs, num_steps)
-        -  value of shape (num_envs, num_steps)
-        -  next_value of shape (num_envs, )
-        -   done of shape (num_envs, num_steps)
-        -   next_done of shape (num_envs, )
+        -     reward: (num_envs, num_steps)
+        -      value: (num_envs, num_steps)
+        - next_value: (num_envs, )
+        -       done: (num_envs, num_steps)
+        -  next_done: (num_envs, )
     Returns:
-        - advantage of shape (num_envs, num_steps)
-        -    return of shape (num_envs, num_steps)
+        -  advantage: (num_envs, num_steps)
+        -     return: (num_envs, num_steps)
     """
     # bootstrap value if not done
     num_envs, num_steps = reward.shape

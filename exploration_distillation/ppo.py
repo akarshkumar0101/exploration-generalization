@@ -40,9 +40,9 @@ def parse_args():
         help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MontezumaRevenge-v5",
+    parser.add_argument("--env-id", type=str, default="procgen-caveflyer-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=2000000000,
+    parser.add_argument("--total-timesteps", type=int, default=32000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
@@ -58,7 +58,7 @@ def parse_args():
         help="the lambda for the general advantage estimation")
     parser.add_argument("--num-minibatches", type=int, default=4,
         help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=4,
+    parser.add_argument("--update-epochs", type=int, default=3,
         help="the K epochs to update the policy")
     parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles advantages normalization")
@@ -66,7 +66,7 @@ def parse_args():
         help="the surrogate clipping coefficient")
     parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-    parser.add_argument("--ent-coef", type=float, default=0.001,
+    parser.add_argument("--ent-coef", type=float, default=0.01,
         help="coefficient of the entropy")
     parser.add_argument("--vf-coef", type=float, default=0.5,
         help="coefficient of the value function")
@@ -74,8 +74,6 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
-    parser.add_argument("--sticky-action", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, sticky action will be used")
 
     # RND arguments
     parser.add_argument("--update-proportion", type=float, default=0.25,
@@ -86,7 +84,7 @@ def parse_args():
         help="coefficient of intrinsic reward")
     parser.add_argument("--int-gamma", type=float, default=0.99,
         help="Intrinsic reward discount rate")
-    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=3, # TODO defualt was 50
+    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=1, # TODO defualt was 50
         help="number of iterations to initialize the observations normalization parameters")
 
     args = parser.parse_args()
@@ -94,35 +92,6 @@ def parse_args():
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     # fmt: on
     return args
-
-
-class RecordEpisodeStatistics(gym.Wrapper):
-    def __init__(self, env, deque_size=100):
-        super().__init__(env)
-        self.num_envs = getattr(env, "num_envs", 1)
-        self.episode_returns = None
-        self.episode_lengths = None
-
-    def reset(self, **kwargs):
-        observations = super().reset(**kwargs)
-        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        self.lives = np.zeros(self.num_envs, dtype=np.int32)
-        self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        return observations
-
-    def step(self, action):
-        observations, rewards, dones, infos = super().step(action)
-        self.episode_returns += rewards
-        self.episode_lengths += 1
-        self.returned_episode_returns[:] = self.episode_returns
-        self.returned_episode_lengths[:] = self.episode_lengths
-        self.episode_returns *= 1 - dones
-        self.episode_lengths *= 1 - dones
-        infos["r"] = self.returned_episode_returns
-        infos["l"] = self.returned_episode_lengths
-        return observations, rewards, dones, infos
 
 
 # ALGO LOGIC: initialize agent here:
@@ -238,51 +207,52 @@ class RewardForwardFilter:
             self.rewems = self.rewems * self.gamma + rews
         return self.rewems
 
+import gym as gym_old
+import gymnasium as gym
+
+
 class MyProcgenEnv(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(84, 84), dtype=np.float32)
-    def process_obs(self, obs):
-        obs = cv2.resize(obs, (84, 84), interpolation=cv2.INTER_AREA)
-        obs = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)
-        obs = obs.astype(np.float32)/255.
-        return obs
+        os = env.observation_space
+        self.observation_space = gym.spaces.Box(low=os.low, high=os.high, shape=os.shape, dtype=np.float32)
+        self.action_space = gym.spaces.Discrete(env.action_space.n)
 
     def reset(self, *args, **kwargs):
-        obs = self.env.reset(*args, **kwargs)
-        obs = self.process_obs(obs)
-        return obs
+        obs = self.env.reset()
+        return obs, {}
 
     def step(self, *args, **kwargs):
         obs, reward, done, info = self.env.step(*args, **kwargs)
-        obs = self.process_obs(obs)
-        return obs, reward, done, info
+        return obs, reward, done, False, info
+class RescaleObservation(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        os = env.observation_space
+        self.observation_space = gym.spaces.Box(low=os.low, high=os.high/255., shape=os.shape, dtype=np.float32)
+    def observation(self, obs):
+        return obs/255.
 
-class DictListInfo(gym.Wrapper):
-    def listdict2dictlist(self, listdict):
-        data = {}
-        for k in listdict[0]:
-            if k=='terminal_observation':
-                continue
-            data[k] = [dic[k] for dic in listdict]
-            if isinstance(listdict[0][k], int) or isinstance(listdict[0][k], float) or isinstance(listdict[0][k], np.ndarray):
-                data[k] = np.asarray(data[k])
-        return data
-
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        return obs, reward, done, self.listdict2dictlist(info)
-
-def make_single_env(env_name='procgen-coinrun-v0', seed=0):
-    env = gym.make(env_name, num_levels=1, start_level=seed)
+def make_single_env(env_name='procgen-coinrun-v0', level_id=0, seed=0, video_folder=None):
+    env = gym_old.make(env_name, num_levels=1, start_level=level_id)
     env = MyProcgenEnv(env)
+    if video_folder is not None:
+        env = gym.wrappers.RecordVideo(env, video_folder)
+    env = gym.wrappers.ResizeObservation(env, (84, 84))
+    env = gym.wrappers.GrayScaleObservation(env)
+    # env = gym.wrappers.NormalizeObservation(env)
+    env = RescaleObservation(env)
     env = gym.wrappers.FrameStack(env, 4)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env.observation_space.seed(seed)
+    env.action_space.seed(seed)
     return env
 
-def make_env(n_envs=10, env_name='procgen-coinrun-v0', seed=0):
-    env_fn = lambda: make_single_env(env_name=env_name, seed=seed)
-    env =  gym.vector.AsyncVectorEnv([env_fn for _ in range(n_envs)])
-    env = DictListInfo(env)
+def make_env(n_envs=10, env_name='procgen-coinrun-v0', level_id=0, video_folder=None):
+    env_fns = [lambda: make_single_env(env_name=env_name, level_id=level_id,
+                       seed=seed, video_folder=video_folder if seed==0 else None)
+               for seed in range(n_envs)]
+    env =  gym.vector.SyncVectorEnv(env_fns)
     return env
 
 if __name__ == "__main__":
@@ -315,8 +285,7 @@ if __name__ == "__main__":
     device = args.device
 
     # env setup
-    envs = make_env(args.num_envs, )
-    envs = RecordEpisodeStatistics(envs)
+    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=f'data/videos/{run_name}')
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -467,6 +436,7 @@ if __name__ == "__main__":
         b_ext_returns = ext_returns.reshape(-1)
         b_int_returns = int_returns.reshape(-1)
         b_ext_values = ext_values.reshape(-1)
+        b_int_values = int_values.reshape(-1)
 
         b_advantages = b_int_advantages * args.int_coef + b_ext_advantages * args.ext_coef
 
@@ -552,6 +522,16 @@ if __name__ == "__main__":
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
+        if args.track and update%20==0:
+            # write 200
+            idxs = torch.randperm(len(b_obs))[:200]
+            s_obs, s_actions = b_obs[idxs], b_actions[idxs]
+            s_ext_val, s_int_val = b_ext_values[idxs], b_int_values[idxs]
+            os.makedirs(                f'{run_name}/update_{update:05d}/', exist_ok=True)
+            torch.save(s_obs.cpu(),     f'{run_name}/update_{update:05d}/obs.pt')
+            torch.save(s_actions.cpu(), f'{run_name}/update_{update:05d}/actions.pt')
+            torch.save(s_ext_val.cpu(), f'{run_name}/update_{update:05d}/ext_val.pt')
+            torch.save(s_int_val.cpu(), f'{run_name}/update_{update:05d}/int_val.pt')
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/avg_reward", rewards.mean().item(), global_step)
