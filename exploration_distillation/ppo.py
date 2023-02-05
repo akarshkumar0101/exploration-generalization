@@ -566,7 +566,7 @@ if __name__ == "__main__":
 
             videos_new = [f for f in os.listdir(video_folder) if f.endswith('.mp4') and f not in videos_old]
             if len(videos_new) > 0:
-                data['video'] = wandb.Video(videos_new[0], fps=15)
+                data['video'] = wandb.Video(video_folder+'/'+videos_new[0], fps=15)
             videos_old = {f for f in os.listdir(video_folder) if f.endswith('.mp4')}
 
             wandb.log(data)
