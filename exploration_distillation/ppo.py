@@ -298,7 +298,9 @@ if __name__ == "__main__":
     device = args.device
 
     # env setup
-    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=f'videos/{run_name}')
+    video_folder = f'videos/{run_name}' if args.track else None
+    videos_old = set()
+    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=video_folder)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -548,16 +550,26 @@ if __name__ == "__main__":
             torch.save(s_int_val.cpu(), f'{run_name}/update_{update:05d}/int_val.pt')
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/avg_reward", rewards.mean().item(), global_step)
-        writer.add_scalar("charts/avg_int_reward", curiosity_rewards.mean().item(), global_step)
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/fwd_loss", forward_loss.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        if args.track:
+            data = dict(global_step=global_step)
+            data['charts/avg_reward'] = rewards.mean().item()
+            data['charts/avg_int_reward'] = curiosity_rewards.mean().item()
+            data['charts/learning_rate'] = optimizer.param_groups[0]["lr"]
+            data['losses/value_loss'] = v_loss.item()
+            data['losses/policy_loss'] = pg_loss.item()
+            data['losses/entropy'] = entropy_loss.item()
+            data['losses/old_approx_kl'] = old_approx_kl.item()
+            data['losses/fwd_loss'] = forward_loss.item()
+            data['losses/clipfrac'] = np.mean(clipfracs)
+            data['charts/SPS'] = int(global_step) / (time.time() - start_time)
+
+
+            videos_new = [f for f in os.listdir(video_folder) if f.endswith('.mp4') and f not in videos_old]
+            if len(videos_new) > 0:
+                data['video'] = wandb.Video(videos_new[0], fps=15)
+            videos_old = {f for f in os.listdir(video_folder) if f.endswith('.mp4')}
+
+            wandb.log(data)
 
     envs.close()
     writer.close()
