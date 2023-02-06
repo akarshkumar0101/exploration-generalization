@@ -21,13 +21,15 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
+import bc
+
 
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
+    parser.add_argument("--name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
+    parser.add_argument("--seed", type=int, default=0,
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -41,9 +43,12 @@ def parse_args():
         help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="procgen-coinrun-v0",
+    parser.add_argument("--pretrain_levels", type=int, default=None)
+    parser.add_argument("--env", type=str, default="procgen-miner-v0",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=32000000,
+    parser.add_argument("--level", type=int, default=0,
+        help="seed of the experiment")
+    parser.add_argument("--total-timesteps", type=int, default=20000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
@@ -268,9 +273,27 @@ def make_env(n_envs=10, env_name='procgen-coinrun-v0', level_id=0, video_folder=
     env =  gym.vector.SyncVectorEnv(env_fns)
     return env
 
+def pretrain_agent(args, agent):
+    x_train, y_train = [], []
+    for i_seed in range(args.fjweiaofjewoajfiweaji):
+        exp_dir = f"data/{args.env}__{args.name}__{i_seed}/"
+        for f in os.listdir(exp_dir):
+            obs = torch.load(f'{exp_dir}/{f}/obs.pt')
+            actions = torch.load(f'{exp_dir}/{f}/actions.pt')
+            x_train.append(obs)
+            y_train.append(actions)
+            # ext_val = torch.load(f'{exp_dir}/{f}/ext_val.pt')
+            # int_val = torch.load(f'{exp_dir}/{f}/int_val.pt')
+    x_train = torch.cat(x_train, dim=0)
+    y_train = torch.cat(y_train, dim=0)
+    bc.train_bc_agent(agent, x_train, y_train,
+                      batch_size=2048, n_steps=100, lr=1e-3, coef_entropy=0.1,
+                      device=args.device, tqdm=tqdm)
+
 if __name__ == "__main__":
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.env}_{args.name}_{args.level}_{args.seed}"
+
     if args.track:
         import wandb
 
@@ -300,7 +323,7 @@ if __name__ == "__main__":
     # env setup
     video_folder = f'data/videos/{run_name}' if args.track else None
     videos_old = set()
-    envs = make_env(args.num_envs, env_name=args.env_id, level_id=args.seed, video_folder=video_folder)
+    envs = make_env(args.num_envs, env_name=args.env, level_id=args.level, video_folder=video_folder)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -538,7 +561,7 @@ if __name__ == "__main__":
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
-        if args.track and update%20==0:
+        if args.track and update%10==0:
             # write 200
             idxs = torch.randperm(len(b_obs))[:200]
             s_obs, s_actions = b_obs[idxs], b_actions[idxs]
