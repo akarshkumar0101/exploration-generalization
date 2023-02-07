@@ -43,7 +43,8 @@ def parse_args():
         help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--pretrain_levels", type=int, default=None)
+    parser.add_argument("--pretrain-levels", type=int, default=None)
+    parser.add_argument("--pretrain-type", type=str, default='int')
     parser.add_argument("--env", type=str, default="procgen-miner-v0",
         help="the id of the environment")
     parser.add_argument("--level", type=int, default=0,
@@ -131,9 +132,16 @@ class Agent(nn.Module):
         )
         self.critic_ext = layer_init(nn.Linear(448, 1), std=0.01)
         self.critic_int = layer_init(nn.Linear(448, 1), std=0.01)
+        
+    def get_dist_and_values(self, x):
+        hidden = self.network(x / 255.0)
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        features = self.extra_layer(hidden)
+        return probs, None
 
     def get_action_and_value(self, x, action=None):
-        hidden = self.network(x / 255.0)
+        hidden = self.network(x / 255.0) # TODO: you already do this...
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         features = self.extra_layer(hidden)
@@ -273,22 +281,26 @@ def make_env(n_envs=10, env_name='procgen-coinrun-v0', level_id=0, video_folder=
     env =  gym.vector.SyncVectorEnv(env_fns)
     return env
 
-def pretrain_agent(args, agent):
+def load_prev_data(args):
     x_train, y_train = [], []
-    for i_seed in range(args.fjweiaofjewoajfiweaji):
-        exp_dir = f"data/{args.env}__{args.name}__{i_seed}/"
-        for f in os.listdir(exp_dir):
+    print(f'Loading {args.pretrain_levels} {args.pretrain_type} levels of data')
+    for level in tqdm(range(args.pretrain_levels)):
+        exp_dir = f"data/{args.env}_{args.pretrain_type}_{level}_0/"
+        fs = np.array(os.listdir(exp_dir))
+        fs = np.sort(fs)
+        fs = fs[len(fs)//2:]
+        fs = fs[np.random.permutation(len(fs))[:12]]
+        for f in fs:
             obs = torch.load(f'{exp_dir}/{f}/obs.pt')
             actions = torch.load(f'{exp_dir}/{f}/actions.pt')
-            x_train.append(obs)
-            y_train.append(actions)
             # ext_val = torch.load(f'{exp_dir}/{f}/ext_val.pt')
             # int_val = torch.load(f'{exp_dir}/{f}/int_val.pt')
+            x_train.append(obs)
+            y_train.append(actions)
     x_train = torch.cat(x_train, dim=0)
     y_train = torch.cat(y_train, dim=0)
-    bc.train_bc_agent(agent, x_train, y_train,
-                      batch_size=2048, n_steps=100, lr=1e-3, coef_entropy=0.1,
-                      device=args.device, tqdm=tqdm)
+    # should be about 10 gigs of data
+    return x_train, y_train
 
 if __name__ == "__main__":
     args = parse_args()
@@ -334,6 +346,25 @@ if __name__ == "__main__":
         lr=args.learning_rate,
         eps=1e-5,
     )
+    
+    # pretrain agent
+    if args.pretrain_levels is not None:
+        x_train, y_train = load_prev_data(args)
+        losses = []
+        print('Starting pretraining')
+        bc.train_bc_agent(agent, x_train, y_train, 1028, 10000, 1e-3, 0.0, device=args.device, tqdm=tqdm,
+                          callback_fn=lambda loss, **kwargs: losses.append(loss.item()))
+        print('Done pretraining')
+        plt.plot(losses)
+        if args.track:
+            wandb.log(dict(pretraining_loss=wandb.Image(plt.gcf())))
+        
+        del x_train, y_train
+        del losses
+    # three timepoints
+    # pretraining type
+    # num of new envs
+    
 
     reward_rms = RunningMeanStd()
     obs_rms = RunningMeanStd(shape=(1, 1, 84, 84))
