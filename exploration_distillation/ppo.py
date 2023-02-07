@@ -21,6 +21,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
+import matplotlib.pyplot as plt
+
 import bc
 
 
@@ -358,6 +360,7 @@ if __name__ == "__main__":
         plt.plot(losses)
         if args.track:
             wandb.log(dict(pretraining_loss=wandb.Image(plt.gcf())))
+        plt.close('all')
         
         del x_train, y_train
         del losses
