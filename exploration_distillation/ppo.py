@@ -10,6 +10,7 @@ from functools import partial
 import cv2
 # import envpool
 import gym
+import matplotlib.pyplot as plt
 import numpy as np
 import procgen
 import torch
@@ -20,8 +21,6 @@ from gym.wrappers.normalize import RunningMeanStd
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
-
-import matplotlib.pyplot as plt
 
 import bc
 
