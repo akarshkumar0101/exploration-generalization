@@ -10,71 +10,112 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-# taken from https://github.com/AIcrowd/neurips2020-procgen-starter-kit/blob/142d09586d2272a17f44481a115c4bd817cf6a94/models/impala_cnn_torch.py
-class ResidualBlock(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.conv0 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)
-        self.conv1 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)
-
-    def forward(self, x):
-        inputs = x
-        x = nn.functional.relu(x)
-        x = self.conv0(x)
-        x = nn.functional.relu(x)
-        x = self.conv1(x)
-        return x + inputs
-
-
-class ConvSequence(nn.Module):
-    def __init__(self, input_shape, out_channels):
-        super().__init__()
-        self._input_shape = input_shape
-        self._out_channels = out_channels
-        self.conv = nn.Conv2d(in_channels=self._input_shape[0], out_channels=self._out_channels, kernel_size=3, padding=1)
-        self.res_block0 = ResidualBlock(self._out_channels)
-        self.res_block1 = ResidualBlock(self._out_channels)
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = nn.functional.max_pool2d(x, kernel_size=3, stride=2, padding=1)
-        x = self.res_block0(x)
-        x = self.res_block1(x)
-        assert x.shape[1:] == self.get_output_shape()
-        return x
-
-    def get_output_shape(self):
-        _c, h, w = self._input_shape
-        return (self._out_channels, (h + 1) // 2, (w + 1) // 2)
-
-
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, env):
         super().__init__()
-        h, w, c = envs.single_observation_space.shape
-        shape = (c, h, w)
-        conv_seqs = []
-        for out_channels in [16, 32, 32]:
-            conv_seq = ConvSequence(shape, out_channels)
-            shape = conv_seq.get_output_shape()
-            conv_seqs.append(conv_seq)
-        conv_seqs += [
+        fs, h, w, c = env.single_observation_space.shape
+        self.preprocess = lambda x: rearrange(x, 'b fs h w c -> b (fs c) h w').float()/128.-1. # [0, 255] -> [-1, 1]
+        
+        self.network = nn.Sequential(
+            layer_init(nn.Conv2d(fs*c, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
             nn.Flatten(),
+            layer_init(nn.Linear(64*4*4, 256)),
             nn.ReLU(),
-            nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=256),
+            layer_init(nn.Linear(256, 256)),
             nn.ReLU(),
-        ]
-        self.network = nn.Sequential(*conv_seqs)
-        self.actor = layer_init(nn.Linear(256, envs.single_action_space.n), std=0.01)
-        self.critic = layer_init(nn.Linear(256, 1), std=1)
+        )
+        
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(256, 128), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(128, env.single_action_space.n), std=0.01),
+        )
+        self.critic_ext = nn.Sequential(
+            layer_init(nn.Linear(256, 32), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(32, 1), std=0.01),
+        )
+        self.critic_int = nn.Sequential(
+            layer_init(nn.Linear(256, 32), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(32, 1), std=0.01),
+        )
+    
 
     def get_value(self, x):
-        return self.critic(self.network(x.permute((0, 3, 1, 2)) / 255.0))  # "bhwc" -> "bchw"
+        x = self.network(self.preprocess(x))
+        return self.critic_ext(x), self.critic_int(x)
 
     def get_action_and_value(self, x, action=None):
-        hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
-        logits = self.actor(hidden)
-        probs = Categorical(logits=logits)
+        x = self.network(self.preprocess(x))
+        logits = self.actor(x)
+        probs = torch.distributions.Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
+        return action, probs.log_prob(action), probs.entropy(), self.critic_ext(x), self.critic_int(x)
+
+class RNDModel(nn.Module):
+    def __init__(self, env, rnd_obs_shape=(64, 64, 3)):
+        super().__init__()
+        
+        h, w, c = rnd_obs_shape
+        self.obs_rms = gym.wrappers.normalize.RunningMeanStd(shape=rnd_obs_shape)
+
+        # Prediction network
+        self.predictor = nn.Sequential(
+            layer_init(nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64*4*4, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512)),
+        )
+
+        # Target network
+        self.target = nn.Sequential(
+            layer_init(nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64*4*4, 512)),
+        )
+
+        # target network is not trainable
+        for param in self.target.parameters():
+            param.requires_grad = False
+        
+    def update(self, x):
+        # x.shape is b, fs, h, w, c
+        assert isinstance(x, np.ndarray)
+        self.obs_rms.update(x[:, -1])
+    
+    def preprocess(self, x):
+        # x.shape is b, fs, h, w, c
+        assert isinstance(x, torch.Tensor)
+        x = x[:, -1] # get only last frame
+        mean = torch.from_numpy(self.obs_rms.mean).to(x)
+        var = torch.from_numpy(self.obs_rms.var).to(x)
+        x = (x.float()-mean)/var.sqrt()
+        x = x.clip(-5., 5.)
+        x = rearrange(x, 'b h w c -> b c h w')
+        return x
+
+    def forward(self, x):
+        x = self.preprocess(x)
+        target_feature = self.target(x)
+        predict_feature = self.predictor(x)
+        return predict_feature, target_feature
