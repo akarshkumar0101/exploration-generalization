@@ -2,6 +2,9 @@ import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Categorical
+import gymnasium as gym
+
+from einops import rearrange
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
