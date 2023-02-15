@@ -6,8 +6,7 @@ import time
 from collections import deque
 from distutils.util import strtobool
 
-import envpool
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -16,6 +15,7 @@ import torch.optim as optim
 from gym.wrappers.normalize import RunningMeanStd
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import tqdm
 
 
 def parse_args():
@@ -37,33 +37,33 @@ def parse_args():
         help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MontezumaRevenge-v5",
+    parser.add_argument("--env-id", type=str, default="something",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=2000000000,
+    parser.add_argument("--total-timesteps", type=int, default=1000000,
         help="total timesteps of the experiments")
-    parser.add_argument("--learning-rate", type=float, default=1e-4,
+    parser.add_argument("--learning-rate", type=float, default=5e-4,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=128,
+    parser.add_argument("--num-envs", type=int, default=64,
         help="the number of parallel game environments")
-    parser.add_argument("--num-steps", type=int, default=128,
+    parser.add_argument("--num-steps", type=int, default=256,
         help="the number of steps to run in each environment per policy rollout")
-    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggle learning rate annealing for policy and value networks")
     parser.add_argument("--gamma", type=float, default=0.999,
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
         help="the lambda for the general advantage estimation")
-    parser.add_argument("--num-minibatches", type=int, default=4,
+    parser.add_argument("--num-minibatches", type=int, default=16,
         help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=4,
+    parser.add_argument("--update-epochs", type=int, default=1,
         help="the K epochs to update the policy")
     parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles advantages normalization")
-    parser.add_argument("--clip-coef", type=float, default=0.1,
+    parser.add_argument("--clip-coef", type=float, default=0.2,
         help="the surrogate clipping coefficient")
     parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-    parser.add_argument("--ent-coef", type=float, default=0.001,
+    parser.add_argument("--ent-coef", type=float, default=0.01,
         help="coefficient of the entropy")
     parser.add_argument("--vf-coef", type=float, default=0.5,
         help="coefficient of the value function")
@@ -71,8 +71,6 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
-    parser.add_argument("--sticky-action", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, sticky action will be used")
 
     # RND arguments
     parser.add_argument("--update-proportion", type=float, default=0.25,
@@ -83,150 +81,9 @@ def parse_args():
         help="coefficient of intrinsic reward")
     parser.add_argument("--int-gamma", type=float, default=0.99,
         help="Intrinsic reward discount rate")
-    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=50,
+    parser.add_argument("--num-iterations-obs-norm-init", type=int, default=2,
         help="number of iterations to initialize the observations normalization parameters")
-
-    args = parser.parse_args()
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    # fmt: on
-    return args
-
-
-class RecordEpisodeStatistics(gym.Wrapper):
-    def __init__(self, env, deque_size=100):
-        super().__init__(env)
-        self.num_envs = getattr(env, "num_envs", 1)
-        self.episode_returns = None
-        self.episode_lengths = None
-
-    def reset(self, **kwargs):
-        observations = super().reset(**kwargs)
-        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        self.lives = np.zeros(self.num_envs, dtype=np.int32)
-        self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        return observations
-
-    def step(self, action):
-        observations, rewards, dones, infos = super().step(action)
-        self.episode_returns += infos["reward"]
-        self.episode_lengths += 1
-        self.returned_episode_returns[:] = self.episode_returns
-        self.returned_episode_lengths[:] = self.episode_lengths
-        self.episode_returns *= 1 - infos["terminated"]
-        self.episode_lengths *= 1 - infos["terminated"]
-        infos["r"] = self.returned_episode_returns
-        infos["l"] = self.returned_episode_lengths
-        return (
-            observations,
-            rewards,
-            dones,
-            infos,
-        )
-
-
-# ALGO LOGIC: initialize agent here:
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-class Agent(nn.Module):
-    def __init__(self, envs):
-        super().__init__()
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 256)),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 448)),
-            nn.ReLU(),
-        )
-        self.extra_layer = nn.Sequential(layer_init(nn.Linear(448, 448), std=0.1), nn.ReLU())
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(448, 448), std=0.01),
-            nn.ReLU(),
-            layer_init(nn.Linear(448, envs.single_action_space.n), std=0.01),
-        )
-        self.critic_ext = layer_init(nn.Linear(448, 1), std=0.01)
-        self.critic_int = layer_init(nn.Linear(448, 1), std=0.01)
-
-    def get_action_and_value(self, x, action=None):
-        hidden = self.network(x / 255.0)
-        logits = self.actor(hidden)
-        probs = Categorical(logits=logits)
-        features = self.extra_layer(hidden)
-        if action is None:
-            action = probs.sample()
-        return (
-            action,
-            probs.log_prob(action),
-            probs.entropy(),
-            self.critic_ext(features + hidden),
-            self.critic_int(features + hidden),
-        )
-
-    def get_value(self, x):
-        hidden = self.network(x / 255.0)
-        features = self.extra_layer(hidden)
-        return self.critic_ext(features + hidden), self.critic_int(features + hidden)
-
-
-class RNDModel(nn.Module):
-    def __init__(self, input_size, output_size):
-        super().__init__()
-
-        self.input_size = input_size
-        self.output_size = output_size
-
-        feature_output = 7 * 7 * 64
-
-        # Prediction network
-        self.predictor = nn.Sequential(
-            layer_init(nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4)),
-            nn.LeakyReLU(),
-            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
-            nn.LeakyReLU(),
-            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
-            nn.LeakyReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(feature_output, 512)),
-            nn.ReLU(),
-            layer_init(nn.Linear(512, 512)),
-            nn.ReLU(),
-            layer_init(nn.Linear(512, 512)),
-        )
-
-        # Target network
-        self.target = nn.Sequential(
-            layer_init(nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4)),
-            nn.LeakyReLU(),
-            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
-            nn.LeakyReLU(),
-            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
-            nn.LeakyReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(feature_output, 512)),
-        )
-
-        # target network is not trainable
-        for param in self.target.parameters():
-            param.requires_grad = False
-
-    def forward(self, next_obs):
-        target_feature = self.target(next_obs)
-        predict_feature = self.predictor(next_obs)
-
-        return predict_feature, target_feature
-
+    return parser
 
 class RewardForwardFilter:
     def __init__(self, gamma):
@@ -241,8 +98,11 @@ class RewardForwardFilter:
         return self.rewems
 
 
-if __name__ == "__main__":
-    args = parse_args()
+def run(agent, rnd_model, envs, args, callback_fn=None):
+    args.num_envs = envs.num_envs
+    args.batch_size = int(args.num_envs * args.num_steps)
+    args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -256,11 +116,11 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    # writer = SummaryWriter(f"runs/{run_name}")
+    # writer.add_text(
+    #     "hyperparameters",
+    #     "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    # )
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -269,25 +129,13 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print(f'Using device {device}')
 
     # env setup
-    envs = envpool.make(
-        args.env_id,
-        env_type="gym",
-        num_envs=args.num_envs,
-        episodic_life=True,
-        reward_clip=True,
-        seed=args.seed,
-        repeat_action_probability=0.25,
-    )
-    envs.num_envs = args.num_envs
-    envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space
-    envs = RecordEpisodeStatistics(envs)
-    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs).to(device)
-    rnd_model = RNDModel(4, envs.single_action_space.n).to(device)
+    agent = agent.to(device)
+    rnd_model = rnd_model.to(device)
     combined_parameters = list(agent.parameters()) + list(rnd_model.predictor.parameters())
     optimizer = optim.Adam(
         combined_parameters,
@@ -296,7 +144,6 @@ if __name__ == "__main__":
     )
 
     reward_rms = RunningMeanStd()
-    obs_rms = RunningMeanStd(shape=(1, 1, 84, 84))
     discounted_reward = RewardForwardFilter(args.int_gamma)
 
     # ALGO Logic: Storage setup
@@ -313,24 +160,19 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    next_obs, _ = envs.reset()
+    next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
     print("Start to initialize observation normalization parameter.....")
-    next_ob = []
-    for step in range(args.num_steps * args.num_iterations_obs_norm_init):
-        acs = np.random.randint(0, envs.single_action_space.n, size=(args.num_envs,))
-        s, r, d, _ = envs.step(acs)
-        next_ob += s[:, 3, :, :].reshape([-1, 1, 84, 84]).tolist()
-
-        if len(next_ob) % (args.num_steps * args.num_envs) == 0:
-            next_ob = np.stack(next_ob)
-            obs_rms.update(next_ob)
-            next_ob = []
+    # for step in tqdm(range(args.num_steps * args.num_iterations_obs_norm_init)):
+    for step in tqdm(range(10)):
+        o, _, _, _, _ = envs.step(envs.action_space.sample())
+        rnd_model.update(o)
     print("End to initialize...")
 
-    for update in range(1, num_updates + 1):
+    for update in tqdm(range(1, num_updates + 1)):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
@@ -355,33 +197,27 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
+            done = np.logical_or(term, trunc)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-            rnd_next_obs = (
-                (
-                    (next_obs[:, 3, :, :].reshape(args.num_envs, 1, 84, 84) - torch.from_numpy(obs_rms.mean).to(device))
-                    / torch.sqrt(torch.from_numpy(obs_rms.var).to(device))
-                ).clip(-5, 5)
-            ).float()
-            target_next_feature = rnd_model.target(rnd_next_obs)
-            predict_next_feature = rnd_model.predictor(rnd_next_obs)
+            predict_next_feature, target_next_feature = rnd_model(next_obs)
             curiosity_rewards[step] = ((target_next_feature - predict_next_feature).pow(2).sum(1) / 2).data
-            for idx, d in enumerate(done):
-                if d and info["lives"][idx] == 0:
-                    avg_returns.append(info["r"][idx])
-                    epi_ret = np.average(avg_returns)
-                    print(
-                        f"global_step={global_step}, episodic_return={info['r'][idx]}, curiosity_reward={np.mean(curiosity_rewards[step].cpu().numpy())}"
-                    )
-                    writer.add_scalar("charts/avg_episodic_return", epi_ret, global_step)
-                    writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
-                    writer.add_scalar(
-                        "charts/episode_curiosity_reward",
-                        curiosity_rewards[step][idx],
-                        global_step,
-                    )
-                    writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
+            # for idx, d in enumerate(done):
+            #     if d and info["lives"][idx] == 0:
+            #         avg_returns.append(info["r"][idx])
+            #         epi_ret = np.average(avg_returns)
+            #         print(
+            #             f"global_step={global_step}, episodic_return={info['r'][idx]}, curiosity_reward={np.mean(curiosity_rewards[step].cpu().numpy())}"
+            #         )
+            #         writer.add_scalar("charts/avg_episodic_return", epi_ret, global_step)
+            #         writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
+            #         writer.add_scalar(
+            #             "charts/episode_curiosity_reward",
+            #             curiosity_rewards[step][idx],
+            #             global_step,
+            #         )
+            #         writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
 
         curiosity_reward_per_env = np.array(
             [discounted_reward.update(reward_per_step) for reward_per_step in curiosity_rewards.cpu().data.numpy().T]
@@ -437,17 +273,17 @@ if __name__ == "__main__":
 
         b_advantages = b_int_advantages * args.int_coef + b_ext_advantages * args.ext_coef
 
-        obs_rms.update(b_obs[:, 3, :, :].reshape(-1, 1, 84, 84).cpu().numpy())
+        rnd_model.update(b_obs.cpu().numpy())
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
 
-        rnd_next_obs = (
-            (
-                (b_obs[:, 3, :, :].reshape(-1, 1, 84, 84) - torch.from_numpy(obs_rms.mean).to(device))
-                / torch.sqrt(torch.from_numpy(obs_rms.var).to(device))
-            ).clip(-5, 5)
-        ).float()
+        # rnd_next_obs = (
+        #     (
+        #         (b_obs[:, 3, :, :].reshape(-1, 1, 84, 84) - torch.from_numpy(obs_rms.mean).to(device))
+        #         / torch.sqrt(torch.from_numpy(obs_rms.var).to(device))
+        #     ).clip(-5, 5)
+        # ).float()
 
         clipfracs = []
         for epoch in range(args.update_epochs):
@@ -455,8 +291,8 @@ if __name__ == "__main__":
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
-
-                predict_next_state_feature, target_next_state_feature = rnd_model(rnd_next_obs[mb_inds])
+                
+                predict_next_state_feature, target_next_state_feature = rnd_model(b_obs[mb_inds])
                 forward_loss = F.mse_loss(
                     predict_next_state_feature, target_next_state_feature.detach(), reduction="none"
                 ).mean(-1)
@@ -519,17 +355,20 @@ if __name__ == "__main__":
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
-
+                    
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/fwd_loss", forward_loss.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        # writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+        # writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
+        # writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        # writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+        # writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+        # writer.add_scalar("losses/fwd_loss", forward_loss.item(), global_step)
+        # writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+        # print("SPS:", int(global_step / (time.time() - start_time)))
+        # writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        sps = int(global_step / (time.time() - start_time))
+        if callback_fn is not None:
+            callback_fn(**locals())
 
-    envs.close()
-    writer.close()
+    # envs.close()
+    # writer.close()
