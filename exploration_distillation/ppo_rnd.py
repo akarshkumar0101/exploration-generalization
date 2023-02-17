@@ -23,15 +23,16 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
+    parser.add_argument("--seed", type=int, default=0,
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
+    parser.add_argument("--device", type=str, default='cpu', help="device to run on")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--wandb-project-name", type=str, default="fixed_ppo_rnd",
         help="the wandb's project name")
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")
@@ -103,19 +104,6 @@ def run(agent, rnd_model, envs, args, callback_fn=None):
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
     # writer = SummaryWriter(f"runs/{run_name}")
     # writer.add_text(
     #     "hyperparameters",
@@ -128,7 +116,8 @@ def run(agent, rnd_model, envs, args, callback_fn=None):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = args.device
     print(f'Using device {device}')
 
     # env setup
@@ -220,14 +209,16 @@ def run(agent, rnd_model, envs, args, callback_fn=None):
             #         writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
 
         curiosity_reward_per_env = np.array(
-            [discounted_reward.update(reward_per_step) for reward_per_step in curiosity_rewards.cpu().data.numpy().T]
+            # [discounted_reward.update(reward_per_step) for reward_per_step in curiosity_rewards.cpu().data.numpy().T]
+            [discounted_reward.update(reward_per_step) for reward_per_step in curiosity_rewards.cpu().data.numpy()]
         )
-        mean, std, count = (
-            np.mean(curiosity_reward_per_env),
-            np.std(curiosity_reward_per_env),
-            len(curiosity_reward_per_env),
-        )
-        reward_rms.update_from_moments(mean, std**2, count)
+        reward_rms.update(curiosity_reward_per_env.flatten())
+        # mean, std, count = (
+        #     np.mean(curiosity_reward_per_env),
+        #     np.std(curiosity_reward_per_env),
+        #     len(curiosity_reward_per_env),
+        # )
+        # reward_rms.update_from_moments(mean, std**2, count)
 
         curiosity_rewards /= np.sqrt(reward_rms.var)
 

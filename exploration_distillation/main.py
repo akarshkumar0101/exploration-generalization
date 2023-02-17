@@ -23,6 +23,8 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 
+from einops import rearrange
+
 # TODO rename to pretrain.py
 
 def viz_stuff(args, env, pbar, **kwargs):
@@ -39,32 +41,37 @@ def viz_stuff(args, env, pbar, **kwargs):
 
     first_obs = env.envs[0].first_obs.copy()
     calc_traj_cov = lambda o:(o.std(axis=0).mean(axis=-1)>0).sum()/first_obs.mean(axis=-1).size
-    traj_cov = np.array([calc_traj_cov(e.past_traj_obs) for e in env.envs])
-    full_cov = calc_traj_cov(np.concatenate([e.past_traj_obs for e in env.envs]))
-    data['traj_cov'] = traj_cov.mean()
-    data['full_cov'] = full_cov
-
-    traj_returns = np.array([e.past_returns[-1] for e in env.envs])
-    traj_lens = np.array([len(e.past_traj_obs) for e in env.envs])
-
-    data['traj_returns_hist'] = wandb.Histogram(traj_returns)
-    data['traj_lens_hist'] = wandb.Histogram(traj_lens)
-    data['traj_returns_mean'] = traj_returns.mean()
-    data['traj_lens_mean'] = traj_lens.mean()
+    
+    if np.all([e.past_traj_obs is not None for e in env.envs]):
+        traj_cov = np.array([calc_traj_cov(e.past_traj_obs) for e in env.envs])
+        full_cov = calc_traj_cov(np.concatenate([e.past_traj_obs for e in env.envs]))
+        data['avg coverage w/ one trajectory'] = traj_cov.mean()
+        data[f'coverage w/ {env.num_envs} trajectories'] = full_cov
+        traj_returns = np.array([e.past_returns[-1] for e in env.envs])
+        traj_lens = np.array([len(e.past_traj_obs) for e in env.envs])
+        data['traj_returns_hist'] = wandb.Histogram(traj_returns)
+        data['traj_lens_hist'] = wandb.Histogram(traj_lens)
+        data['traj_returns_mean'] = traj_returns.mean()
+        data['traj_lens_mean'] = traj_lens.mean()
 
     data['rewards.mean'] = kwargs['rewards'].mean().item()
     data['curiosity_rewards.mean'] = kwargs['curiosity_rewards'].mean().item()
 
     if args.track and kwargs['update']%10==0:
-        plt.figure(figsize=(15, 7))
+        plt.figure(figsize=(10, 7))
         plt.subplot(221)
         plt.imshow(env.envs[0].first_obs)
         plt.subplot(222)
         o = kwargs['b_obs'][:, -1].cpu().numpy().std(axis=0).mean(axis=-1)
         plt.imshow(o)
+        plt.tight_layout()
         data['state distribution'] = wandb.Image(plt.gcf())
         plt.close('all')
-
+        
+    video = env.envs[0].past_traj_obs
+    if args.track and video is not None and kwargs['update']%10==0:
+        data['video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
+        
     pbar.set_postfix({key: val for key, val in data.items() if isinstance(val, (int, float))})
     if args.track:
         wandb.log(data)
@@ -72,8 +79,20 @@ def viz_stuff(args, env, pbar, **kwargs):
 def main():
     parser = ppo_rnd.parse_args()
     args = parser.parse_args()
-
-    env = miner.make_env(args.num_envs)
+    
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}"
+    if args.track:
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            sync_tensorboard=True,
+            config=vars(args),
+            name=run_name,
+            monitor_gym=True,
+            save_code=True,
+        )
+        
+    env = miner.make_env(args.num_envs, level_id=args.seed, video_folder=None)
     agent = models.Agent(env)
     rnd = models.RNDModel(env, (64, 64, 3))
     n_params = np.sum([p.numel() for p in agent.parameters()])

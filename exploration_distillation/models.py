@@ -17,7 +17,6 @@ class Agent(nn.Module):
     def __init__(self, env):
         super().__init__()
         fs, h, w, c = env.single_observation_space.shape
-        self.preprocess = lambda x: rearrange(x, 'b fs h w c -> b (fs c) h w').float()/128.-1. # [0, 255] -> [-1, 1]
         
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(fs*c, 32, 8, stride=4)),
@@ -49,13 +48,19 @@ class Agent(nn.Module):
             layer_init(nn.Linear(32, 1), std=0.01),
         )
     
+    def preprocess(self, x):
+        return rearrange(x, 'b fs h w c -> b (fs c) h w').float()/128.-1. # [0, 255] -> [-1, 1]
 
     def get_value(self, x):
         x = self.network(self.preprocess(x))
         return self.critic_ext(x), self.critic_int(x)
 
     def get_action_and_value(self, x, action=None):
-        x = self.network(self.preprocess(x))
+        print(x.min(), x.max())
+        x = self.preprocess(x)
+        print(x.shape)
+        print(x.min(), x.max())
+        x = self.network(x)
         logits = self.actor(x)
         probs = torch.distributions.Categorical(logits=logits)
         if action is None:
