@@ -170,8 +170,8 @@ def main():
     if args.pretrain_levels>0:
         run_name += f"_pretrain_{args.pretrain_levels:05d}_{args.pretrain_obj}"
     run_dir = f'data/{run_name}'
-    print(run_name)
-    print(run_dir)
+    print(f'run_name: {run_name}')
+    print(f'run_dir: {run_dir}')
 
     if args.track:
         wandb.init(

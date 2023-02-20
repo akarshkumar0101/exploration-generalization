@@ -26,8 +26,8 @@ class RewardForwardFilter:
         return self.rewems
 
 def init_rnd_model(rnd_model, envs, num_steps, num_iterations_obs_norm_init):
-    # for step in tqdm(range(num_steps * num_iterations_obs_norm_init)):
-    for step in tqdm(range(10)):
+    for step in tqdm(range(num_steps * num_iterations_obs_norm_init)):
+    # for step in tqdm(range(10)):
         o, _, _, _, _ = envs.step(envs.action_space.sample())
         rnd_model.update(o)
 
