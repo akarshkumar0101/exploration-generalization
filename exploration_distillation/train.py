@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo-rnd/#ppo_rnd_envpoolpy
 import argparse
+import os
 from distutils.util import strtobool
 from functools import partial
 
@@ -114,12 +115,12 @@ def callback(args, main_kwargs, **kwargs):
     if np.all([e.past_traj_obs is not None for e in env.envs]):
         traj_cov = np.array([calc_traj_cov(e.past_traj_obs) for e in env.envs])
         full_cov = calc_traj_cov(np.concatenate([e.past_traj_obs for e in env.envs]))
-        data['coverage/{1:03d}_trajs'] = traj_cov.mean()
+        data[f'coverage/{1:03d}_trajs'] = traj_cov.mean()
         data[f'coverage/{env.num_envs:03d}_trajs'] = full_cov
         traj_returns = np.array([e.past_returns[-1] for e in env.envs])
         traj_lens = np.array([len(e.past_traj_obs) for e in env.envs])
-        data['charts/returns_hist'] = wandb.Histogram(traj_returns)
-        data['charts/traj_lens_hist'] = wandb.Histogram(traj_lens)
+        data['charts/returns_hist'] = wandb.Histogram(traj_returns.tolist())
+        data['charts/traj_lens_hist'] = wandb.Histogram(traj_lens.tolist())
         data['charts/returns'] = traj_returns.mean()
         data['charts/traj_lens'] = traj_lens.mean()
 
@@ -146,6 +147,7 @@ def callback(args, main_kwargs, **kwargs):
     
     # freq_save = int(kwargs['num_updates']//10)
     if args.track and kwargs['update']%40==0:
+        os.makedirs(main_kwargs['run_dir'], exist_ok=True)
         torch.save(kwargs['agent'].state_dict(), f"{main_kwargs['run_dir']}/agent_{kwargs['update']:05d}.pt")
         torch.save(kwargs['rnd_model'].state_dict(), f"{main_kwargs['run_dir']}/rnd_{kwargs['update']:05d}.pt")
         
