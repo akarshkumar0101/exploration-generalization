@@ -27,7 +27,7 @@ parser.add_argument("--pretrain-levels", type=int, default=0, help='level')
 parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: ext or int')
 
 # Algorithm arguments
-parser.add_argument("--total-timesteps", type=int, default=1e6,
+parser.add_argument("--total-timesteps", type=int, default=4e6,
     help="total timesteps of the experiments")
 parser.add_argument("--learning-rate", type=float, default=5e-4,
     help="the learning rate of the optimizer")
@@ -144,7 +144,8 @@ def callback(args, main_kwargs, **kwargs):
         video = generate_video(env, shape=(2, 2))
         data['charts/video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
     
-    if args.track and kwargs['update']%20==0:
+    # freq_save = int(kwargs['num_updates']//10)
+    if args.track and kwargs['update']%40==0:
         torch.save(kwargs['agent'].state_dict(), f"{main_kwargs['run_dir']}/agent_{kwargs['update']:05d}.pt")
         torch.save(kwargs['rnd_model'].state_dict(), f"{main_kwargs['run_dir']}/rnd_{kwargs['update']:05d}.pt")
         
@@ -172,8 +173,8 @@ def main():
 
     if args.track:
         wandb.init(
-            entity=args.wandb_entity,
-            project=args.wandb_project_name,
+            # entity=args.wandb_entity,
+            project='exploration-distillation',
             name=run_name,
             config=vars(args),
             save_code=True,
