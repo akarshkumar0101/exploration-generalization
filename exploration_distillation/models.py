@@ -1,10 +1,9 @@
+import gymnasium as gym
 import numpy as np
 import torch
+from einops import rearrange
 from torch import nn
 from torch.distributions import Categorical
-import gymnasium as gym
-
-from einops import rearrange
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -56,10 +55,7 @@ class Agent(nn.Module):
         return self.critic_ext(x), self.critic_int(x)
 
     def get_action_and_value(self, x, action=None):
-        print(x.min(), x.max())
         x = self.preprocess(x)
-        print(x.shape)
-        print(x.min(), x.max())
         x = self.network(x)
         logits = self.actor(x)
         probs = torch.distributions.Categorical(logits=logits)

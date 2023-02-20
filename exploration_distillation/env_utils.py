@@ -1,10 +1,10 @@
+from functools import partial
+
 import gym as gym_old
 import gymnasium as gym
 import numpy as np
 import procgen
 
-
-from functools import partial
 
 class MyProcgenEnv(gym.Wrapper):
     def __init__(self, env):
