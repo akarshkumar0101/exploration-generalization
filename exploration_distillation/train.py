@@ -99,6 +99,7 @@ def callback(args, main_kwargs, **kwargs):
     env = main_kwargs['env']
 
     data = dict()
+    data['per_step/step'] = kwargs['update']
     data['charts/entropy'] = kwargs['entropy_loss'].item()
     data['details/value_loss'] = kwargs['v_loss'].item()
     data['details/policy_loss'] = kwargs['pg_loss'].item()
