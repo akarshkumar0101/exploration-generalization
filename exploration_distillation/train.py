@@ -15,6 +15,11 @@ from tqdm.auto import tqdm
 
 import env_utils
 
+
+# TODO
+# plot advantages.std() (the division term)
+# scale of gradients
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default='cpu', help="device to run on")
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
@@ -157,8 +162,7 @@ def callback(args, main_kwargs, **kwargs):
     if args.track:
         wandb.log(data)
 
-def main():
-    args = parser.parse_args()
+def main(args):
     assert args.train_obj in {'ext', 'int'}
     assert args.pretrain_obj in {'ext', 'int'}
     args.ext_coef, args.int_coef = (1.0, 0.0) if args.train_obj=='ext' else (0.0, 1.0)
@@ -187,6 +191,11 @@ def main():
         
     env = env_utils.make_env(args.num_envs, env_name=f'procgen-{args.env}-v0', level_id=args.level)
     agent = models.Agent(env)
+    
+    if args.pretrain_levels>0:
+        # load agent from distillation process
+        agent.load_state_dict(torch.load(f"data/distill_{args.env}_{args.pretrain_levels:05d}_{args.pretrain_obj}/agent.pt"))
+    
     rnd = models.RNDModel(env, (64, 64, 3))
     n_params = np.sum([p.numel() for p in agent.parameters()])
     print(f'Agent # parameters: {n_params:012d}')
@@ -204,7 +213,9 @@ def main():
                 update_proportion=args.update_proportion, int_coef=args.int_coef, ext_coef=args.ext_coef,
                 int_gamma=args.int_gamma, num_iterations_obs_norm_init=args.num_iterations_obs_norm_init,
                 )
+    return locals()
 
 if __name__=="__main__":
-    main()
+    args = parser.parse_args()
+    main(args)
 

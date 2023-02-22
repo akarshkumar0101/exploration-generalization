@@ -62,6 +62,13 @@ class Agent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic_ext(x), self.critic_int(x)
+    
+    def get_dist_and_values(self, x):
+        x = self.preprocess(x)
+        x = self.network(x)
+        logits = self.actor(x)
+        dist = torch.distributions.Categorical(logits=logits)
+        return dist, self.critic_ext(x), self.critic_int(x)
 
 class RNDModel(nn.Module):
     def __init__(self, env, rnd_obs_shape=(64, 64, 3)):

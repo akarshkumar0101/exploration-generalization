@@ -73,6 +73,8 @@ class EpisodeStats(gym.Wrapper):
         self.past_traj_obs = np.stack(self.curr_traj_obs) if len(self.curr_traj_obs) > 0 else None
         self.curr_traj_obs = [obs]
         
+        # TODO change the appending to be at step when term/trunc==True
+        # bc or else I have a 0 return in the beginning
         self.past_returns.append(self.running_return)
         self.past_lengths.append(self.running_length)
         self.past_actions.append(self.running_actions)
