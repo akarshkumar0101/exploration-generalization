@@ -52,9 +52,8 @@ class EpisodeStats(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.first_obs = None
-        
         self.past_traj_obs = None
-        self.curr_traj_obs = []
+        self.running_traj_obs = []
         
         self.past_returns = []
         self.running_return = 0
@@ -66,19 +65,10 @@ class EpisodeStats(gym.Wrapper):
         self.running_actions = []
         
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset()
+        obs, info = self.env.reset(*args, **kwargs)
+        self.first_obs = obs
         
-        self.first_obs = obs if self.first_obs is None else self.first_obs
-        
-        self.past_traj_obs = np.stack(self.curr_traj_obs) if len(self.curr_traj_obs) > 0 else None
-        self.curr_traj_obs = [obs]
-        
-        # TODO change the appending to be at step when term/trunc==True
-        # bc or else I have a 0 return in the beginning
-        self.past_returns.append(self.running_return)
-        self.past_lengths.append(self.running_length)
-        self.past_actions.append(self.running_actions)
-        
+        self.running_traj_obs = [obs]
         self.running_return = 0
         self.running_length = 0
         self.running_actions = []
@@ -87,13 +77,38 @@ class EpisodeStats(gym.Wrapper):
         
     def step(self, action, *args, **kwargs):
         obs, reward, term, trunc, info = self.env.step(action, *args, **kwargs)
-        self.curr_traj_obs.append(obs)
+        self.running_traj_obs.append(obs)
         self.running_return += reward
         self.running_length += 1
         self.running_actions.extend([action])
+
+        if term or trunc:
+            self.past_traj_obs = np.stack(self.running_traj_obs)
+            self.past_returns.append(self.running_return)
+            self.past_lengths.append(self.running_length)
+            self.past_actions.append(self.running_actions)
+
+        return obs, reward, term, trunc, info
+
+class EpisodicCoverageRewardMiner(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        assert hasattr(env, 'running_traj_obs')
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        o = np.stack(self.env.running_traj_obs[-2:])
+        self.mask = o.std(axis=0).mean(axis=-1)>1e-3
+        return obs, info
+    def step(self, action):
+        obs, reward, term, trunc, info = self.env.step(action)
+        o = np.stack(self.env.running_traj_obs[-2:])
+        mask_change = o.std(axis=0).mean(axis=-1)>1e-3
+        reward = (mask_change & (~self.mask)).mean()
+        reward *= np.prod(obs.shape[:2])/9. # ~= 1.
+        self.mask = self.mask | mask_change
         return obs, reward, term, trunc, info
         
-def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folder=None):
+def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folder=None, reward_fn='ext'):
     # it's okay to call reset when a term/trunc is emitted (SyncVectorEnv), but that's it
     env = gym_old.make(env_name, num_levels=1, start_level=level_id, distribution_mode='hard')
     env = MyProcgenEnv(env)
@@ -101,6 +116,8 @@ def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folde
         env = gym.wrappers.RecordVideo(env, video_folder)
     env = MinerActionRestriction(env)
     env = EpisodeStats(env)
+    if reward_fn=='eps':
+        env = EpisodicCoverageRewardMiner(env)
     # env = gym.wrappers.RecordEpisodeStatistics(env)
     # env = RescaleObservation(env)
     env = gym.wrappers.FrameStack(env, 4)
@@ -108,10 +125,11 @@ def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folde
     env.action_space.seed(seed)
     return env
 
-def make_env(n_envs=10, env_name='procgen-miner-v0', level_id=0, video_folder=None):
+def make_env(n_envs=10, env_name='procgen-miner-v0', level_id=0, video_folder=None, async_=False, reward_fn='ext'):
     if isinstance(level_id, int):
         level_id = [level_id for _ in range(n_envs)]
     env_fns = [partial(make_single_env, env_name=env_name, level_id=level_id[seed],
-                       seed=seed, video_folder=video_folder if seed==0 else None) for seed in range(n_envs)]
-    env =  gym.vector.SyncVectorEnv(env_fns)
+                       seed=seed, video_folder=video_folder if seed==0 else None,
+                       reward_fn=reward_fn) for seed in range(n_envs)]
+    env = gym.vector.AsyncVectorEnv(env_fns) if async_ else gym.vector.SyncVectorEnv(env_fns)
     return env

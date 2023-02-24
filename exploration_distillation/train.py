@@ -15,20 +15,21 @@ from tqdm.auto import tqdm
 
 import env_utils
 
-
 # TODO
 # plot advantages.std() (the division term)
 # scale of gradients
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default='cpu', help="device to run on")
-parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--seed", type=int, default=0, help='seed')
+
+parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+parser.add_argument("--project", type=str, default='exploration-distillation')
 
 # Experiment arguments
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
 parser.add_argument("--level", type=int, default=0, help='level')
-parser.add_argument("--train-obj", type=str, default='ext', help='objective: ext or int')
+parser.add_argument("--train-obj", type=str, default='ext', help='objective: ext/int/eps')
 parser.add_argument("--pretrain-levels", type=int, default=0, help='level')
 parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: ext or int')
 
@@ -163,9 +164,9 @@ def callback(args, main_kwargs, **kwargs):
         wandb.log(data)
 
 def main(args):
-    assert args.train_obj in {'ext', 'int'}
-    assert args.pretrain_obj in {'ext', 'int'}
-    args.ext_coef, args.int_coef = (1.0, 0.0) if args.train_obj=='ext' else (0.0, 1.0)
+    assert args.train_obj in {'ext', 'int', 'eps'}
+    assert args.pretrain_obj in {'ext', 'int', 'eps'}
+    args.ext_coef, args.int_coef = {'ext': (1.0, 0.0), 'int': (0.0, 1.0), 'eps': (1.0, 0.0)}[args.train_obj]
     
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -181,7 +182,7 @@ def main(args):
     if args.track:
         wandb.init(
             # entity=args.wandb_entity,
-            project='exploration-distillation',
+            project=args.project,
             name=run_name,
             config=vars(args),
             save_code=True,
@@ -189,7 +190,8 @@ def main(args):
             # monitor_gym=True,
         )
         
-    env = env_utils.make_env(args.num_envs, env_name=f'procgen-{args.env}-v0', level_id=args.level)
+    env = env_utils.make_env(args.num_envs, env_name=f'procgen-{args.env}-v0',
+                             level_id=args.level, seed=args.seed, reward_fn=args.train_obj)
     agent = models.Agent(env)
     
     if args.pretrain_levels>0:
