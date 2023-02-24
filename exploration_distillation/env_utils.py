@@ -109,7 +109,9 @@ def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folde
     return env
 
 def make_env(n_envs=10, env_name='procgen-miner-v0', level_id=0, video_folder=None):
-    env_fns = [partial(make_single_env, env_name=env_name, level_id=level_id,
+    if isinstance(level_id, int):
+        level_id = [level_id for _ in range(n_envs)]
+    env_fns = [partial(make_single_env, env_name=env_name, level_id=level_id[seed],
                        seed=seed, video_folder=video_folder if seed==0 else None) for seed in range(n_envs)]
     env =  gym.vector.SyncVectorEnv(env_fns)
     return env
