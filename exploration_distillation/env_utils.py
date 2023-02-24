@@ -125,11 +125,11 @@ def make_single_env(env_name='procgen-miner-v0', level_id=0, seed=0, video_folde
     env.action_space.seed(seed)
     return env
 
-def make_env(n_envs=10, env_name='procgen-miner-v0', level_id=0, video_folder=None, async_=False, reward_fn='ext'):
+def make_env(n_envs=10, env_name='procgen-miner-v0', level_id=0, seed=0, video_folder=None, async_=False, reward_fn='ext'):
     if isinstance(level_id, int):
         level_id = [level_id for _ in range(n_envs)]
     env_fns = [partial(make_single_env, env_name=env_name, level_id=level_id[seed],
-                       seed=seed, video_folder=video_folder if seed==0 else None,
-                       reward_fn=reward_fn) for seed in range(n_envs)]
+                       seed=seed*100+i, video_folder=video_folder if seed==0 else None,
+                       reward_fn=reward_fn) for i in range(n_envs)]
     env = gym.vector.AsyncVectorEnv(env_fns) if async_ else gym.vector.SyncVectorEnv(env_fns)
     return env
