@@ -104,7 +104,9 @@ class EpisodicCoverageRewardMiner(gym.Wrapper):
         o = np.stack(self.env.running_traj_obs[-2:])
         mask_change = o.std(axis=0).mean(axis=-1)>1e-3
         reward = (mask_change & (~self.mask)).mean()
-        reward *= np.prod(obs.shape[:2])/9. # ~= 1.
+        if reward > 0:
+            reward = 1.
+        # reward *= np.prod(obs.shape[:2])/9. # ~= 1.
         self.mask = self.mask | mask_change
         return obs, reward, term, trunc, info
         
