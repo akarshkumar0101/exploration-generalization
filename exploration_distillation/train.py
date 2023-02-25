@@ -26,6 +26,8 @@ parser.add_argument("--seed", type=int, default=0, help='seed')
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--project", type=str, default='exploration-distillation')
 
+parser.add_argument("--async-env", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+
 # Experiment arguments
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
 parser.add_argument("--level", type=int, default=0, help='level')
@@ -118,6 +120,15 @@ def callback(args, main_kwargs, **kwargs):
 
     first_obs = env.envs[0].first_obs.copy()
     calc_traj_cov = lambda o:(o.std(axis=0).mean(axis=-1)>0).sum()/first_obs.mean(axis=-1).size
+    # # coverage map
+    # calc_covmap = lambda o:(o.std(axis=0).mean(axis=-1)>0)
+    # calc_cov = lambda covmap: covmap.sum()/covmap.size
+    # covmap1 = calc_covmap
+
+    # m = calc_map(np.concatenate([e.past_traj_obs for e in env.envs]))
+    # if not hasattr(env, 'historical_cov'):
+    #     env.historical_cov = m
+    # env.historical_cov = env.historical_cov | m
     
     if np.all([e.past_traj_obs is not None for e in env.envs]):
         traj_cov = np.array([calc_traj_cov(e.past_traj_obs) for e in env.envs])
@@ -191,7 +202,7 @@ def main(args):
         )
         
     env = env_utils.make_env(args.num_envs, env_name=f'procgen-{args.env}-v0',
-                             level_id=args.level, seed=args.seed, reward_fn=args.train_obj)
+                             level_id=args.level, seed=args.seed, async_=args.async_env, reward_fn=args.train_obj)
     agent = models.Agent(env)
     
     if args.pretrain_levels>0:
