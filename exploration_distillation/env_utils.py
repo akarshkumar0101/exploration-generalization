@@ -96,13 +96,12 @@ class EpisodicCoverageRewardMiner(gym.Wrapper):
         assert hasattr(env, 'running_traj_obs')
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        o = np.stack(self.env.running_traj_obs[-2:])
-        self.mask = o.std(axis=0).mean(axis=-1)>1e-3
+        self.mask = self.env.running_traj_obs[-1].max(axis=-1) <-1e9
         return obs, info
     def step(self, action):
         obs, reward, term, trunc, info = self.env.step(action)
-        o = np.stack(self.env.running_traj_obs[-2:])
-        mask_change = o.std(axis=0).mean(axis=-1)>1e-3
+        diff = np.abs(self.env.running_traj_obs[-1]-self.env.running_traj_obs[-2])
+        mask_change = diff.max(axis=-1)>1e-3
         reward = (mask_change & (~self.mask)).mean()
         if reward > 0:
             reward = 1.
