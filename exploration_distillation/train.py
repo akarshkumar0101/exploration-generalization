@@ -25,6 +25,7 @@ parser.add_argument("--seed", type=int, default=0, help='seed')
 
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--project", type=str, default='exploration-distillation')
+parser.add_argument("--name", type=str, default='{env}_{level:05d}_{train_obj}_{pretrain_levels}_{pretrain_obj}')
 
 parser.add_argument("--async-env", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 
@@ -32,8 +33,8 @@ parser.add_argument("--async-env", type=lambda x: bool(strtobool(x)), default=Fa
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
 parser.add_argument("--level", type=int, default=0, help='level')
 parser.add_argument("--train-obj", type=str, default='ext', help='objective: ext/int/eps')
-parser.add_argument("--pretrain-levels", type=int, default=0, help='level')
-parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: ext or int')
+parser.add_argument("--pretrain-levels", type=int, default=None, help='level')
+parser.add_argument("--pretrain-obj", type=str, default=None, help='objective: ext or int')
 
 # Algorithm arguments
 parser.add_argument("--total-timesteps", type=int, default=4e6,
@@ -186,16 +187,19 @@ def callback(args, main_kwargs, **kwargs):
 
 def main(args):
     assert args.train_obj in {'ext', 'int', 'eps'}
-    assert args.pretrain_obj in {'ext', 'int', 'eps'}
+    assert args.pretrain_obj is None or args.pretrain_obj in {'ext', 'int', 'eps'}
     args.ext_coef, args.int_coef = {'ext': (1.0, 0.0), 'int': (0.0, 1.0), 'eps': (1.0, 0.0)}[args.train_obj]
     
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
     # env-level-type-pretrain-levels-type  |  type in {ext, int}
-    run_name = f"{args.env}_{args.level:05d}_{args.train_obj}"
-    if args.pretrain_levels>0:
-        run_name += f"_pretrain_{args.pretrain_levels:05d}_{args.pretrain_obj}"
+    name = args.name.format(**args.__dict__)
+    print(name)
+    return
+    # run_name = f"{args.env}_{args.level:05d}_{args.train_obj}"
+    # if args.pretrain_levels is not None:
+    #     run_name += f"_pretrain_{args.pretrain_levels:05d}_{args.pretrain_obj}"
     run_dir = f'data/{run_name}'
     print(f'run_name: {run_name}')
     print(f'run_dir: {run_dir}')
@@ -215,7 +219,7 @@ def main(args):
                              level_id=args.level, seed=args.seed, async_=args.async_env, reward_fn=args.train_obj)
     agent = models.Agent(env)
     
-    if args.pretrain_levels>0:
+    if args.pretrain_levels is not None:
         # load agent from distillation process
         agent.load_state_dict(torch.load(f"data/distill_{args.env}_{args.pretrain_levels:05d}_{args.pretrain_obj}/agent.pt"))
     
