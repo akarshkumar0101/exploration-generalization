@@ -117,6 +117,7 @@ class EpisodicCoverageRewardMiner(gym.Wrapper):
         obs, reward, term, trunc, info = self.env.step(action)
         mask_change = (np.abs(obs-self.pobs)>1e-3).any(axis=-1)
         info['rew_eps'] = np.sign((mask_change & (~self.mask_episodic)).mean())
+        info['rew_epd'] = info['rew_eps'] - (5. if term else 0)
         self.mask_episodic = self.mask_episodic | mask_change
         self.pobs = obs
         return obs, reward, term, trunc, info

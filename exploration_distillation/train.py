@@ -82,7 +82,7 @@ parser.add_argument("--int-gamma", type=float, default=0.99,
 parser.add_argument("--num-iterations-obs-norm-init", type=int, default=2,
     help="number of iterations to initialize the observations normalization parameters")
 
-def generate_video(env, shape=(2, 2)):
+def generate_video(env, shape=(3, 3)):
     """
     Combine X videos and generate a single video of shape (t, h, w, c)
     with appropriate border, looping, padding.
@@ -186,9 +186,10 @@ def callback(args, main_kwargs, **kwargs):
         wandb.log(data)
 
 def main(args):
-    assert args.train_obj in {'ext', 'int', 'eps'}
-    assert args.pretrain_obj is None or args.pretrain_obj in {'ext', 'int', 'eps'}
-    args.ext_coef, args.int_coef = {'ext': (1.0, 0.0), 'int': (0.0, 1.0), 'eps': (1.0, 0.0)}[args.train_obj]
+    # assert args.train_obj in {'ext', 'int', 'eps'}
+    # assert args.pretrain_obj is None or args.pretrain_obj in {'ext', 'int', 'eps'}
+    args.ext_coef, args.int_coef = {'ext': (1.0, 0.0), 'int': (0.0, 1.0),
+                                    'eps': (1.0, 0.0), 'epd': (1.0, 0.0)}[args.train_obj]
     
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
