@@ -118,9 +118,7 @@ def callback(args, main_kwargs, **kwargs):
     # data['losses/explained_variance'] = kwargs['explained_var']
     data['details/SPS'] = kwargs['sps']
 
-    first_obs = env.envs[0].first_obs.copy()
-    calc_traj_cov = lambda o:(o.std(axis=0).mean(axis=-1)>0).sum()/first_obs.mean(axis=-1).size
-    # # coverage map
+    # coverage map
     # calc_covmap = lambda o:(o.std(axis=0).mean(axis=-1)>0)
     # calc_cov = lambda covmap: covmap.sum()/covmap.size
     # covmap1 = calc_covmap
@@ -129,17 +127,29 @@ def callback(args, main_kwargs, **kwargs):
     # if not hasattr(env, 'historical_cov'):
     #     env.historical_cov = m
     # env.historical_cov = env.historical_cov | m
+
+    # calc_traj_cov = lambda o:(o.std(axis=0).mean(axis=-1)>0).sum()/first_obs.mean(axis=-1).size
+    def pto2heatmap(pto):
+        return np.sign(np.abs(np.diff(pto.mean(axis=-1), axis=0))).sum(axis=0)
     
     if np.all([e.past_traj_obs is not None for e in env.envs]):
-        traj_cov = np.array([calc_traj_cov(e.past_traj_obs) for e in env.envs])
-        full_cov = calc_traj_cov(np.concatenate([e.past_traj_obs for e in env.envs]))
-        data[f'coverage/{1:03d}_trajs'] = traj_cov.mean()
-        data[f'coverage/{env.num_envs:03d}_trajs'] = full_cov
-        traj_returns = np.array([e.past_returns[-1] for e in env.envs])
+        heatmaps = np.stack([pto2heatmap(e.past_traj_obs) for e in env.envs])
+        heatmap_global = heatmaps.mean(axis=0)
+        covs = [(hm>0).sum()/hm.size for hm in heatmaps]
+        covs_global = (heatmap_global>0).sum()/heatmap_global.size
+        data[f'coverage/{1:03d}_trajs'] = np.mean(covs)
+        data[f'coverage/{env.num_envs:03d}_trajs'] = covs_global
+
+        returns_ext = np.array([e.past_returns_ext[-1] for e in env.envs])
+        data['charts/returns_hist'] = wandb.Histogram(returns_ext.tolist())
+        data['charts/returns'] = returns_ext.mean()
+
+        returns_eps = np.array([e.past_returns_eps[-1] for e in env.envs])
+        data['charts/returns_hist'] = wandb.Histogram(returns_eps.tolist())
+        data['charts/returns'] = returns_eps.mean()
+
         traj_lens = np.array([len(e.past_traj_obs) for e in env.envs])
-        data['charts/returns_hist'] = wandb.Histogram(traj_returns.tolist())
         data['charts/traj_lens_hist'] = wandb.Histogram(traj_lens.tolist())
-        data['charts/returns'] = traj_returns.mean()
         data['charts/traj_lens'] = traj_lens.mean()
 
     data['per_step/ext_rewards'] = kwargs['rewards'].mean().item()
