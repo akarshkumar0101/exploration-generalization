@@ -195,20 +195,19 @@ def main(args):
 
     # env-level-type-pretrain-levels-type  |  type in {ext, int}
     name = args.name.format(**args.__dict__)
-    print(name)
-    return
-    # run_name = f"{args.env}_{args.level:05d}_{args.train_obj}"
+    # name = f"{args.env}_{args.level:05d}_{args.train_obj}"
     # if args.pretrain_levels is not None:
-    #     run_name += f"_pretrain_{args.pretrain_levels:05d}_{args.pretrain_obj}"
-    run_dir = f'data/{run_name}'
-    print(f'run_name: {run_name}')
+    #     name += f"_pretrain_{args.pretrain_levels:05d}_{args.pretrain_obj}"
+    run_dir = f'data/{name}'
+    print(f'project: {args.project}')
+    print(f'name: {name}')
     print(f'run_dir: {run_dir}')
 
     if args.track:
         wandb.init(
             # entity=args.wandb_entity,
             project=args.project,
-            name=run_name,
+            name=name,
             config=vars(args),
             save_code=True,
             # sync_tensorboard=True,
