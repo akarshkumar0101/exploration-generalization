@@ -27,21 +27,25 @@ class Agent(nn.Module):
             nn.Flatten(),
             layer_init(nn.Linear(64*4*4, 256)),
             nn.ReLU(),
-            layer_init(nn.Linear(256, 256)),
-            nn.ReLU(),
         )
         
         self.actor = nn.Sequential(
+            layer_init(nn.Linear(256, 256)),
+            nn.ReLU(),
             layer_init(nn.Linear(256, 128), std=0.01),
             nn.ReLU(),
             layer_init(nn.Linear(128, env.single_action_space.n), std=0.01),
         )
         self.critic_ext = nn.Sequential(
+            layer_init(nn.Linear(256, 256)),
+            nn.ReLU(),
             layer_init(nn.Linear(256, 32), std=0.01),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),
         )
         self.critic_int = nn.Sequential(
+            layer_init(nn.Linear(256, 256)),
+            nn.ReLU(),
             layer_init(nn.Linear(256, 32), std=0.01),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),
