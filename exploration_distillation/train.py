@@ -141,12 +141,12 @@ def callback(args, main_kwargs, **kwargs):
         data[f'coverage/{env.num_envs:03d}_trajs'] = covs_global
 
         returns_ext = np.array([e.past_returns_ext[-1] for e in env.envs])
-        data['charts/returns_hist'] = wandb.Histogram(returns_ext.tolist())
-        data['charts/returns'] = returns_ext.mean()
+        data['charts/returns_ext_hist'] = wandb.Histogram(returns_ext.tolist())
+        data['charts/returns_ext'] = returns_ext.mean()
 
         returns_eps = np.array([e.past_returns_eps[-1] for e in env.envs])
-        data['charts/returns_hist'] = wandb.Histogram(returns_eps.tolist())
-        data['charts/returns'] = returns_eps.mean()
+        data['charts/returns_eps_hist'] = wandb.Histogram(returns_eps.tolist())
+        data['charts/returns_eps'] = returns_eps.mean()
 
         traj_lens = np.array([len(e.past_traj_obs) for e in env.envs])
         data['charts/traj_lens_hist'] = wandb.Histogram(traj_lens.tolist())
