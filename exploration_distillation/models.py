@@ -75,11 +75,11 @@ class Agent(nn.Module):
         return dist, self.critic_ext(x), self.critic_int(x)
 
 class RNDModel(nn.Module):
-    def __init__(self, env, rnd_obs_shape=(64, 64, 3)):
+    def __init__(self, env, obs_shape=(64, 64, 3)):
         super().__init__()
         
-        h, w, c = rnd_obs_shape
-        self.obs_rms = gym.wrappers.normalize.RunningMeanStd(shape=rnd_obs_shape)
+        h, w, c = obs_shape
+        self.obs_rms = gym.wrappers.normalize.RunningMeanStd(shape=obs_shape)
 
         # Prediction network
         self.predictor = nn.Sequential(
@@ -134,3 +134,43 @@ class RNDModel(nn.Module):
         target_feature = self.target(x)
         predict_feature = self.predictor(x)
         return predict_feature, target_feature
+
+# class E3B(nn.Module):
+#     def __init__(self, env, obs_shape=(64, 64, 3)):
+#         super().__init__()
+#         h, w, c = obs_shape
+#         self.encoder = nn.Sequential(
+#             layer_init(nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4)),
+#             nn.LeakyReLU(),
+#             layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+#             nn.LeakyReLU(),
+#             layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+#             nn.LeakyReLU(),
+#             nn.Flatten(),
+#             layer_init(nn.Linear(64*4*4, 512)),
+#             nn.ReLU(),
+#             layer_init(nn.Linear(512, 512)),
+#             nn.ReLU(),
+#             layer_init(nn.Linear(512, 512)),
+#         )
+#         self.idm = nn.Sequential(
+#             layer_init(nn.Linear(512*2, 512)),
+#             nn.ReLU(),
+#             layer_init(nn.Linear(512, 512)),
+#             nn.ReLU(),
+#             layer_init(nn.Linear(512, env.action_space.n)),
+#         )
+#         self.cel = nn.CrossEntropyLoss()
+
+#     def preprocess(self, x):
+#         return rearrange(x, 'b h w c -> b c h w').float()/128.-1. # [0, 255] -> [-1, 1]
+
+#     def encode(self, obs):
+#         return self.encoder(self.preprocess(obs))
+    
+#     def idm_forward(self, obs, obs_next, action):
+#         latent = self.encode(obs)
+#         latent_next = self.encode(obs_next)
+#         latent_cat = torch.cat([latent, latent_next], dim=-1)
+#         logits = self.idm(latent_cat)
+#         return self.cel(logits, action).mean()
