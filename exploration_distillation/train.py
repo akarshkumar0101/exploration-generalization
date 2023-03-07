@@ -37,7 +37,7 @@ parser.add_argument("--pretrain-levels", type=int, default=None, help='level')
 parser.add_argument("--pretrain-obj", type=str, default=None, help='objective: ext or int')
 
 # Algorithm arguments
-parser.add_argument("--total-timesteps", type=int, default=4e6,
+parser.add_argument("--total-timesteps", type=float, default=4e6,
     help="total timesteps of the experiments")
 parser.add_argument("--learning-rate", type=float, default=5e-4,
     help="the learning rate of the optimizer")
@@ -190,6 +190,7 @@ def main(args):
     # assert args.pretrain_obj is None or args.pretrain_obj in {'ext', 'int', 'eps'}
     args.ext_coef, args.int_coef = {'ext': (1.0, 0.0), 'int': (0.0, 1.0),
                                     'eps': (1.0, 0.0), 'epd': (1.0, 0.0)}[args.train_obj]
+    args.total_timesteps = int(args.total_timesteps)
     
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
