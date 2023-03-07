@@ -158,7 +158,7 @@ def callback(args, main_kwargs, **kwargs):
     data['per_step/ext_rewards_hist'] = wandb.Histogram(kwargs['rewards'].flatten().tolist())
     data['per_step/int_rewards_hist'] = wandb.Histogram(kwargs['curiosity_rewards'].flatten().tolist())
 
-    if args.track and kwargs['update']%(kwargs['num_updates']//10)==0:
+    if args.track and (kwargs['update']-5)%(kwargs['num_updates']//20)==0:
         plt.figure(figsize=(10, 7))
         plt.subplot(221)
         plt.imshow(env.envs[0].first_obs)
@@ -166,15 +166,14 @@ def callback(args, main_kwargs, **kwargs):
         o = kwargs['b_obs'][:, -1].cpu().numpy().std(axis=0).mean(axis=-1)
         plt.imshow(o)
         plt.tight_layout()
-        data['coverage/heatmap'] = wandb.Image(plt.gcf())
+        data['media/heatmap'] = wandb.Image(plt.gcf())
         plt.close('all')
         
     vids_exist = np.all([e.past_traj_obs is not None for e in env.envs])
-    if args.track and vids_exist and kwargs['update']%(kwargs['num_updates']//10)==0:
+    if args.track and vids_exist and (kwargs['update']-5)%(kwargs['num_updates']//20)==0:
         video = generate_video(env)
-        data['charts/video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
+        data['media/video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
     
-    # freq_save = int(kwargs['num_updates']//10)
     if args.track and kwargs['update']%(kwargs['num_updates']//10)==0:
         os.makedirs(main_kwargs['run_dir'], exist_ok=True)
         torch.save(kwargs['agent'].state_dict(), f"{main_kwargs['run_dir']}/agent_{kwargs['update']:05d}.pt")
