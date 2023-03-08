@@ -17,8 +17,11 @@ import env_utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default='cpu', help="device to run on")
-parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--seed", type=int, default=0, help='seed')
+
+parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+parser.add_argument("--project", type=str, default='exploration-distillation')
+parser.add_argument("--name", type=str, default='distill_{args.env}_{args.pretrain_levels:05d}_{args.pretrain_obj}')
 
 # Experiment arguments
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
@@ -101,16 +104,16 @@ def main(args):
     
     print(args)
     # env-level-type-pretrain-levels-type  |  type in {ext, int}
-    run_name = f"distill_{args.env}_{args.pretrain_levels:05d}_{args.pretrain_obj}"
-    run_dir = f'data/{run_name}'
-    print(run_name)
+    name = args.name.format(**args.__dict__)
+    run_dir = f'data/{name}'
+    print(name)
     print(run_dir)
 
     if args.track:
         wandb.init(
             # entity=args.wandb_entity,
-            project='exploration-distillation',
-            name=run_name,
+            project=args.project,
+            name=name,
             config=vars(args),
             save_code=True,
             # sync_tensorboard=True,
