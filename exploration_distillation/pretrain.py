@@ -1,17 +1,16 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo-rnd/#ppo_rnd_envpoolpy
 import argparse
+import os
 from distutils.util import strtobool
 from functools import partial
 
-import os
 import matplotlib.pyplot as plt
 import models
 import numpy as np
 import torch
 import wandb
-from tqdm.auto import tqdm
-
 from einops import rearrange
+from tqdm.auto import tqdm
 
 import bc
 import env_utils
@@ -95,8 +94,8 @@ def callback(args, main_kwargs, **kwargs):
         wandb.log(data)
         
 def main(args):
-    assert args.pretrain_obj in {'ext', 'int'}
-    
+    assert args.pretrain_obj in {'ext', 'int', 'eps', 'epd'}
+
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     
