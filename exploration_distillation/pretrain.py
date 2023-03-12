@@ -15,13 +15,15 @@ from tqdm.auto import tqdm
 import bc
 import env_utils
 
+from train import generate_video
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default='cpu', help="device to run on")
 parser.add_argument("--seed", type=int, default=0, help='seed')
 
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
 parser.add_argument("--project", type=str, default='exploration-distillation')
-parser.add_argument("--name", type=str, default='distill_{args.env}_{args.pretrain_levels:05d}_{args.pretrain_obj}')
+parser.add_argument("--name", type=str, default='distill_{env}_{pretrain_levels:05d}_{pretrain_obj}')
 
 # Experiment arguments
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
@@ -30,34 +32,22 @@ parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: 
 
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--coef_entropy', type=float, default=0) # 1e-2
-parser.add_argument('--ds-size', type=float, default=10e9)
+parser.add_argument('--ds-size', type=float, default=2e9)
 parser.add_argument('--batch-size', type=int, default=512)
-parser.add_argument('--n-steps', type=int, default=5000)
+parser.add_argument('--n-steps', type=int, default=50000)
 
 # TODO rename pretrain.py to distill.py
 
-def get_levels_files(env_name, pretrain_levels, pretrain_obj):
+def get_level2files(env_name, pretrain_levels, pretrain_obj):
     levels = list(range(pretrain_levels))
+    level2files = {}
     files = []
     for level in levels:
         run_name = f"{env_name}_{level:05d}_{pretrain_obj}"
         run_dir = f'data/{run_name}'
+        level2files[level] = sorted([f'{run_dir}/{f}' for f in os.listdir(run_dir) if f.startswith('agent')])
         files.append(sorted([f'{run_dir}/{f}' for f in os.listdir(run_dir) if f.startswith('agent')]))
-
-    levels, files = np.array(levels).astype(np.int32), np.array(files)
-    levels, files = np.broadcast_arrays(levels[:, None], files)
-    return levels, files
-
-def get_updated_levels_files(levels, files, size=2e8):
-    # number of agents possible with 10 GB data and 1000 timesteps
-    n = int(size/(4*64*64*3)/1000)
-    files_flat = np.array(files)[:, ::-1][:, :].T.flatten() # consider all agent checkpoints
-    files_flat = files_flat[:n]
-    levels_flat = np.array(levels)[:, ::-1][:, :].T.flatten()
-    levels_flat = levels_flat[:n]
-    n_steps = int(1000*n/len(files_flat))
-    print(f'{n=}, {n_steps=}, {len(files_flat)=}')
-    return levels_flat, files_flat, n, n_steps
+    return level2files
 
 def collect_rollout(env, agent, n_steps, device=None):
     x, y = [], []
@@ -72,12 +62,12 @@ def collect_rollout(env, agent, n_steps, device=None):
         obs, reward, term, trunc, info = env.step(action.tolist())
     return torch.stack(x), torch.stack(y)
 
-def collect_dataset(levels, files, env_name, n_steps, device=None):
+def collect_dataset(env_name, level2file, n_steps, device=None):
     env = env_utils.make_env(1, env_name=f'procgen-{env_name}-v0', level_id=0)
     agent = models.Agent(env)
 
     x, y = [], []
-    for level, file in zip(tqdm(levels.tolist()), files):
+    for level, file in tqdm(level2file.items()):
         agent.load_state_dict(torch.load(file))
         env = env_utils.make_env(1, env_name=f'procgen-{env_name}-v0', level_id=level)
         xi, yi = collect_rollout(env, agent, n_steps, device=device)
@@ -85,11 +75,54 @@ def collect_dataset(levels, files, env_name, n_steps, device=None):
         y.append(yi)
     return torch.stack(x), torch.stack(y)
 
+def eval_performance(agent, levels, n_steps=2000, device=None):
+    np.random.seed(0)
+    torch.manual_seed(0)
+
+    env = env_utils.make_env(len(levels), level_id=levels)
+    agent = agent.to(device)
+    obs, _ = env.reset() # or just step randomly first time
+    for step in tqdm(range(n_steps)):
+        obs = torch.from_numpy(obs)
+        with torch.no_grad():
+            action, _, _, _, _ = agent.get_action_and_value(obs.to(device))
+        obs, reward, term, trunc, info = env.step(action.tolist())
+    
+    rets_ext = [e.past_returns_ext for e in env.envs]
+    rets_eps = [e.past_returns_eps for e in env.envs]
+    rets_ext = np.array([i for sublist in rets_ext for i in sublist])
+    rets_eps = np.array([i for sublist in rets_eps for i in sublist])
+    return env, rets_ext, rets_eps
+
 def callback(args, main_kwargs, **kwargs):
     data = dict()
     
     data['distill/loss_bc'] = kwargs['loss_bc'].item()
     data['distill/loss_entropy'] = kwargs['loss_entropy'].item()
+    
+    if kwargs['i_step']%(kwargs['n_steps']//10)==0:
+        # seen levels
+        levels = list(range(args.pretrain_levels))
+        env, rets_ext, rets_eps = eval_performance(main_kwargs['agent'], levels, n_steps=2000, device=args.device)
+        data['charts/seen_rets_ext_hist'] = wandb.Histogram(rets_ext.tolist())
+        data['charts/seen_rets_eps_hist'] = wandb.Histogram(rets_eps.tolist())
+        data['charts/seen_rets_ext'] = np.mean(rets_ext)
+        data['charts/seen_rets_eps'] = np.mean(rets_eps)
+        
+        video = generate_video(env, shape=(2,2))
+        data['media/seen_video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
+        
+        # zero-shot levels
+        levels = list(range(10000, 10000+128))
+        env, rets_ext, rets_eps = eval_performance(main_kwargs['agent'], levels, n_steps=2000, device=args.device)
+        data['charts/zeroshot_rets_ext_hist'] = wandb.Histogram(rets_ext.tolist())
+        data['charts/zeroshot_rets_eps_hist'] = wandb.Histogram(rets_eps.tolist())
+        data['charts/zeroshot_rets_ext'] = np.mean(rets_ext)
+        data['charts/zeroshot_rets_eps'] = np.mean(rets_eps)
+        
+        video = generate_video(env, shape=(2,2))
+        data['media/zeroshot_video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
+        
     
     if 'pbar' in kwargs:
         kwargs['pbar'].set_postfix({key: val for key, val in data.items() if isinstance(val, (int, float))})
@@ -120,11 +153,13 @@ def main(args):
             # monitor_gym=True,
         )
         
-    levels, files = get_levels_files(args.env, args.pretrain_levels, args.pretrain_obj)
-    levels, files, _, n_steps = get_updated_levels_files(levels, files, size=args.ds_size)
+    # levels, files = get_levels_files(args.env, args.pretrain_levels, args.pretrain_obj)
+    # levels, files, _, n_steps = get_updated_levels_files(levels, files, size=args.ds_size)
+    level2files = get_level2files(args.env, args.pretrain_levels, args.pretrain_obj)
+    level2file = {k: v[-1] for k, v in level2files.items()}
+    n_steps = int(args.ds_size/(4*64*64*3)/len(level2files))
 
-    x_train, y_train = collect_dataset(levels, files, args.env, n_steps, device=args.device)
-
+    x_train, y_train = collect_dataset(args.env, level2file, n_steps, device=args.device)
     print(f'Dataset size: {x_train.shape}, {y_train.shape}, {x_train.dtype}')
     x_train = rearrange(x_train, '... fs h w c -> (...) fs h w c')
     y_train = rearrange(y_train, '... -> (...)')
