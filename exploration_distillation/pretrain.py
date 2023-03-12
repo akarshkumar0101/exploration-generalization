@@ -30,7 +30,7 @@ parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: 
 
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--coef_entropy', type=float, default=0) # 1e-2
-parser.add_argument('--ds-size', type=float, default=10e9)
+parser.add_argument('--ds-size', type=float, default=2e9)
 parser.add_argument('--batch-size', type=int, default=512)
 parser.add_argument('--n-steps', type=int, default=5000)
 
