@@ -51,7 +51,7 @@ def get_level2files(env_name, pretrain_levels, pretrain_obj):
 
 def collect_rollout(env, agent, n_steps, device=None):
     x, y = [], []
-    agent = agent.to(device)
+    agent = agent.to(device).eval()
     obs, _ = env.reset() # or just step randomly first time
     for step in range(n_steps):
         obs = torch.from_numpy(obs)
@@ -62,18 +62,22 @@ def collect_rollout(env, agent, n_steps, device=None):
         obs, reward, term, trunc, info = env.step(action.tolist())
     return torch.stack(x), torch.stack(y)
 
-def collect_dataset(env_name, level2file, n_steps, device=None):
+def collect_batch(env_name, level2files, n_agents, n_steps, device=None):
     env = env_utils.make_env(1, env_name=f'procgen-{env_name}-v0', level_id=0)
     agent = models.Agent(env)
-
-    x, y = [], []
-    for level, file in tqdm(level2file.items()):
+    
+    lf = [(level, file) for level, files in level2files.items() for file in files]
+    lf = [lf[i] for i in np.random.choice(len(lf), size=n_agents)]
+    
+    envs, x, y = [], [], []
+    for level, file in tqdm(lf):
         agent.load_state_dict(torch.load(file))
-        env = env_utils.make_env(1, env_name=f'procgen-{env_name}-v0', level_id=level)
+        env = env_utils.make_env(4, env_name=f'procgen-{env_name}-v0', level_id=level)
         xi, yi = collect_rollout(env, agent, n_steps, device=device)
+        envs.append(env)
         x.append(xi)
         y.append(yi)
-    return torch.stack(x), torch.stack(y)
+    return envs, torch.stack(x), torch.stack(y)
 
 def eval_performance(agent, levels, n_steps=2000, device=None):
     np.random.seed(0)
@@ -96,6 +100,13 @@ def eval_performance(agent, levels, n_steps=2000, device=None):
 
 def callback(args, main_kwargs, **kwargs):
     data = dict()
+    
+    
+    envs_expert = main_kwargs['envs_expert']
+    envs = [e for envs in envs_expert for e in envs]
+    rets_eps = [r for e in envs for r in e.past_returns_eps]
+    
+    
     
     data['distill/loss_bc'] = kwargs['loss_bc'].item()
     data['distill/loss_entropy'] = kwargs['loss_entropy'].item()
@@ -123,11 +134,40 @@ def callback(args, main_kwargs, **kwargs):
         video = generate_video(env, shape=(2,2))
         data['media/zeroshot_video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
         
-    
     if 'pbar' in kwargs:
         kwargs['pbar'].set_postfix({key: val for key, val in data.items() if isinstance(val, (int, float))})
     if args.track:
         wandb.log(data)
+        
+        
+def train_bc_agent(agent, get_next_batch, batch_size=32, n_steps=10, lr=1e-3, coef_entropy=0.0,
+                   device=None, tqdm=None, callback_fn=None):
+    """
+    Behavior Cloning
+    """
+    agent = agent.to(device)
+    loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
+    opt = torch.optim.Adam(agent.parameters(), lr=lr)
+    pbar = range(n_steps)
+    if tqdm is not None: pbar = tqdm(pbar)
+    for i_step in pbar:
+        x_batch, y_batch = get_next_batch(**locals())
+        x_batch, y_batch = x_batch.float().to(device), y_batch.long().to(device)
+        dist, _, _ = agent.get_dist_and_values(x_batch)
+
+        loss_bc = loss_fn(dist.logits, y_batch).mean()
+        loss_entropy = dist.entropy().mean()
+        loss = loss_bc - coef_entropy * loss_entropy
+
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+        if tqdm is not None:
+            pbar.set_postfix(loss_bc=loss_bc.item(), entropy=loss_entropy.item())
+        if callback_fn is not None:
+            callback_fn(**locals())
+        
         
 def main(args):
     assert args.pretrain_obj in {'ext', 'int', 'eps', 'epd'}
@@ -156,8 +196,8 @@ def main(args):
     # levels, files = get_levels_files(args.env, args.pretrain_levels, args.pretrain_obj)
     # levels, files, _, n_steps = get_updated_levels_files(levels, files, size=args.ds_size)
     level2files = get_level2files(args.env, args.pretrain_levels, args.pretrain_obj)
-    level2file = {k: v[-1] for k, v in level2files.items()}
-    n_steps = int(args.ds_size/(4*64*64*3)/len(level2files))
+    level2files = {k: [v[-1]] for k, v in level2files.items()}
+    # n_steps = int(args.ds_size/(4*64*64*3)/len(level2files))
 
     x_train, y_train = collect_dataset(args.env, level2file, n_steps, device=args.device)
     print(f'Dataset size: {x_train.shape}, {y_train.shape}, {x_train.dtype}')
@@ -172,7 +212,18 @@ def main(args):
     print(f'Agent # parameters: {n_params:012d}')
     
     cb = partial(callback, args=args, main_kwargs=locals())
-    bc.train_bc_agent(agent, x_train, y_train, batch_size=args.batch_size,
+    
+    envs_expert, x_train, y_train = None, None, None
+    def get_next_batch(i_step, **kwargs):
+        if i_step%10==0:
+            envs_expert, x_train, y_train = collect_batch(args.env, level2files, 10, 1000, args.device)
+            # log this stuff
+            
+        idxs_batch = torch.randperm(len(x_train))[:batch_size]
+        x_batch, y_batch = x_train[idxs_batch], y_train[idxs_batch]
+        return x_batch, y_batch
+    
+    bc.train_bc_agent(agent, get_next_batch, batch_size=args.batch_size,
                       n_steps=args.n_steps, lr=args.lr, coef_entropy=args.coef_entropy,
                       device=args.device, tqdm=tqdm, callback_fn=cb)
     
