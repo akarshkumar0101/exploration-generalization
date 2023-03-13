@@ -9,6 +9,7 @@ from tqdm.auto import tqdm
 parser = argparse.ArgumentParser()
 # general parameters
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
+parser.add_argument("--project", type=str, default='project-name')
 parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default=None)
@@ -25,6 +26,9 @@ def main(args):
     print(f'Starting run with args: {args}')
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+
+    if args.name is not None:
+        args.name = args.name.format(**args.__dict__)
 
     if args.track:
         run = wandb.init(config=args, name=args.name, save_code=True)
