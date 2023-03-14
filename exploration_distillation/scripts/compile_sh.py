@@ -36,10 +36,13 @@ def main(args):
         lines = f.readlines()
         lines = [line.strip() for line in lines]
         lines = [line for line in lines if line]
+        lines = [line for line in lines if not line.startswith('#')]
     commands = []
     for line in lines:
+        commands.append(f'# {line}')
         for command in list_commands(line):
             commands.append(command)
+        commands.append('')
     for command in commands:
         print(command)
 
