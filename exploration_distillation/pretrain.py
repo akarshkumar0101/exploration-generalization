@@ -29,14 +29,15 @@ parser.add_argument("--env", type=str, default="miner", help="the id of the envi
 parser.add_argument("--pretrain-levels", type=int, default=1, help='level')
 parser.add_argument("--pretrain-obj", type=str, default='ext', help='objective: ext or int')
 
-parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--lr', type=float, default=3e-4)
 parser.add_argument('--coef_entropy', type=float, default=0)  # 1e-2
 # parser.add_argument('--ds-size', type=float, default=2e9)
 parser.add_argument('--batch-size', type=int, default=4096)
-parser.add_argument('--n-steps', type=int, default=5000)
+parser.add_argument('--n-steps', type=int, default=50000)
 
-parser.add_argument('--n-viz-fast', type=int, default=10000)
-parser.add_argument('--n-viz-slow', type=int, default=10)
+parser.add_argument('--n-viz-fast', type=int, default=50000)
+parser.add_argument('--n-viz-slow', type=int, default=30)
+
 
 # TODO rename pretrain.py to distill.py
 
@@ -104,25 +105,25 @@ def eval_performance(agent, env_name, levels, n_steps=2000, device=None):
 def callback(args, main_kwargs, **kwargs):
     data = dict()
 
-    data['distill/loss_bc'] = kwargs['loss_bc'].item()
-    data['distill/loss_entropy'] = kwargs['loss_entropy'].item()
-
-    envs_experts = main_kwargs['batch_data']['envs_expert']
-    envs = [e for svenv in envs_experts for e in svenv.envs]
-    rets_ext = [r for e in envs for r in e.past_returns_ext]
-    rets_eps = [r for e in envs for r in e.past_returns_eps]
-    data['charts_hist/expert_rets_ext_hist'] = wandb.Histogram(rets_ext)
-    data['charts_hist/expert_rets_eps_hist'] = wandb.Histogram(rets_eps)
-    data['charts/expert_rets_ext'] = np.mean(rets_ext)
-    data['charts/expert_rets_eps'] = np.mean(rets_eps)
-
     if kwargs['i_step'] % max(1, (kwargs['n_steps'] // args.n_viz_fast)) == 0:
-        pass
+        data['distill/loss_bc'] = kwargs['loss_bc'].item()
+        data['distill/loss_entropy'] = kwargs['loss_entropy'].item()
+        dist = torch.distributions.Categorical(probs=kwargs['y_probs_batch'])
+        data['distill/expert_entropy'] = dist.entropy().mean().item()
+
+        envs_experts = main_kwargs['batch_data']['envs_expert']
+        envs = [e for svenv in envs_experts for e in svenv.envs]
+        rets_ext = [r for e in envs for r in e.past_returns_ext]
+        rets_eps = [r for e in envs for r in e.past_returns_eps]
+        data['charts_hist/expert_rets_ext_hist'] = wandb.Histogram(rets_ext)
+        data['charts_hist/expert_rets_eps_hist'] = wandb.Histogram(rets_eps)
+        data['charts/expert_rets_ext'] = np.mean(rets_ext)
+        data['charts/expert_rets_eps'] = np.mean(rets_eps)
 
     if kwargs['i_step'] % max(1, (kwargs['n_steps'] // args.n_viz_slow)) == 0:
         levels_seen = (np.arange(128) % args.pretrain_levels).tolist()
-        levels_zershot = (np.arange(128) + 10000).tolist()
-        levels_all = levels_seen + levels_zershot
+        levels_zeroshot = (np.arange(128) + 10000).tolist()
+        levels_all = levels_seen + levels_zeroshot
         env, rets_ext, rets_eps = eval_performance(main_kwargs['agent'], args.env, levels_all, n_steps=1000,
                                                    device=args.device)
         envs_seen, envs_zeroshot = env.envs[:len(levels_seen)], env.envs[len(levels_seen):]
