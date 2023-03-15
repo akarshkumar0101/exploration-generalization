@@ -74,6 +74,71 @@ class Agent(nn.Module):
         dist = torch.distributions.Categorical(logits=logits)
         return dist, self.critic_ext(x), self.critic_int(x)
 
+
+
+class BigAgent(nn.Module):
+    def __init__(self, env):
+        super().__init__()
+        fs, h, w, c = env.single_observation_space.shape
+
+        self.network = nn.Sequential(
+            layer_init(nn.Conv2d(fs * c, 64, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 128, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(128, 128, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(128 * 4 * 4, 512)),
+            nn.ReLU(),
+        )
+
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, env.single_action_space.n), std=0.01),
+        )
+        self.critic_ext = nn.Sequential(
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 1), std=0.01),
+        )
+        self.critic_int = nn.Sequential(
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512), std=0.01),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 1), std=0.01),
+        )
+
+    def preprocess(self, x):
+        return rearrange(x, 'b fs h w c -> b (fs c) h w').float() / 128. - 1.  # [0, 255] -> [-1, 1]
+
+    def get_value(self, x):
+        x = self.network(self.preprocess(x))
+        return self.critic_ext(x), self.critic_int(x)
+
+    def get_action_and_value(self, x, action=None):
+        x = self.preprocess(x)
+        x = self.network(x)
+        logits = self.actor(x)
+        probs = torch.distributions.Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic_ext(x), self.critic_int(x)
+
+    def get_dist_and_values(self, x):
+        x = self.preprocess(x)
+        x = self.network(x)
+        logits = self.actor(x)
+        dist = torch.distributions.Categorical(logits=logits)
+        return dist, self.critic_ext(x), self.critic_int(x)
+
+
 class RNDModel(nn.Module):
     def __init__(self, env, obs_shape=(64, 64, 3)):
         super().__init__()
@@ -174,3 +239,12 @@ class RNDModel(nn.Module):
 #         latent_cat = torch.cat([latent, latent_next], dim=-1)
 #         logits = self.idm(latent_cat)
 #         return self.cel(logits, action).mean()
+
+
+# TODO:
+"""
+- make distillation network bigger
+- smooth out dataset transitions
+- use dagger style imitation learning
+- 
+"""

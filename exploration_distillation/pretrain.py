@@ -52,7 +52,7 @@ def get_level2files(args):
     return level2files
 
 
-def collect_rollout(env, agent, n_steps, device=None):
+def collect_rollout(env, agent, n_steps, device=None, pbar=None):
     x, y, y_probs = [], [], []
     agent = agent.to(device).eval()
     obs, _ = env.reset()  # or just step randomly first time
@@ -66,6 +66,8 @@ def collect_rollout(env, agent, n_steps, device=None):
         y.append(action.cpu())
         y_probs.append(dist.probs.cpu())
         obs, reward, term, trunc, info = env.step(action.tolist())
+        if pbar is not None:
+            pbar.update()
     return torch.stack(x), torch.stack(y), torch.stack(y_probs)
 
 
@@ -77,10 +79,11 @@ def collect_batch(env_name, level2files, n_agents, n_envs, n_steps, device=None)
     lf = [lf[i] for i in np.random.choice(len(lf), size=n_agents)]
 
     envs, x, y, y_probs = [], [], [], []
+    pbar = tqdm(total=n_agents*n_steps)
     for level, file in lf:
         agent.load_state_dict(torch.load(file))
         env = env_utils.make_env(n_envs, env_name=f'procgen-{env_name}-v0', level_id=level)
-        xi, yi, yi_probs = collect_rollout(env, agent, n_steps, device=device)
+        xi, yi, yi_probs = collect_rollout(env, agent, n_steps, device=device, pbar=pbar)
         envs.append(env)
         x.append(xi)
         y.append(yi)
