@@ -31,10 +31,12 @@ parser.add_argument("--save-dir", type=str, default=None)
 
 # Experiment arguments
 parser.add_argument("--env", type=str, default="miner", help="the id of the environment")
-parser.add_argument("--level", type=int, default=0, help='level')
+parser.add_argument("--level-start", type=int, default=0, help='level')
+parser.add_argument("--n-levels", type=int, default=1, help='level')
 parser.add_argument("--train-obj", type=str, default='ext', help='objective: ext/int/eps')
-parser.add_argument("--pretrain-levels", type=int, default=None, help='level')
-parser.add_argument("--pretrain-obj", type=str, default=None, help='objective: ext or int')
+
+parser.add_argument('--distribution-mode', type=str, default='easy')
+parser.add_argument('--use-backgrounds', type=bool, default=True)
 
 # Algorithm arguments
 parser.add_argument("--total-timesteps", type=float, default=4e6,
@@ -236,7 +238,7 @@ def main(args):
         distribution_mode=args.distribution_mode, use_backgrounds=args.use_backgrounds, use_generated_assets=False,
         async_=args.async_env)
     env_test = env_utils.make_env(
-        args.num_envs, args.env, 1000000, 1000000, args.seed, args.train_obj,
+        args.num_envs, args.env,         10000000,      10000000, args.seed, args.train_obj,
         distribution_mode=args.distribution_mode, use_backgrounds=args.use_backgrounds, use_generated_assets=False,
         async_=args.async_env)
 
