@@ -4,6 +4,8 @@ import gym as gym_old
 import gymnasium as gym
 import numpy as np
 
+import procgen
+
 
 class MyProcgenEnv(gym.Wrapper):
     def __init__(self, env):
@@ -147,7 +149,7 @@ class RewardSelector(gym.Wrapper):
 def make_single_env(env_name='miner', level_start=0, n_levels=1,
                     seed=0, video_folder=None, reward_fn='ext', **kwargs):
     # it's okay to call reset when a term/trunc is emitted (SyncVectorEnv), but that's it
-    env = gym_old.make(f'procgen:procgen-{env_name}-v0', num_levels=n_levels, start_level=level_start, **kwargs)
+    env = gym_old.make(f'procgen-{env_name}-v0', num_levels=n_levels, start_level=level_start, **kwargs)
     env = MyProcgenEnv(env)
     if video_folder is not None:
         env = gym.wrappers.RecordVideo(env, video_folder)
