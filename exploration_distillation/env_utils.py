@@ -159,7 +159,7 @@ def make_single_env(env_name='miner', level_start=0, n_levels=1,
     env = EpisodeStats(env)
     # env = gym.wrappers.RecordEpisodeStatistics(env)
     # env = RescaleObservation(env)
-    env = gym.wrappers.FrameStack(env, 4)
+    env = gym.wrappers.FrameStack(env, 1)
     env.observation_space.seed(seed)
     env.action_space.seed(seed)
     return env

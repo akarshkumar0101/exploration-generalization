@@ -53,9 +53,9 @@ parser.add_argument("--gamma", type=float, default=0.999,
                     help="the discount factor gamma")
 parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="the lambda for the general advantage estimation")
-parser.add_argument("--num-minibatches", type=int, default=32,
+parser.add_argument("--num-minibatches", type=int, default=8,
                     help="the number of mini-batches")
-parser.add_argument("--update-epochs", type=int, default=1,
+parser.add_argument("--update-epochs", type=int, default=3,
                     help="the K epochs to update the policy")
 parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                     help="Toggles advantages normalization")
@@ -145,7 +145,7 @@ def callback(args, main_kwargs, **kwargs):
     env_train = main_kwargs['env_train']
     env_test = main_kwargs['env_test']
 
-    if (kwargs['update'] - 5) % (kwargs['num_updates'] // 20) == 0:
+    if (kwargs['update'] - 1) % (kwargs['num_updates'] // 40) == 0:
         rollout(env_test, main_kwargs['agent'], 1000, device=args.device, pbar=None)
 
     # coverage map
@@ -184,7 +184,7 @@ def callback(args, main_kwargs, **kwargs):
             data[f'{prefix}_charts/traj_lens'] = traj_lens.mean()
 
         vids_exist = np.all([e.past_traj_obs is not None for e in env.envs])
-        if args.track and vids_exist and (kwargs['update'] - 5) % (kwargs['num_updates'] // 20) == 0:
+        if args.track and vids_exist and (kwargs['update'] - 1) % (kwargs['num_updates'] // 40) == 0:
             video = generate_video(env.envs)
             data[f'{prefix}_media/video'] = wandb.Video(rearrange(video, 't h w c->t c h w'), fps=15)
 
