@@ -53,9 +53,9 @@ parser.add_argument("--gamma", type=float, default=0.999,
                     help="the discount factor gamma")
 parser.add_argument("--gae-lambda", type=float, default=0.95,
                     help="the lambda for the general advantage estimation")
-parser.add_argument("--num-minibatches", type=int, default=8,
+parser.add_argument("--num-minibatches", type=int, default=32,  # 8
                     help="the number of mini-batches")
-parser.add_argument("--update-epochs", type=int, default=3,
+parser.add_argument("--update-epochs", type=int, default=1,  # 3
                     help="the K epochs to update the policy")
 parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                     help="Toggles advantages normalization")
