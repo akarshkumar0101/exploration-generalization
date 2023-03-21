@@ -147,7 +147,7 @@ class RewardSelector(gym.Wrapper):
 def make_single_env(env_name='miner', level_start=0, n_levels=1,
                     seed=0, video_folder=None, reward_fn='ext', **kwargs):
     # it's okay to call reset when a term/trunc is emitted (SyncVectorEnv), but that's it
-    env = gym_old.make(f'procgen-{env_name}-v0', num_levels=n_levels, start_level=level_start, **kwargs)
+    env = gym_old.make(f'procgen:procgen-{env_name}-v0', num_levels=n_levels, start_level=level_start, **kwargs)
     env = MyProcgenEnv(env)
     if video_folder is not None:
         env = gym.wrappers.RecordVideo(env, video_folder)
@@ -180,3 +180,7 @@ def make_env(n_envs=10, env_name='miner', level_start=0, n_levels=1,
                        reward_fn=reward_fn, **kwargs) for i in range(n_envs)]
     env = gym.vector.AsyncVectorEnv(env_fns) if async_ else gym.vector.SyncVectorEnv(env_fns)
     return env
+
+
+if __name__=='__main__':
+    make_env()
