@@ -106,8 +106,8 @@ def run(agent, rnd_model, envs, tqdm=None, device=None, callback_fn=None,
 
             next_obs, reward, term, trunc, info = envs.step(action.cpu().numpy())
             done = np.logical_or(term, trunc)
-            rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+            rewards[step] = torch.tensor(reward).float().to(device).view(-1)
+            next_obs, next_done = torch.Tensor(next_obs).float().to(device), torch.Tensor(done).to(device)
             predict_next_feature, target_next_feature = rnd_model(next_obs)
             curiosity_rewards[step] = ((target_next_feature - predict_next_feature).pow(2).sum(1) / 2).data
             # for idx, d in enumerate(done):
