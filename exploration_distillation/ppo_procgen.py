@@ -470,8 +470,8 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # main(parse_args())
+    main(parse_args())
     # use default arguments from argparse
-    envs = make_env('ext', 64, 'miner', 0, 0, 'easy', 0.999)
-    envs.reset()
-    envs.step(np.array([0]*64))
+    # envs = make_env('ext', 64, 'miner', 0, 0, 'easy', 0.999)
+    # envs.reset()
+    # envs.step(np.array([0]*64))
