@@ -10,7 +10,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from einops import rearrange
 from procgen import ProcgenEnv
+from stable_baselines3.common.vec_env import VecEnvWrapper
 from torch.distributions.categorical import Categorical
 from tqdm.auto import tqdm
 
@@ -37,6 +39,11 @@ def parse_args():
                         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="whether to capture videos of the agent performances (check out `videos` folder)")
+    parser.add_argument('--num-levels', type=int, default=0)
+    parser.add_argument('--start-level', type=int, default=0)
+    parser.add_argument('--distribution-mode', type=str, default='easy')
+
+    parser.add_argument('--obj', type=str, default='ext')
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="miner",
@@ -157,16 +164,142 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+class StoreObs(VecEnvWrapper):
+    def __init__(self, venv, n_envs=16, store_limit=1000):
+        super().__init__(venv)
+        self.n_envs = n_envs
+        self.store_limit = store_limit
+        self.past_obs = []
+
+    def reset(self):
+        obs = self.venv.reset()
+        self.past_obs.append(obs[:self.n_envs])
+        return obs
+
+    def step_wait(self):
+        obs, rew, done, infos = self.venv.step_wait()
+        self.past_obs.append(obs[:self.n_envs])
+        self.past_obs = self.past_obs[-self.store_limit:]
+        return obs, rew, done, infos
+
+
+class VecMinerEpisodicCoverageReward(VecEnvWrapper):
+    def __init__(self, venv, obj):
+        super().__init__(venv)
+        self.pobs, self.mask_episodic = None, None
+        self.obj = obj
+
+    def reset(self):
+        obs = self.venv.reset()
+        self.pobs = obs  # n_envs, h, w, c
+        self.mask_episodic = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
+        return obs
+
+    def step_wait(self):
+        obs, rew, done, info = self.venv.step_wait()
+        mask_change = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
+        rew_eps = (mask_change & (~self.mask_episodic)).mean(axis=(-1, -2))
+        rew_eps = np.sign(rew_eps)  # n_envs
+        rew_eps[done] = 0.
+        self.mask_episodic = self.mask_episodic | mask_change
+        self.pobs = obs
+        self.mask_episodic[done] = (np.abs(obs[done] - self.pobs[done]) > 1e-3).any(axis=-1)
+        for i in range(self.num_envs):
+            info[i]['rew_eps'] = rew_eps[i]
+            info[i]['rew_ext'] = rew[i]
+        rew = rew if self.obj == 'ext' else rew_eps
+        return obs, rew, done, info
+
+
+class ReturnTracker(VecEnvWrapper):
+    def __init__(self, venv):
+        super().__init__(venv)
+        self._ret_ext, self._ret_eps, self._traj_len = None, None, None
+
+    def reset(self):
+        obs = self.venv.reset()
+        self._ret_ext = np.zeros(self.num_envs, dtype=np.float32)
+        self._ret_eps = np.zeros(self.num_envs, dtype=np.float32)
+        self._traj_len = np.zeros(self.num_envs, dtype=np.int32)
+        return obs
+
+    def step_wait(self):
+        obs, rew, dones, infos = self.venv.step_wait()
+        self._ret_ext += np.array([info['rew_ext'] for info in infos])
+        self._ret_eps += np.array([info['rew_eps'] for info in infos])
+        self._traj_len += 1
+
+        for i, info in enumerate(infos):
+            if dones[i]:
+                info['ret_ext'] = self._ret_ext[i]
+                info['ret_eps'] = self._ret_eps[i]
+                info['traj_len'] = self._traj_len[i]
+
+        self._ret_ext[dones] = 0.
+        self._ret_eps[dones] = 0.
+        self._traj_len[dones] = 0
+
+        return obs, rew, dones, infos
+
+
+def make_env(obj, num_envs, env_id, num_levels, start_level, distribution_mode, gamma):
+    envs = ProcgenEnv(num_envs=num_envs, env_name=env_id, num_levels=num_levels,
+                      start_level=start_level, distribution_mode=distribution_mode)
+    envs = gym.wrappers.TransformObservation(envs, lambda obs: obs["rgb"])
+    envs.single_action_space = envs.action_space
+    envs.single_observation_space = envs.observation_space["rgb"]
+    envs.is_vector_env = True
+    envs = gym.wrappers.RecordEpisodeStatistics(envs)
+    envs = StoreObs(envs)
+    envs = VecMinerEpisodicCoverageReward(envs, obj)
+    envs = ReturnTracker(envs)
+    envs = gym.wrappers.NormalizeReward(envs, gamma=gamma)
+    envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
+    return envs
+
+
+def rollout_agent_test_env(args, agent):
+    device = torch.device(args.device)
+    # envs = make_env(args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode, args.gamma)
+    envs = make_env(args.num_envs, args.env_id, 0, 1000000000, args.distribution_mode, args.gamma)
+    next_obs = torch.Tensor(envs.reset()).to(device)
+    infoss = []
+    for i in range(1000):
+        with torch.no_grad():
+            action, _, _, _ = agent.get_action_and_value(next_obs)
+            next_obs, reward, done, infos = envs.step(action.cpu().numpy())
+            next_obs = torch.Tensor(next_obs).to(device)
+            infoss.append(infos)
+    return envs, infoss
+
+
+def record_agent_data(envs, infoss, store_vid=True):
+    data = {}
+    rets_ext = np.array([info['ret_ext'] for infos in infoss for info in infos if 'ret_ext' in info])
+    rets_eps = np.array([info['ret_eps'] for infos in infoss for info in infos if 'ret_eps' in info])
+    traj_lens = np.array([info['traj_len'] for infos in infoss for info in infos if 'traj_len' in info])
+    data['charts/ret_ext'] = np.mean(rets_ext)
+    data['charts_hist/ret_ext'] = wandb.Histogram(rets_ext)
+    data['charts/ret_eps'] = np.mean(rets_eps)
+    data['charts_hist/ret_eps'] = wandb.Histogram(rets_eps)
+    data['charts/traj_len'] = np.mean(traj_lens)
+    data['charts_hist/traj_len'] = wandb.Histogram(traj_lens)
+    if store_vid:
+        vid = np.stack(envs.past_obs)  # 1000, 16, 64, 64, 3
+        vid = rearrange(vid, 't (H W) h w c -> t (H h) (W w) c', H=4, W=4)
+        data[f'media/vid'] = wandb.Video(rearrange(vid, 't h w c->t c h w'), fps=15)
+    return data
+
+
+def main(args):
+    args.run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             # sync_tensorboard=True,
             config=args,
-            name=run_name,
+            name=args.run_name,
             # monitor_gym=True,
             save_code=True,
         )
@@ -179,17 +312,7 @@ if __name__ == "__main__":
     device = torch.device(args.device)
 
     # env setup
-    envs = ProcgenEnv(num_envs=args.num_envs, env_name=args.env_id, num_levels=0, start_level=0,
-                      distribution_mode="easy")
-    envs = gym.wrappers.TransformObservation(envs, lambda obs: obs["rgb"])
-    envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space["rgb"]
-    envs.is_vector_env = True
-    envs = gym.wrappers.RecordEpisodeStatistics(envs)
-    if args.capture_video:
-        envs = gym.wrappers.RecordVideo(envs, f"videos/{run_name}")
-    envs = gym.wrappers.NormalizeReward(envs, gamma=args.gamma)
-    envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
+    envs = make_env(args.obj, args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode, args.gamma)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -219,7 +342,7 @@ if __name__ == "__main__":
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
-        infos = []
+        infoss = []
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
             obs[step] = next_obs
@@ -233,17 +356,11 @@ if __name__ == "__main__":
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, done, info = envs.step(action.cpu().numpy())
+            next_obs, reward, done, infos = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
-            infos.append(info)
-        rets = np.array([item['episode']['r'] for info in infos for item in info if 'episode' in item])
-        traj_lens = np.array([item['episode']['l'] for info in infos for item in info if 'episode' in item])
-        data['charts/episodic_return'] = np.mean(rets)
-        data['charts_hist/episodic_return'] = wandb.Histogram(rets)
-        data['charts/episodic_length'] = np.mean(traj_lens)
-        data['charts_hist/episodic_length'] = wandb.Histogram(traj_lens)
+            infoss.append(infos)
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -338,8 +455,20 @@ if __name__ == "__main__":
         data['details/explained_variance'] = explained_var
         data['meta/steps_per_second'] = int(global_step / (time.time() - start_time))
 
+        viz_slow = (update - 1) % (num_updates // 10) == 0
+        data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
+        data.update({f'{k}_train': v for k, v in data_ret.items()})
+        if viz_slow:
+            envs_test, infoss_test = rollout_agent_test_env(args, agent)
+            data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
+            data.update({f'{k}_test': v for k, v in data_ret.items()})
+
         pbar.set_postfix(dict(episodic_reward=data['charts/episodic_return']))
         if args.track:
             wandb.log(data)
 
     envs.close()
+
+
+if __name__ == "__main__":
+    main(parse_args())
