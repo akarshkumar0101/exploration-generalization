@@ -462,7 +462,7 @@ def main(args):
             data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        pbar.set_postfix(dict(episodic_reward=data['charts/episodic_return']))
+        pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
         if args.track:
             wandb.log(data)
 
