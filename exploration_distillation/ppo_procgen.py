@@ -285,6 +285,8 @@ def record_agent_data(envs, infoss, store_vid=True):
     data['charts_hist/traj_len'] = wandb.Histogram(traj_lens)
     if store_vid:
         vid = np.stack(envs.past_obs)  # 1000, 16, 64, 64, 3
+        vid[:, :, 0, :, :] = 0  # black border on first row
+        vid[:, :, :, 0, :] = 0  # black border on first col
         vid = rearrange(vid, 't (H W) h w c -> t (H h) (W w) c', H=4, W=4)
         data[f'media/vid'] = wandb.Video(rearrange(vid, 't h w c->t c h w'), fps=15)
     return data
@@ -454,15 +456,15 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/steps_per_second'] = int(global_step / (time.time() - start_time))
 
-        viz_slow = (update - 1) % (num_updates // 10) == 0
-        data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
-        data.update({f'{k}_train': v for k, v in data_ret.items()})
-        if viz_slow:
-            envs_test, infoss_test = rollout_agent_test_env(args, agent)
-            data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
-            data.update({f'{k}_test': v for k, v in data_ret.items()})
-
-        pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
+        # viz_slow = (update - 1) % (num_updates // 10) == 0
+        # data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
+        # data.update({f'{k}_train': v for k, v in data_ret.items()})
+        # if viz_slow:
+        #     envs_test, infoss_test = rollout_agent_test_env(args, agent)
+        #     data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
+        #     data.update({f'{k}_test': v for k, v in data_ret.items()})
+        #
+        # pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
         if args.track:
             wandb.log(data)
 
