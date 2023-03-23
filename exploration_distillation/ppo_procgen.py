@@ -1,6 +1,5 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_procgenpy
 import argparse
-import os
 import random
 import time
 from distutils.util import strtobool
@@ -21,10 +20,8 @@ import wandb
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-                        help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
-                        help="seed of the experiment")
+    parser.add_argument("--name", type=str, default='{env_id}_{num_levels:2.1e}_{obj}_gamma={gamma}')
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     # parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -32,14 +29,14 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    parser.add_argument("--project", type=str, default="egb",
                         help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
+    parser.add_argument("--entity", type=str, default=None,
                         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="whether to capture videos of the agent performances (check out `videos` folder)")
-    parser.add_argument('--num-levels', type=int, default=0)
-    parser.add_argument('--start-level', type=int, default=0)
+    parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
+    parser.add_argument('--start-level', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--distribution-mode', type=str, default='easy')
 
     parser.add_argument('--obj', type=str, default='ext')
@@ -47,7 +44,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="miner",
                         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=int(25e6),
+    parser.add_argument("--total-timesteps", type=lambda x: int(float(x)), default=int(25e6),
                         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=5e-4,
                         help="the learning rate of the optimizer")
@@ -293,14 +290,14 @@ def record_agent_data(envs, infoss, store_vid=True):
 
 
 def main(args):
-    args.run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.name = args.name.format(**args.__dict__)
     if args.track:
         wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
+            project=args.project,
+            entity=args.entity,
             # sync_tensorboard=True,
             config=args,
-            name=args.run_name,
+            name=args.name,
             # monitor_gym=True,
             save_code=True,
         )
@@ -313,7 +310,8 @@ def main(args):
     device = torch.device(args.device)
 
     # env setup
-    envs = make_env(args.obj, args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode, args.gamma)
+    envs = make_env(args.obj, args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode,
+                    args.gamma)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
@@ -456,24 +454,42 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/steps_per_second'] = int(global_step / (time.time() - start_time))
 
-        # viz_slow = (update - 1) % (num_updates // 10) == 0
-        # data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
-        # data.update({f'{k}_train': v for k, v in data_ret.items()})
-        # if viz_slow:
-        #     envs_test, infoss_test = rollout_agent_test_env(args, agent)
-        #     data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
-        #     data.update({f'{k}_test': v for k, v in data_ret.items()})
-        #
-        # pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
+        viz_slow = (update - 1) % (num_updates // 20) == 0
+        data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
+        data.update({f'{k}_train': v for k, v in data_ret.items()})
+        if viz_slow:
+            envs_test, infoss_test = rollout_agent_test_env(args, agent)
+            data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
+            data.update({f'{k}_test': v for k, v in data_ret.items()})
+
+        pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
         if args.track:
             wandb.log(data)
 
     envs.close()
 
 
+def test_env_speed():
+    env = make_env('ext', 64, 'miner', 0, 0, 'easy', 0.999)
+    env.reset()
+    print(env.action_space)
+    start = time.time()
+    steps = 10000
+    for i in tqdm(range(steps)):
+        env.step(np.array([env.action_space.sample() for _ in range(64)]))
+    print((steps * 64) / (time.time() - start))
+
+
 if __name__ == "__main__":
+    # test_env_speed()
+
     main(parse_args())
     # use default arguments from argparse
     # envs = make_env('ext', 64, 'miner', 0, 0, 'easy', 0.999)
     # envs.reset()
     # envs.step(np.array([0]*64))
+
+# TODO: optimize intrinsic rewards to run batched (on the agent side)
+# TODO: record videos manually (not using my gym wrappers on the environment)
+# Every n_updates//20 steps, create a separate test and train env and generate rollouts
+# and manually stich together videos using a obs variable.
