@@ -238,7 +238,7 @@ def main(args):
         distribution_mode=args.distribution_mode, use_backgrounds=args.use_backgrounds, use_generated_assets=False,
         async_=args.async_env)
     env_test = env_utils.make_env(
-        args.num_envs, args.env,         10000000,      10000000, args.seed, reward_fn=args.train_obj,
+        args.num_envs, args.env,    1000000000000, 1000000000000, args.seed, reward_fn=args.train_obj,
         distribution_mode=args.distribution_mode, use_backgrounds=args.use_backgrounds, use_generated_assets=False,
         async_=args.async_env)
 
