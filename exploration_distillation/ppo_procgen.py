@@ -164,38 +164,38 @@ class Agent(nn.Module):
 
 
 class StoreObs(gym.Wrapper):
-    def __init__(self, venv, n_envs=16, store_limit=1000):
-        super().__init__(venv)
+    def __init__(self, env, n_envs=16, store_limit=1000):
+        super().__init__(env)
         self.n_envs = n_envs
         self.store_limit = store_limit
         self.past_obs = []
 
     def reset(self):
-        obs = self.venv.reset()
+        obs = self.env.reset()
         self.past_obs.append(obs[:self.n_envs])
         return obs
 
-    def step_wait(self):
-        obs, rew, done, infos = self.venv.step_wait()
+    def step(self, action):
+        obs, rew, done, infos = self.env.step(action)
         self.past_obs.append(obs[:self.n_envs])
         self.past_obs = self.past_obs[-self.store_limit:]
         return obs, rew, done, infos
 
 
 class VecMinerEpisodicCoverageReward(gym.Wrapper):
-    def __init__(self, venv, obj):
-        super().__init__(venv)
+    def __init__(self, env, obj):
+        super().__init__(env)
         self.pobs, self.mask_episodic = None, None
         self.obj = obj
 
     def reset(self):
-        obs = self.venv.reset()
+        obs = self.env.reset()
         self.pobs = obs  # n_envs, h, w, c
         self.mask_episodic = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
         return obs
 
-    def step_wait(self):
-        obs, rew, done, info = self.venv.step_wait()
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
         mask_change = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
         rew_eps = (mask_change & (~self.mask_episodic)).mean(axis=(-1, -2))
         rew_eps = np.sign(rew_eps)  # n_envs
@@ -211,19 +211,19 @@ class VecMinerEpisodicCoverageReward(gym.Wrapper):
 
 
 class ReturnTracker(gym.Wrapper):
-    def __init__(self, venv):
-        super().__init__(venv)
+    def __init__(self, env):
+        super().__init__(env)
         self._ret_ext, self._ret_eps, self._traj_len = None, None, None
 
     def reset(self):
-        obs = self.venv.reset()
+        obs = self.env.reset()
         self._ret_ext = np.zeros(self.num_envs, dtype=np.float32)
         self._ret_eps = np.zeros(self.num_envs, dtype=np.float32)
         self._traj_len = np.zeros(self.num_envs, dtype=np.int32)
         return obs
 
-    def step_wait(self):
-        obs, rew, dones, infos = self.venv.step_wait()
+    def step(self, action):
+        obs, rew, dones, infos = self.env.step(action)
         self._ret_ext += np.array([info['rew_ext'] for info in infos])
         self._ret_eps += np.array([info['rew_eps'] for info in infos])
         self._traj_len += 1
@@ -470,4 +470,8 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(parse_args())
+    # main(parse_args())
+    # use default arguments from argparse
+    envs = make_env('ext', 64, 'miner', 0, 0, 'easy', 0.999)
+    envs.reset()
+    envs.step(np.array([0]*64))
