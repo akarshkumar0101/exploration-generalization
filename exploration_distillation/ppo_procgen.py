@@ -260,7 +260,7 @@ def make_env(obj, num_envs, env_id, num_levels, start_level, distribution_mode, 
 def rollout_agent_test_env(args, agent):
     device = torch.device(args.device)
     # envs = make_env(args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode, args.gamma)
-    envs = make_env(args.num_envs, args.env_id, 0, 1000000000, args.distribution_mode, args.gamma)
+    envs = make_env(args.obj, args.num_envs, args.env_id, 0, 1000000000, args.distribution_mode, args.gamma)
     next_obs = torch.Tensor(envs.reset()).to(device)
     infoss = []
     for i in range(1000):
