@@ -12,7 +12,6 @@ import torch.nn as nn
 import torch.optim as optim
 from einops import rearrange
 from procgen import ProcgenEnv
-from stable_baselines3.common.vec_env import VecEnvWrapper
 from torch.distributions.categorical import Categorical
 from tqdm.auto import tqdm
 
@@ -164,7 +163,7 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
-class StoreObs(VecEnvWrapper):
+class StoreObs(gym.Wrapper):
     def __init__(self, venv, n_envs=16, store_limit=1000):
         super().__init__(venv)
         self.n_envs = n_envs
@@ -183,7 +182,7 @@ class StoreObs(VecEnvWrapper):
         return obs, rew, done, infos
 
 
-class VecMinerEpisodicCoverageReward(VecEnvWrapper):
+class VecMinerEpisodicCoverageReward(gym.Wrapper):
     def __init__(self, venv, obj):
         super().__init__(venv)
         self.pobs, self.mask_episodic = None, None
@@ -211,7 +210,7 @@ class VecMinerEpisodicCoverageReward(VecEnvWrapper):
         return obs, rew, done, info
 
 
-class ReturnTracker(VecEnvWrapper):
+class ReturnTracker(gym.Wrapper):
     def __init__(self, venv):
         super().__init__(venv)
         self._ret_ext, self._ret_eps, self._traj_len = None, None, None
