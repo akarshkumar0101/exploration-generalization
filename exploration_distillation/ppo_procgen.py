@@ -37,7 +37,7 @@ def parse_args():
                         help="whether to capture videos of the agent performances (check out `videos` folder)")
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=0)
-    parser.add_argument('--distribution-mode', type=str, default='easy')
+    parser.add_argument('--distribution-mode', type=str, default='hard')
 
     parser.add_argument('--obj', type=str, default='ext')
 
@@ -474,7 +474,7 @@ def test_env_speed():
     env.reset()
     print(env.action_space)
     start = time.time()
-    steps = 10000
+    steps = 1000
     for i in tqdm(range(steps)):
         env.step(np.array([env.action_space.sample() for _ in range(64)]))
     print((steps * 64) / (time.time() - start))
