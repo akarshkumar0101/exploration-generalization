@@ -189,7 +189,6 @@ class VecMinerEpisodicCoverageReward(gym.Wrapper):
         self.obj = obj
 
     def reset(self):
-        print('ff')
         obs = self.env.reset()
         self.pobs = obs  # n_envs, h, w, c
         self.mask_episodic = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
