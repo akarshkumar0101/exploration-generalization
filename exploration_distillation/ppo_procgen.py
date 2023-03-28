@@ -39,6 +39,9 @@ def parse_args():
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--distribution-mode', type=str, default='hard')
 
+    parser.add_argument('--warmup-critic-steps', type=int, default=None)
+    parser.add_argument('--load-agent', type=str, default=None)
+
     parser.add_argument('--obj', type=str, default='ext')
 
     # Algorithm specific arguments
@@ -246,9 +249,9 @@ def make_env(obj, num_envs, env_id, num_levels, start_level, distribution_mode, 
     envs.single_observation_space = envs.observation_space["rgb"]
     envs.is_vector_env = True
     envs = gym.wrappers.RecordEpisodeStatistics(envs)
-    envs = StoreObs(envs)
-    envs = VecMinerEpisodicCoverageReward(envs, obj)
-    envs = ReturnTracker(envs)
+    # envs = StoreObs(envs)
+    # envs = VecMinerEpisodicCoverageReward(envs, obj)
+    # envs = ReturnTracker(envs)
     envs = gym.wrappers.NormalizeReward(envs, gamma=gamma)
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     return envs
@@ -314,7 +317,11 @@ def main(args):
                     args.gamma)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs).to(device)
+    if args.load_agent is None:
+        agent = Agent(envs).to(device)
+    else:
+        agent = torch.load(args.load_agent).to(device)
+
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -332,9 +339,23 @@ def main(args):
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
+    warmup_critic_steps = args.warmup_critic_steps if args.warmup_critic_steps else 0
+    num_updates = (args.total_timesteps + warmup_critic_steps) // args.batch_size
+    critic_warm = True if args.warmup_critic_steps is None else False
+    if not critic_warm:  # freeze network + actor for critic warmup
+        for name, p in agent.named_parameters():
+            if not name.startswith('critic'):
+                p.requires_grad_(False)
+
     pbar = tqdm(range(1, num_updates + 1))
     for update in pbar:
         data = dict()
+
+        if not critic_warm and global_step > args.warmup_critic_steps:  # unfreeze network+actor
+            critic_warm = True
+            for name, p in agent.named_parameters():
+                p.requires_grad_(True)
+
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
@@ -452,7 +473,7 @@ def main(args):
         data['details/approx_kl'] = approx_kl.item()
         data['details/clipfrac'] = np.mean(clipfracs)
         data['details/explained_variance'] = explained_var
-        data['meta/steps_per_second'] = int(global_step / (time.time() - start_time))
+        data['meta/SPS'] = int(global_step / (time.time() - start_time))
 
         viz_slow = (update - 1) % (num_updates // 20) == 0
         data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
@@ -462,10 +483,12 @@ def main(args):
             data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        pbar.set_postfix(dict(ret_ext=data['charts/ret_ext_train'], ret_eps=data['charts/ret_eps_train']))
+        pbar.set_postfix(
+            {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
         if args.track:
-            wandb.log(data)
+            wandb.log(data, step=global_step)
 
+        # pbar.set_postfix(dict(sps=data['meta/SPS']))
     envs.close()
 
 
