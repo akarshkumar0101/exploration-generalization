@@ -29,14 +29,14 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--project", type=str, default="egb",
+    parser.add_argument("--project", type=str, default="egb1",
                         help="the wandb's project name")
     parser.add_argument("--entity", type=str, default=None,
                         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="whether to capture videos of the agent performances (check out `videos` folder)")
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
-    parser.add_argument('--start-level', type=lambda x: int(float(x)), default=0)
+    parser.add_argument('--start-level', type=lambda x: int(float(x)), default=None)
     parser.add_argument('--distribution-mode', type=str, default='hard')
 
     parser.add_argument('--warmup-critic-steps', type=int, default=None)
@@ -189,6 +189,7 @@ class VecMinerEpisodicCoverageReward(gym.Wrapper):
         self.obj = obj
 
     def reset(self):
+        print('ff')
         obs = self.env.reset()
         self.pobs = obs  # n_envs, h, w, c
         self.mask_episodic = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
@@ -196,7 +197,8 @@ class VecMinerEpisodicCoverageReward(gym.Wrapper):
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        mask_change = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
+        mask_change = (obs != self.pobs).any(axis=-1)
+        # mask_change = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
         rew_eps = (mask_change & (~self.mask_episodic)).mean(axis=(-1, -2))
         rew_eps = np.sign(rew_eps)  # n_envs
         rew_eps[done] = 0.
@@ -249,9 +251,9 @@ def make_env(obj, num_envs, env_id, num_levels, start_level, distribution_mode, 
     envs.single_observation_space = envs.observation_space["rgb"]
     envs.is_vector_env = True
     envs = gym.wrappers.RecordEpisodeStatistics(envs)
-    # envs = StoreObs(envs)
-    # envs = VecMinerEpisodicCoverageReward(envs, obj)
-    # envs = ReturnTracker(envs)
+    envs = StoreObs(envs)
+    envs = VecMinerEpisodicCoverageReward(envs, obj)
+    envs = ReturnTracker(envs)
     envs = gym.wrappers.NormalizeReward(envs, gamma=gamma)
     envs = gym.wrappers.TransformReward(envs, lambda reward: np.clip(reward, -10, 10))
     return envs
@@ -293,7 +295,10 @@ def record_agent_data(envs, infoss, store_vid=True):
 
 
 def main(args):
+    if args.start_level is None:
+        args.start_level = args.seed * args.num_levels
     args.name = args.name.format(**args.__dict__)
+
     if args.track:
         wandb.init(
             project=args.project,
@@ -312,11 +317,12 @@ def main(args):
 
     device = torch.device(args.device)
 
-    # env setup
+    print('Creating environment')
     envs = make_env(args.obj, args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode,
                     args.gamma)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
+    print('Creating/loading agent')
     if args.load_agent is None:
         agent = Agent(envs).to(device)
     else:
@@ -324,7 +330,7 @@ def main(args):
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
-    # ALGO Logic: Storage setup
+    print('Creating buffers')
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -347,6 +353,7 @@ def main(args):
             if not name.startswith('critic'):
                 p.requires_grad_(False)
 
+    print('Starting learning...')
     pbar = tqdm(range(1, num_updates + 1))
     for update in pbar:
         data = dict()
@@ -475,20 +482,20 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
 
-        # viz_slow = (update - 1) % (num_updates // 20) == 0
-        # data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
-        # data.update({f'{k}_train': v for k, v in data_ret.items()})
-        # if viz_slow:
-        #     envs_test, infoss_test = rollout_agent_test_env(args, agent)
-        #     data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
-        #     data.update({f'{k}_test': v for k, v in data_ret.items()})
-        #
-        # pbar.set_postfix(
-        #     {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
-        # if args.track:
-        #     wandb.log(data, step=global_step)
+        viz_slow = (update - 1) % (num_updates // 20) == 0
+        data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
+        data.update({f'{k}_train': v for k, v in data_ret.items()})
+        if viz_slow:
+            envs_test, infoss_test = rollout_agent_test_env(args, agent)
+            data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
+            data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        pbar.set_postfix(dict(sps=data['meta/SPS']))
+        pbar.set_postfix(
+            {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
+        if args.track:
+            wandb.log(data, step=global_step)
+
+        # pbar.set_postfix(dict(sps=data['meta/SPS']))
     envs.close()
 
 
