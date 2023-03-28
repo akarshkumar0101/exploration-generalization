@@ -475,20 +475,20 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
 
-        viz_slow = (update - 1) % (num_updates // 20) == 0
-        data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
-        data.update({f'{k}_train': v for k, v in data_ret.items()})
-        if viz_slow:
-            envs_test, infoss_test = rollout_agent_test_env(args, agent)
-            data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
-            data.update({f'{k}_test': v for k, v in data_ret.items()})
+        # viz_slow = (update - 1) % (num_updates // 20) == 0
+        # data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
+        # data.update({f'{k}_train': v for k, v in data_ret.items()})
+        # if viz_slow:
+        #     envs_test, infoss_test = rollout_agent_test_env(args, agent)
+        #     data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
+        #     data.update({f'{k}_test': v for k, v in data_ret.items()})
+        #
+        # pbar.set_postfix(
+        #     {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
+        # if args.track:
+        #     wandb.log(data, step=global_step)
 
-        pbar.set_postfix(
-            {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
-        if args.track:
-            wandb.log(data, step=global_step)
-
-        # pbar.set_postfix(dict(sps=data['meta/SPS']))
+        pbar.set_postfix(dict(sps=data['meta/SPS']))
     envs.close()
 
 
