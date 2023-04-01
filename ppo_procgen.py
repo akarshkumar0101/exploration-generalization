@@ -523,8 +523,9 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
         data['meta/global_step'] = global_step
-        data['details/ce0'] = ce0.mean().item()
-        data['details/kl0'] = kl0.mean().item()
+        if args.load_agent is not None:
+            data['details/ce0'] = ce0.mean().item()
+            data['details/kl0'] = kl0.mean().item()
 
         viz_slow = (update - 1) % (num_updates // 20) == 0
         data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
