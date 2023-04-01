@@ -1,5 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_procgenpy
 import argparse
+import os
 import random
 import time
 from distutils.util import strtobool
@@ -20,8 +21,8 @@ import wandb
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", type=str, default='{env_id}_{num_levels:2.1e}_{obj}_gamma={gamma}')
-    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+    parser.add_argument("--name", type=str, default='{env_id}_{num_levels:2.1e}_{obj}_{seed}')
+    parser.add_argument("--seed", type=int, default=0, help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     # parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -29,7 +30,7 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--project", type=str, default="egb1",
+    parser.add_argument("--project", type=str, default="egb",
                         help="the wandb's project name")
     parser.add_argument("--entity", type=str, default=None,
                         help="the entity (team) of wandb's project")
@@ -37,7 +38,8 @@ def parse_args():
                         help="whether to capture videos of the agent performances (check out `videos` folder)")
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=None)
-    parser.add_argument('--distribution-mode', type=str, default='hard')
+    parser.add_argument('--distribution-mode', type=str, default='easy')
+    parser.add_argument('--kl0-coef', type=float, default=0.)
 
     parser.add_argument('--warmup-critic-steps', type=int, default=None)
     parser.add_argument('--load-agent', type=str, default=None)
@@ -162,6 +164,19 @@ class Agent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
+    def get_output(self, x, action=None):
+        hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
+        logits = self.actor(hidden)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), probs
+
+    def temp_out(self, x, action=None):
+        hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
+        logits = self.actor(hidden)
+        value = self.critic(hidden)
+        return logits, value
 
 
 class StoreObs(gym.Wrapper):
@@ -197,7 +212,8 @@ class VecMinerEpisodicCoverageReward(gym.Wrapper):
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        mask_change = (obs != self.pobs).any(axis=-1)
+        # mask_change = (obs != self.pobs).any(axis=-1)
+        mask_change = (obs != self.pobs)[..., 1]
         # mask_change = (np.abs(obs - self.pobs) > 1e-3).any(axis=-1)
         rew_eps = (mask_change & (~self.mask_episodic)).mean(axis=(-1, -2))
         rew_eps = np.sign(rew_eps)  # n_envs
@@ -300,6 +316,8 @@ def main(args):
     if args.start_level is None:
         args.start_level = args.seed * args.num_levels
     args.name = args.name.format(**args.__dict__)
+    args.save_agent = args.save_agent.format(**args.__dict__)
+    print(args)
 
     if args.track:
         print('Starting wandb')
@@ -327,10 +345,13 @@ def main(args):
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     print('Creating agent')
-    agent = Agent(envs)
+    agent, agent0 = Agent(envs), None
     if args.load_agent is not None:
         print('Loading agent')
-        agent.load_state_dict(torch.load(args.load_agent))
+        agent0 = Agent(envs)
+        agent0.load_state_dict(torch.load(f'{args.load_agent}/agent.pt'))
+        agent.load_state_dict(agent0.state_dict())
+        agent0 = agent0.to(device)
     agent = agent.to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -350,10 +371,11 @@ def main(args):
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
-    warmup_critic_steps = args.warmup_critic_steps if args.warmup_critic_steps else 0
-    num_updates = (args.total_timesteps + warmup_critic_steps) // args.batch_size
+    warmup_critic_steps = 0 if args.warmup_critic_steps is None else args.warmup_critic_steps
+    num_updates = num_updates + warmup_critic_steps // args.batch_size
     critic_warm = True if args.warmup_critic_steps is None else False
     if not critic_warm:  # freeze network + actor for critic warmup
+        print('Freezing everything but the critic')
         for name, p in agent.named_parameters():
             if not name.startswith('critic'):
                 p.requires_grad_(False)
@@ -367,6 +389,7 @@ def main(args):
 
         if not critic_warm and global_step > args.warmup_critic_steps:  # unfreeze network+actor
             critic_warm = True
+            print('Unfreezing critic')
             for name, p in agent.named_parameters():
                 p.requires_grad_(True)
 
@@ -429,7 +452,10 @@ def main(args):
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                # _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue, dist = agent.get_output(b_obs[mb_inds], b_actions.long()[mb_inds])
+                with torch.no_grad():
+                    _, _, _, _, dist0 = agent0.get_output(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -464,7 +490,9 @@ def main(args):
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                ce0 = nn.functional.cross_entropy(dist.logits, dist0.probs, reduction='none')
+                kl0 = ce0 - dist0.entropy()
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + kl0.mean() * args.kl0_coef
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -489,6 +517,8 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
         data['meta/global_step'] = global_step
+        data['details/ce0'] = ce0.mean().item()
+        data['details/kl0'] = kl0.mean().item()
 
         viz_slow = (update - 1) % (num_updates // 20) == 0
         data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
@@ -500,7 +530,9 @@ def main(args):
 
         if viz_slow and args.save_agent is not None and data['charts/ret_ext_train'] > best_ret_ext_train:
             best_ret_ext_train = data['charts/ret_ext_train']
-            torch.save(agent.state_dict(), args.save_agent)
+            os.makedirs(args.save_agent, exist_ok=True)
+            torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
+            torch.save(data, f'{args.save_agent}/data.pt')
 
         keys_tqdm = ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']
         pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})
