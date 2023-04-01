@@ -380,7 +380,7 @@ def main(args):
             if not name.startswith('critic'):
                 p.requires_grad_(False)
 
-    best_ret_ext_train = None
+    best_ret_ext_train = float('-inf')
 
     print('Starting learning...')
     pbar = tqdm(range(1, num_updates + 1))
@@ -531,11 +531,13 @@ def main(args):
         data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
         data.update({f'{k}_train': v for k, v in data_ret.items()})
         if viz_slow:
+            print('Rolling out test envs...')
             envs_test, infoss_test = rollout_agent_test_env(args, agent)
             data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
         if viz_slow and args.save_agent is not None and data['charts/ret_ext_train'] > best_ret_ext_train:
+            print('Saving agent...')
             best_ret_ext_train = data['charts/ret_ext_train']
             os.makedirs(args.save_agent, exist_ok=True)
             torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
