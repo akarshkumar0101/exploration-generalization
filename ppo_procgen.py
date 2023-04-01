@@ -454,8 +454,10 @@ def main(args):
 
                 # _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
                 _, newlogprob, entropy, newvalue, dist = agent.get_output(b_obs[mb_inds], b_actions.long()[mb_inds])
-                with torch.no_grad():
-                    _, _, _, _, dist0 = agent0.get_output(b_obs[mb_inds], b_actions.long()[mb_inds])
+                if args.load_agent is not None:
+                    with torch.no_grad():
+                        _, _, _, _, dist0 = agent0.get_output(b_obs[mb_inds], b_actions.long()[mb_inds])
+
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -490,9 +492,13 @@ def main(args):
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-                ce0 = nn.functional.cross_entropy(dist.logits, dist0.probs, reduction='none')
-                kl0 = ce0 - dist0.entropy()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + kl0.mean() * args.kl0_coef
+
+                if args.load_agent is not None:
+                    ce0 = nn.functional.cross_entropy(dist.logits, dist0.probs, reduction='none')
+                    kl0 = ce0 - dist0.entropy()
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + kl0.mean() * args.kl0_coef
+                else:
+                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()
