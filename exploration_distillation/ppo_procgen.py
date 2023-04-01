@@ -41,6 +41,7 @@ def parse_args():
 
     parser.add_argument('--warmup-critic-steps', type=int, default=None)
     parser.add_argument('--load-agent', type=str, default=None)
+    parser.add_argument('--save-agent', type=str, default=None)
 
     parser.add_argument('--obj', type=str, default='ext')
 
@@ -247,7 +248,9 @@ def make_env(obj, num_envs, env_id, num_levels, start_level, distribution_mode, 
                       start_level=start_level, distribution_mode=distribution_mode)
     envs = gym.wrappers.TransformObservation(envs, lambda obs: obs["rgb"])
     envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space["rgb"]
+    envs.multi_action_space = gym.spaces.MultiDiscrete([envs.action_space.n] * num_envs)
+    envs.observation_space = envs.observation_space["rgb"]
+    envs.single_observation_space = envs.observation_space
     envs.is_vector_env = True
     envs = gym.wrappers.RecordEpisodeStatistics(envs)
     envs = StoreObs(envs)
@@ -299,6 +302,7 @@ def main(args):
     args.name = args.name.format(**args.__dict__)
 
     if args.track:
+        print('Starting wandb')
         wandb.init(
             project=args.project,
             entity=args.entity,
@@ -315,17 +319,19 @@ def main(args):
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device(args.device)
+    print(f'Using device: {device}')
 
     print('Creating environment')
     envs = make_env(args.obj, args.num_envs, args.env_id, args.num_levels, args.start_level, args.distribution_mode,
                     args.gamma)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    print('Creating/loading agent')
-    if args.load_agent is None:
-        agent = Agent(envs).to(device)
-    else:
-        agent = torch.load(args.load_agent).to(device)
+    print('Creating agent')
+    agent = Agent(envs)
+    if args.load_agent is not None:
+        print('Loading agent')
+        agent.load_state_dict(torch.load(args.load_agent))
+    agent = agent.to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -351,6 +357,8 @@ def main(args):
         for name, p in agent.named_parameters():
             if not name.startswith('critic'):
                 p.requires_grad_(False)
+
+    best_ret_ext_train = None
 
     print('Starting learning...')
     pbar = tqdm(range(1, num_updates + 1))
@@ -489,8 +497,12 @@ def main(args):
             data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        pbar.set_postfix(
-            {k.split('/')[-1]: data[k] for k in ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']})
+        if viz_slow and args.save_agent is not None and data['charts/ret_ext_train'] > best_ret_ext_train:
+            best_ret_ext_train = data['charts/ret_ext_train']
+            torch.save(agent.state_dict(), args.save_agent)
+
+        keys_tqdm = ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']
+        pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})
         if args.track:
             wandb.log(data, step=global_step)
 
