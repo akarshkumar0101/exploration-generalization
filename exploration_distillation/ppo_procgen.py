@@ -488,6 +488,7 @@ def main(args):
         data['details/clipfrac'] = np.mean(clipfracs)
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
+        data['meta/global_step'] = global_step
 
         viz_slow = (update - 1) % (num_updates // 20) == 0
         data_ret = record_agent_data(envs, infoss, store_vid=viz_slow)
