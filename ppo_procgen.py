@@ -43,7 +43,6 @@ def parse_args():
 
     parser.add_argument("--pre-env-id", type=str, default="miner")
     parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
-    parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--pre-obj', type=str, default='ext')
     parser.add_argument("--pre-seed", type=int, default=0, help="seed of the experiment")
 
