@@ -41,6 +41,12 @@ def parse_args():
     parser.add_argument('--distribution-mode', type=str, default='easy')
     parser.add_argument('--kl0-coef', type=float, default=0.)
 
+    parser.add_argument("--pre-env-id", type=str, default="miner")
+    parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
+    parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
+    parser.add_argument('--pre-obj', type=str, default='ext')
+    parser.add_argument("--pre-seed", type=int, default=0, help="seed of the experiment")
+
     parser.add_argument('--warmup-critic-steps', type=int, default=None)
     parser.add_argument('--load-agent', type=str, default=None)
     parser.add_argument('--save-agent', type=str, default=None)
@@ -317,6 +323,7 @@ def main(args):
         args.start_level = args.seed * args.num_levels
     args.name = args.name.format(**args.__dict__)
     args.save_agent = args.save_agent.format(**args.__dict__)
+    args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
 
     if args.track:
@@ -380,7 +387,7 @@ def main(args):
             if not name.startswith('critic'):
                 p.requires_grad_(False)
 
-    best_ret_ext_train = float('-inf')
+    best_ret_train = float('-inf')
 
     print('Starting learning...')
     pbar = tqdm(range(1, num_updates + 1))
@@ -536,12 +543,14 @@ def main(args):
             data_ret = record_agent_data(envs_test, infoss_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        if viz_slow and args.save_agent is not None and data['charts/ret_ext_train'] > best_ret_ext_train:
+        if viz_slow and args.save_agent is not None:
             print('Saving agent...')
-            best_ret_ext_train = data['charts/ret_ext_train']
             os.makedirs(args.save_agent, exist_ok=True)
-            torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
-            torch.save(data, f'{args.save_agent}/data.pt')
+            torch.save(agent.state_dict(), f'{args.save_agent}/agent_{global_step:012.0f}.pt')
+            if data[f'charts/ret_{args.obj}_train'] > best_ret_train:
+                best_ret_train = data[f'charts/ret_{args.obj}_train']
+                torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
+                torch.save(data, f'{args.save_agent}/data.pt')
 
         keys_tqdm = ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']
         pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})
