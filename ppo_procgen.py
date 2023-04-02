@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--pre-obj', type=str, default='ext')
     parser.add_argument("--pre-seed", type=int, default=0, help="seed of the experiment")
 
-    parser.add_argument('--warmup-critic-steps', type=int, default=None)
+    parser.add_argument("--warmup-critic-steps", type=lambda x: int(float(x)), default=None)
     parser.add_argument('--load-agent', type=str, default=None)
     parser.add_argument('--save-agent', type=str, default=None)
 
@@ -384,7 +384,7 @@ def main(args):
     num_updates = num_updates + warmup_critic_steps // args.batch_size
     critic_warm = True if args.warmup_critic_steps is None else False
     if not critic_warm:  # freeze network + actor for critic warmup
-        print('Freezing everything but the critic')
+        print('Freezing everything except the critic')
         for name, p in agent.named_parameters():
             if not name.startswith('critic'):
                 p.requires_grad_(False)
@@ -398,7 +398,7 @@ def main(args):
 
         if not critic_warm and global_step > args.warmup_critic_steps:  # unfreeze network+actor
             critic_warm = True
-            print('Unfreezing critic')
+            print('Unfreezing everything')
             for name, p in agent.named_parameters():
                 p.requires_grad_(True)
 
