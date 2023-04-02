@@ -320,9 +320,12 @@ def record_agent_data(envs, infoss, store_vid=True):
 def main(args):
     if args.start_level is None:
         args.start_level = args.seed * args.num_levels
-    args.name = args.name.format(**args.__dict__)
-    args.save_agent = args.save_agent.format(**args.__dict__)
-    args.load_agent = args.load_agent.format(**args.__dict__)
+    if args.name:
+        args.name = args.name.format(**args.__dict__)
+    if args.save_agent:
+        args.save_agent = args.save_agent.format(**args.__dict__)
+    if args.load_agent:
+        args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
 
     if args.track:
