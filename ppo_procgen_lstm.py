@@ -103,11 +103,18 @@ def parse_args():
 @torch.no_grad()
 def rollout_agent_test_env(agent, envs, n_steps=1000):
     _, info = envs.reset()
+    device = info['obs'].device
+    
     next_obs = info['obs']
+    next_done = torch.zeros(envs.num_envs).to(device)
+    next_lstm_state = (
+        torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device),
+        torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device),
+    )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
     for _ in range(n_steps):
-        action, _, _, _ = agent.get_action_and_value(next_obs)
+        action, _, _, _, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
         _, _, _, info = envs.step(action.cpu().numpy())
-        next_obs = info['obs']
+        next_obs, next_done = info['obs'], info['done'].to(torch.uint8)
     return envs
 
 def record_agent_data(envs, store_vid=True):
