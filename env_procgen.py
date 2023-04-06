@@ -61,6 +61,7 @@ class E3BReward(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         e3b_rew = self.e3b.calc_reward(info['obs'], done=info['done'])
+        info['ext'] = info['rew']
         info['e3b'] = e3b_rew
         return obs, rew, done, info
         
@@ -76,11 +77,11 @@ class StoreReturns(gym.Wrapper):
         obs, rew, done, info = self.env.step(action)
 
         if self._ret_ext is None:
-            self._ret_ext = torch.zeros_like(info['rew'])
-            self._ret_e3b = torch.zeros_like(info['rew'])
-            self._traj_len = torch.zeros_like(info['rew']).to(torch.int)
+            self._ret_ext = torch.zeros_like(info['ext'])
+            self._ret_e3b = torch.zeros_like(info['ext'])
+            self._traj_len = torch.zeros_like(info['ext']).to(torch.int)
 
-        self._ret_ext += info['rew']
+        self._ret_ext += info['ext']
         if 'e3b' in info:
             self._ret_e3b += info['e3b']
         self._traj_len += 1
@@ -99,39 +100,8 @@ class StoreReturns(gym.Wrapper):
 
         return obs, rew, done, info
 
-class ReturnTracker(gym.Wrapper):
-    def __init__(self, env, device='cpu'):
-        super().__init__(env)
-        self._ret_ext, self._ret_eps, self._traj_len = None, None, None
-        self.device = device
-
-    def reset(self):
-        obs, info = self.env.reset()
-        self._ret_ext = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self._ret_e3b = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        self._traj_len = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
-        return obs, info
-
-    def step(self, action):
-        obs, rew, done, info = self.env.step(action)
-
-        self._ret_ext += info['rew']
-        if 'e3b' in info:
-            self._ret_e3b += info['e3b']
-        self._traj_len += 1
-
-        info['ret_ext'] = self._ret_ext[info['done']]
-        info['ret_e3b'] = self._ret_e3b[info['done']]
-        info['traj_len'] = self._traj_len[info['done']]
-
-        self._ret_ext[info['done']] = 0.
-        self._ret_e3b[info['done']] = 0.
-        self._traj_len[info['done']] = 0
-
-        return obs, rew, done, info
-
 class RewardSelector(gym.Wrapper):
-    def __init__(self, env, obj='rew'):
+    def __init__(self, env, obj='ext'):
         super().__init__(env)
         self.obj = obj
     def step(self, action):
