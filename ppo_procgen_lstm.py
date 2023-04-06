@@ -24,8 +24,9 @@ from env_procgen import make_env
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
-        help="the name of this experiment")
+    # parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
+    #     help="the name of this experiment")
+    parser.add_argument("--name", type=str, default='{env_id}_{num_levels:2.1e}_{obj}_{seed}')
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -35,8 +36,9 @@ def parse_args():
     parser.add_argument("--device", type=str, default='cpu')
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
-        help="the wandb's project name")
+    # parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
+    #     help="the wandb's project name")
+    parser.add_argument("--project", type=str, default='egb')
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -90,6 +92,7 @@ def parse_args():
     parser.add_argument("--warmup-critic-steps", type=lambda x: int(float(x)), default=None)
     parser.add_argument('--load-agent', type=str, default=None)
     parser.add_argument('--save-agent', type=str, default=None)
+    parser.add_argument('--idm-lr', type=float, default=1e-4)
 
     parser.add_argument('--obj', type=str, default='ext')
 
@@ -139,12 +142,12 @@ def record_agent_data(envs, store_vid=True):
 def main(args):
     if args.start_level is None:
         args.start_level = args.seed * args.num_levels
-    # if args.name:
-    #     args.name = args.name.format(**args.__dict__)
-    # if args.save_agent:
-    #     args.save_agent = args.save_agent.format(**args.__dict__)
-    # if args.load_agent:
-    #     args.load_agent = args.load_agent.format(**args.__dict__)
+    if args.name:
+        args.name = args.name.format(**args.__dict__)
+    if args.save_agent:
+        args.save_agent = args.save_agent.format(**args.__dict__)
+    if args.load_agent:
+        args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
