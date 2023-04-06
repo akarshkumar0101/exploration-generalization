@@ -368,7 +368,7 @@ def main(args):
         #         torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
         #         torch.save(data, f'{args.save_agent}/data.pt')
 
-        keys_tqdm = ['charts/ret_ext_train', 'charts/ret_eps_train', 'meta/SPS']
+        keys_tqdm = ['charts/ret_ext_train', 'charts/ret_e3b_train', 'meta/SPS']
         pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})
         if args.track:
             wandb.log(data, step=global_step)
