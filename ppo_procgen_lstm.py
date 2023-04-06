@@ -150,7 +150,7 @@ def main(args):
         args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
     if args.track:
-        print('Starting wandb with run name {run_name}...')
+        print(f'Starting wandb with run name {args.name}...')
 
         wandb.init(
             project=args.project,
