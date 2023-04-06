@@ -175,7 +175,10 @@ def main(args):
     n_actions = 15
     agent = AgentLSTM(obs_shape, n_actions).to(device)
     e3b = E3B(args.num_envs, obs_shape, n_actions, n_features=100, lmbda=0.1).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    optimizer = optim.Adam([
+        {'params': agent.parameters(), 'lr': args.learning_rate, 'eps': 1e-5},
+        {'params': e3b.idm.parameters(), 'lr': args.idm_lr, 'eps': 1e-8}
+    ])
 
     # env setup
     print('Creating env...')
@@ -316,8 +319,17 @@ def main(args):
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
+                # IDM loss
+                mb_obs = b_obs[mb_inds].reshape(256, 8, *obs_shape) # T, N, H, W, C
+                mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
+                mb_obs_flat_nxt = rearrange(mb_obs[ 1:], 't n h w c -> (t n) h w c')
+                mb_actions = b_actions.long()[mb_inds].reshape(256, 8) # T, N
+                mb_actions_flat_now = rearrange(mb_actions[:-1], 't n -> (t n)')
+                logits_idm = e3b.idm(mb_obs_flat_now, mb_obs_flat_nxt)
+                loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction='mean')
+
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -336,6 +348,7 @@ def main(args):
         data['details/learning_rate'] = optimizer.param_groups[0]["lr"]
         data['details/value_loss'] = v_loss.item()
         data['details/policy_loss'] = pg_loss.item()
+        data['details/idm_loss'] = loss_idm.item()
         data['details/entropy'] = entropy_loss.item()
         data['details/old_approx_kl'] = old_approx_kl.item()
         data['details/approx_kl'] = approx_kl.item()
