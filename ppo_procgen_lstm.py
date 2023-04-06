@@ -226,7 +226,7 @@ def main(args):
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             # next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-            next_obs, next_done = info['obs'], info['done']
+            next_obs, next_done = info['obs'], info['done'].to(torch.uint8)
 
         # bootstrap value if not done
         with torch.no_grad():
