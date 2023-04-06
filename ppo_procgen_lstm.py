@@ -161,7 +161,7 @@ def main(args):
 
     device = torch.device(args.device)
     # device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    print('Using device: {device}')
+    print(f'Using device: {device}')
 
     print('Creating agent...')
     obs_shape = (64, 64, 3)
