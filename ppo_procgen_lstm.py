@@ -149,17 +149,14 @@ def main(args):
     if args.load_agent:
         args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         print('Starting wandb with run name {run_name}...')
 
         wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
+            project=args.project,
+            entity=args.entity,
+            config=args,
+            name=args.name,
             save_code=True,
         )
 
