@@ -154,7 +154,6 @@ def main(args):
 
         wandb.init(
             project=args.project,
-            entity=args.entity,
             config=args,
             name=args.name,
             save_code=True,
