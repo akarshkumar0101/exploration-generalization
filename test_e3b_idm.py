@@ -28,6 +28,8 @@ def collect_rollouts():
 
 
 def main(args):
+    if args.name:
+        args.name = args.name.format(**args.__dict__)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -36,7 +38,7 @@ def main(args):
 
     e3b = E3B(64, obs_shape=(64, 64, 3), n_actions=len(action_list_miner), n_features=100, lmbda=0.1)
     e3b.to(args.device)
-    opt = torch.optim.Adam(e3b.idm.parameters(), lr=5e-4)  # , weight_decay=1e-5)
+    opt = torch.optim.Adam(e3b.idm.parameters(), lr=args.lr)  # , weight_decay=1e-5)
 
     pbar = tqdm(range(args.n_steps))
     for i_batch in pbar:
@@ -75,11 +77,12 @@ def main(args):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--project", type=str, default="e3b_idm_test")
-parser.add_argument("--name", type=str, default="{env_id}_{num_levels:2.1e}_{obj}_{seed}")
+parser.add_argument("--name", type=str, default="e3bidmtest_{freq_collect}_{freq_batch}_{lr}")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--track", default=False, action="store_true")
 
+parser.add_argument("--lr", type=float, default=5e-4)
 parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(1e6))
 parser.add_argument("--batch-size", type=int, default=256)
 
