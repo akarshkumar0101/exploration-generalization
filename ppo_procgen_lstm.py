@@ -81,9 +81,7 @@ def parse_args():
         help="the target KL divergence threshold")
 
     # My arguments
-    parser.add_argument("--ignore-lstm", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
-    parser.add_argument("--no-recurrence", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True)
-
+    parser.add_argument("--lstm", type=str, default=None)
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=None)
     parser.add_argument('--distribution-mode', type=str, default='easy')
@@ -176,8 +174,8 @@ def main(args):
     obs_shape = (64, 64, 3)
     n_actions = 15
     agent = AgentLSTM(obs_shape, n_actions).to(device)
-    agent.ignore_lstm = args.ignore_lstm
-    agent.no_recurrence = args.no_recurrence
+    agent.ignore_lstm = (args.lstm=='ignore-lstm')
+    agent.no_recurrence = (args.lstm=='no-reucrrence')
     e3b = E3B(args.num_envs, obs_shape, n_actions, n_features=100, lmbda=0.1).to(device)
     optimizer = optim.Adam([
         {'params': agent.parameters(), 'lr': args.learning_rate, 'eps': 1e-5},
