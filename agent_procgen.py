@@ -75,7 +75,8 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
+        # return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), logits
+        return action, None, probs.entropy(), self.critic(hidden), logits
 
 class AgentLSTM(nn.Module):
     def __init__(self, obs_shape, n_actions):
@@ -102,9 +103,15 @@ class AgentLSTM(nn.Module):
                 nn.init.orthogonal_(param, 1.0)
         self.actor = layer_init(nn.Linear(256, n_actions), std=0.01)
         self.critic = layer_init(nn.Linear(256, 1), std=1)
+        self.ignore_lstm = False
+        self.no_recurrence = False
 
     def get_states(self, x, lstm_state, done):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
+        if self.ignore_lstm:
+            return hidden, lstm_state
+        if self.no_recurrence:
+            done = torch.ones_like(done)
 
         # LSTM logic
         batch_size = lstm_state[0].shape[1]
@@ -154,13 +161,13 @@ class IDM(nn.Module):
         ]
         self.network = nn.Sequential(*conv_seqs)
         
-        self.idm = layer_init(nn.Linear(2*n_features, n_actions), std=1.0)
+        self.idm = layer_init(nn.Linear(2*n_features, n_actions), std=0.01)
         # self.idm = nn.Sequential(
-            # nn.Linear(n_features, n_features),
-            # nn.ReLU(),
-            # nn.Linear(n_features, n_features),
-            # nn.ReLU(),
-            # nn.Linear(n_features, envs.action_space.n),
+        #     nn.Linear(2*n_features, n_features),
+        #     nn.ReLU(),
+        #     nn.Linear(n_features, n_features),
+        #     nn.ReLU(),
+        #     nn.Linear(n_features, n_actions),
         # )
 
     def calc_features(self, x):

@@ -47,6 +47,7 @@ class ToTensor(gym.Wrapper):
         obs, rew, done, info = self.env.step(action)
         info['obs'] = torch.from_numpy(obs).to(self.device)
         info['rew'] = torch.from_numpy(rew).to(self.device)
+        info['ext'] = torch.from_numpy(rew).to(self.device)
         info['done'] = torch.from_numpy(done).to(self.device)
         return obs, rew, done, info
 
@@ -61,7 +62,6 @@ class E3BReward(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         e3b_rew = self.e3b.calc_reward(info['obs'], done=info['done'])
-        info['ext'] = info['rew']
         info['e3b'] = e3b_rew
         return obs, rew, done, info
         
