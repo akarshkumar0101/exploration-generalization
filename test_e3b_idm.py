@@ -36,9 +36,12 @@ def main(args):
     if args.track:
         wandb.init(project=args.project, name=args.name, config=args, save_code=True)
 
-    e3b = E3B(64, obs_shape=(64, 64, 3), n_actions=len(action_list_miner), n_features=100, lmbda=0.1)
+    e3b = E3B(64, obs_shape=(64, 64, 3), n_actions=len(action_list_miner), n_features=100, idm_merge=args.idm_merge, lmbda=0.1)
     e3b.to(args.device)
     opt = torch.optim.Adam(e3b.idm.parameters(), lr=args.lr)  # , weight_decay=1e-5)
+
+    if args.track:
+        wandb.watch(e3b, log="all", log_freq=args.n_steps // 100)
 
     pbar = tqdm(range(args.n_steps))
     for i_batch in pbar:
@@ -48,11 +51,9 @@ def main(args):
             i_step = torch.randint(low=0, high=len(obss) - 1, size=(args.batch_size,))
             i_env = torch.randint(low=0, high=64, size=(args.batch_size,))
 
-        obs_now = obss[i_step, i_env]
-        obs_nxt = obss[i_step + 1, i_env]
-        action_now = actions[i_step, i_env]
-        obs_now, obs_nxt = torch.from_numpy(obs_now).to(args.device), torch.from_numpy(obs_nxt).to(args.device)
-        action_now = torch.from_numpy(action_now).to(args.device)
+        obs_now = torch.from_numpy(obss[i_step, i_env]).to(args.device)
+        obs_nxt = torch.from_numpy(obss[i_step + 1, i_env]).to(args.device)
+        action_now = torch.from_numpy(actions[i_step, i_env]).to(args.device)
         logits = e3b.idm(obs_now, obs_nxt)
 
         with torch.no_grad():
@@ -85,6 +86,8 @@ parser.add_argument("--track", default=False, action="store_true")
 parser.add_argument("--lr", type=float, default=5e-4)
 parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(1e6))
 parser.add_argument("--batch-size", type=int, default=256)
+
+parser.add_argument("--idm-merge", type=str, default="cat")
 
 parser.add_argument("--freq-collect", type=lambda x: int(float(x)), default=64)
 parser.add_argument("--freq-batch", type=lambda x: int(float(x)), default=1)
