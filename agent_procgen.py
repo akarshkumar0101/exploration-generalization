@@ -189,12 +189,12 @@ class IDM(nn.Module):
         logits = self.idm(l)
         return logits
 
-    def smart_forward(self, obs):  # obs has shape: (t n h w c)
+    def forward_smart(self, obs):  # obs has shape: (t n h w c)
         x = rearrange(obs, "t n h w c -> (t n) c h w") / 255.0
         hidden = self.network(x) # (t n) d
         hidden = rearrange(hidden, "(t n) d -> t n d", t=len(obs)) # t n d
         l1, l2 = hidden[:-1], hidden[1:] # t-1 n d
         l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l2 - l1
         logits = self.idm(l)
-        return logits
+        return logits # t-1 n a
 

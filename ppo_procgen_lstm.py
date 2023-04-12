@@ -16,7 +16,7 @@ from einops import rearrange
 from tqdm.auto import tqdm
 import wandb
 
-from agent_procgen import AgentLSTM, E3B
+from agent_procgen import AgentLSTM, IDM
 from env_procgen import make_env
 
 
@@ -174,21 +174,21 @@ def main(args):
     obs_shape = (64, 64, 3)
     n_actions = 15
     agent = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device)
-    e3b = E3B(args.num_envs, obs_shape, n_actions, n_features=100, idm_merge='sub', lmbda=0.1).to(device)
+    idm = IDM(obs_shape, n_actions, n_features=100, merge='sub').to(device)
     optimizer = optim.Adam([
         {'params': agent.parameters(), 'lr': args.learning_rate, 'eps': 1e-5},
-        {'params': e3b.idm.parameters(), 'lr': args.idm_lr, 'eps': 1e-8}
+        {'params': idm.parameters(), 'lr': args.idm_lr, 'eps': 1e-8}
     ])
 
     if args.track:
-        wandb.watch((agent, e3b), log='all', log_freq=args.total_timesteps//100)
+        wandb.watch((agent, idm), log='all', log_freq=args.total_timesteps//100)
 
     # env setup
     print('Creating env...')
 
     envs = make_env(args.env_id, args.obj, args.num_envs,
                     args.start_level, args.num_levels, args.distribution_mode,
-                    args.gamma, e3b=e3b, device=device)
+                    args.gamma, encoder=idm, device=device)
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # ALGO Logic: Storage setup
@@ -325,11 +325,13 @@ def main(args):
 
                 # IDM loss, TODO: make this more efficient by not computing v twice
                 mb_obs = b_obs[mb_inds].reshape(args.num_steps, envsperbatch, *obs_shape) # T, N, H, W, C
-                mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
-                mb_obs_flat_nxt = rearrange(mb_obs[ 1:], 't n h w c -> (t n) h w c')
+                # mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
+                # mb_obs_flat_nxt = rearrange(mb_obs[ 1:], 't n h w c -> (t n) h w c')
                 mb_actions = b_actions.long()[mb_inds].reshape(args.num_steps, envsperbatch) # T, N
                 mb_actions_flat_now = rearrange(mb_actions[:-1], 't n -> (t n)')
-                logits_idm = e3b.idm(mb_obs_flat_now, mb_obs_flat_nxt)
+                # logits_idm = e3b.idm(mb_obs_flat_now, mb_obs_flat_nxt)
+                logits_idm = idm.forward_smart(mb_obs) # T-1 N A
+                logits_idm = logits_idm.flatten(0, 1)
                 loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction='none')
 
                 entropy_loss = entropy.mean()
@@ -369,26 +371,26 @@ def main(args):
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
 
-        data_ret = record_agent_data(envs, store_vid=viz_slow)
+        data_ret = record_agent_data(envs, store_vid=args.track and viz_slow)
         data.update({f'{k}_train': v for k, v in data_ret.items()})
-        if viz_slow:
+        if args.track and viz_slow:
             print('Rolling out test envs...')
             envs_test = make_env(args.env_id, args.obj, args.num_envs,
                                  1000000, 0, args.distribution_mode,
-                                 args.gamma, e3b=e3b, device=device)
+                                 args.gamma, encoder=idm, device=device)
             envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
-            data_ret = record_agent_data(envs_test, store_vid=viz_slow)
+            data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
         if viz_slow and args.save_agent is not None:
             print('Saving agent...')
             os.makedirs(args.save_agent, exist_ok=True)
             torch.save(agent.state_dict(), f'{args.save_agent}/agent_{global_step:012.0f}.pt')
-            torch.save(e3b.state_dict(), f'{args.save_agent}/e3b_{global_step:012.0f}.pt')
+            torch.save(idm.state_dict(), f'{args.save_agent}/idm_{global_step:012.0f}.pt')
             if data[f'charts/ret_{args.obj}_train'] > best_ret_train:
                 best_ret_train = data[f'charts/ret_{args.obj}_train']
                 torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
-                torch.save(e3b.state_dict(), f'{args.save_agent}/e3b.pt')
+                torch.save(idm.state_dict(), f'{args.save_agent}/idm.pt')
                 torch.save(data, f'{args.save_agent}/data.pt')
 
         keys_tqdm = ['charts/ret_ext_train', 'charts/ret_e3b_train', 'meta/SPS']

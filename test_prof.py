@@ -48,7 +48,7 @@ def test_train(args):
             xb = x.reshape(2048, 64, 64, 3)
             _, logprob, _, _, _ = agent.get_action_and_value(xb)
             # logits = idm(xb, xb)
-            logits = idm.smart_forward(x)
+            logits = idm.forward_smart(x)
             loss = logprob.sum()+logits.sum()
 
             opt.zero_grad()
