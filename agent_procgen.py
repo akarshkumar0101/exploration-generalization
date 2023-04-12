@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from einops import rearrange
 from torch.distributions import Categorical
 
 
@@ -77,8 +78,7 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        # return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), logits
-        return action, None, probs.entropy(), self.critic(hidden), logits
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), logits
 
 
 class AgentLSTM(nn.Module):
@@ -144,13 +144,13 @@ class AgentLSTM(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        # return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
-        return action, None, probs.entropy(), self.critic(hidden), lstm_state
+        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
 
 
 class IDM(nn.Module):
     def __init__(self, obs_shape, n_actions, n_features=100, merge="cat"):
         super().__init__()
+        self.n_features = n_features
         h, w, c = obs_shape
         shape = (c, h, w)
         conv_seqs = []
@@ -185,36 +185,16 @@ class IDM(nn.Module):
     def forward(self, obs, next_obs):
         l1 = self.calc_features(obs)
         l2 = self.calc_features(next_obs)
-        l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l1 - l2
+        l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l2 - l1
         logits = self.idm(l)
         return logits
 
+    def smart_forward(self, obs):  # obs has shape: (t n h w c)
+        x = rearrange(obs, "t n h w c -> (t n) c h w") / 255.0
+        hidden = self.network(x) # (t n) d
+        hidden = rearrange(hidden, "(t n) d -> t n d", t=len(obs)) # t n d
+        l1, l2 = hidden[:-1], hidden[1:] # t-1 n d
+        l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l2 - l1
+        logits = self.idm(l)
+        return logits
 
-class E3B(nn.Module):
-    def __init__(self, num_envs, obs_shape, n_actions, n_features=100, idm_merge="cat", lmbda=0.1):
-        super().__init__()
-        self.idm = IDM(obs_shape, n_actions, n_features, idm_merge)
-
-        self.Il = nn.Parameter(torch.eye(n_features) / lmbda)  # d, d
-        self.Cinv = nn.Parameter(torch.zeros(num_envs, n_features, n_features))  # b, d, d
-        self.Il.requires_grad_(False)
-        self.Cinv.requires_grad_(False)
-
-        self.Cinv[:] = self.Il
-
-    @torch.no_grad()  # this is required
-    def calc_reward(self, obs, done=None):
-        """
-        obs should be of shape (n_envs, *obs_shape)
-        done should be of shape (n_envs, ) signaling if this obs is for a new episode
-        """
-        if done is not None:
-            assert done.dtype == torch.bool
-            self.Cinv[done] = self.Il
-        v = self.idm.calc_features(obs)[..., :, None]  # b, d, 1
-        u = self.Cinv @ v  # b, d, 1
-        b = v.mT @ u  # b, 1, 1
-        self.Cinv[~done] = (self.Cinv - u @ u.mT / (1.0 + b))[~done]  # b, d, d
-        rew_eps = b[..., 0, 0].detach()
-        rew_eps[done] = 0.0
-        return rew_eps
