@@ -131,7 +131,7 @@ class AgentLSTM(nn.Module):
             new_hidden += [h]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
         if "residual" in self.lstm_type:
-            new_hidden = new_hidden + hidden
+            new_hidden = (new_hidden + hidden).reshape(new_hidden.shape)
         return new_hidden, lstm_state
 
     def get_value(self, x, lstm_state, done):
