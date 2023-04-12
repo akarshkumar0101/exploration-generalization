@@ -144,7 +144,8 @@ class AgentLSTM(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+        # return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+        return action, None, probs.entropy(), self.critic(hidden), lstm_state
 
 
 class IDM(nn.Module):
