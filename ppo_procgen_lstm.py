@@ -81,7 +81,7 @@ def parse_args():
         help="the target KL divergence threshold")
 
     # My arguments
-    parser.add_argument("--lstm", type=str, default=None)
+    parser.add_argument("--lstm-type", type=str, default='lstm')
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=None)
     parser.add_argument('--distribution-mode', type=str, default='easy')
@@ -93,7 +93,7 @@ def parse_args():
     parser.add_argument("--warmup-critic-steps", type=lambda x: int(float(x)), default=None)
     parser.add_argument('--load-agent', type=str, default=None)
     parser.add_argument('--save-agent', type=str, default=None)
-    parser.add_argument('--idm-lr', type=float, default=1e-4)
+    parser.add_argument('--idm-lr', type=float, default=5e-4)
 
     parser.add_argument('--obj', type=str, default='ext')
 
@@ -173,14 +173,15 @@ def main(args):
     print('Creating agent...')
     obs_shape = (64, 64, 3)
     n_actions = 15
-    agent = AgentLSTM(obs_shape, n_actions).to(device)
-    agent.ignore_lstm = (args.lstm=='ignore-lstm')
-    agent.no_recurrence = (args.lstm=='no-reucrrence')
-    e3b = E3B(args.num_envs, obs_shape, n_actions, n_features=100, lmbda=0.1).to(device)
+    agent = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device)
+    e3b = E3B(args.num_envs, obs_shape, n_actions, n_features=100, idm_merge='sub', lmbda=0.1).to(device)
     optimizer = optim.Adam([
         {'params': agent.parameters(), 'lr': args.learning_rate, 'eps': 1e-5},
         {'params': e3b.idm.parameters(), 'lr': args.idm_lr, 'eps': 1e-8}
     ])
+
+    if args.track:
+        wandb.watch((agent, e3b), log='all', log_freq=args.total_timesteps//100)
 
     # env setup
     print('Creating env...')
@@ -211,6 +212,7 @@ def main(args):
         torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
     )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
     num_updates = args.total_timesteps // args.batch_size
+    best_ret_train = -np.inf
 
     print('Starting learning...')
     pbar = tqdm(range(1, num_updates + 1))
@@ -321,17 +323,17 @@ def main(args):
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                # IDM loss
-                mb_obs = b_obs[mb_inds].reshape(256, 8, *obs_shape) # T, N, H, W, C
+                # IDM loss, TODO: make this more efficient by not computing v twice
+                mb_obs = b_obs[mb_inds].reshape(args.num_steps, envsperbatch, *obs_shape) # T, N, H, W, C
                 mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
                 mb_obs_flat_nxt = rearrange(mb_obs[ 1:], 't n h w c -> (t n) h w c')
-                mb_actions = b_actions.long()[mb_inds].reshape(256, 8) # T, N
+                mb_actions = b_actions.long()[mb_inds].reshape(args.num_steps, envsperbatch) # T, N
                 mb_actions_flat_now = rearrange(mb_actions[:-1], 't n -> (t n)')
                 logits_idm = e3b.idm(mb_obs_flat_now, mb_obs_flat_nxt)
-                loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction='mean')
+                loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction='none')
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -346,11 +348,12 @@ def main(args):
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+        viz_slow = (update - 1) % (num_updates // 10) == 0
+
         data = {}
         data['details/learning_rate'] = optimizer.param_groups[0]["lr"]
         data['details/value_loss'] = v_loss.item()
         data['details/policy_loss'] = pg_loss.item()
-        data['details/idm_loss'] = loss_idm.item()
         data['details/entropy'] = entropy_loss.item()
         data['details/old_approx_kl'] = old_approx_kl.item()
         data['details/approx_kl'] = approx_kl.item()
@@ -358,11 +361,14 @@ def main(args):
         data['details/explained_variance'] = explained_var
         data['meta/SPS'] = int(global_step / (time.time() - start_time))
         data['meta/global_step'] = global_step
+
+        data['idm/idm_loss'] = loss_idm.mean().item()
+        for i in range(n_actions):
+            data[f'idm_losses/loss_action_{i}'] = loss_idm[mb_actions_flat_now==i].mean().item()
         # if args.load_agent is not None:
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
 
-        viz_slow = (update - 1) % (num_updates // 20) == 0
         data_ret = record_agent_data(envs, store_vid=viz_slow)
         data.update({f'{k}_train': v for k, v in data_ret.items()})
         if viz_slow:
@@ -374,14 +380,16 @@ def main(args):
             data_ret = record_agent_data(envs_test, store_vid=viz_slow)
             data.update({f'{k}_test': v for k, v in data_ret.items()})
 
-        # if viz_slow and args.save_agent is not None:
-        #     print('Saving agent...')
-        #     os.makedirs(args.save_agent, exist_ok=True)
-        #     torch.save(agent.state_dict(), f'{args.save_agent}/agent_{global_step:012.0f}.pt')
-        #     if data[f'charts/ret_{args.obj}_train'] > best_ret_train:
-        #         best_ret_train = data[f'charts/ret_{args.obj}_train']
-        #         torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
-        #         torch.save(data, f'{args.save_agent}/data.pt')
+        if viz_slow and args.save_agent is not None:
+            print('Saving agent...')
+            os.makedirs(args.save_agent, exist_ok=True)
+            torch.save(agent.state_dict(), f'{args.save_agent}/agent_{global_step:012.0f}.pt')
+            torch.save(e3b.state_dict(), f'{args.save_agent}/e3b_{global_step:012.0f}.pt')
+            if data[f'charts/ret_{args.obj}_train'] > best_ret_train:
+                best_ret_train = data[f'charts/ret_{args.obj}_train']
+                torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
+                torch.save(e3b.state_dict(), f'{args.save_agent}/e3b.pt')
+                torch.save(data, f'{args.save_agent}/data.pt')
 
         keys_tqdm = ['charts/ret_ext_train', 'charts/ret_e3b_train', 'meta/SPS']
         pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})

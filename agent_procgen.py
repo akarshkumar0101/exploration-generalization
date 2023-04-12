@@ -82,7 +82,7 @@ class Agent(nn.Module):
 
 
 class AgentLSTM(nn.Module):
-    def __init__(self, obs_shape, n_actions):
+    def __init__(self, obs_shape, n_actions, lstm_type="lstm"):
         super().__init__()
         h, w, c = obs_shape
         shape = (c, h, w)
@@ -106,14 +106,13 @@ class AgentLSTM(nn.Module):
                 nn.init.orthogonal_(param, 1.0)
         self.actor = layer_init(nn.Linear(256, n_actions), std=0.01)
         self.critic = layer_init(nn.Linear(256, 1), std=1)
-        self.ignore_lstm = False
-        self.no_recurrence = False
+        self.lstm_type = lstm_type
 
     def get_states(self, x, lstm_state, done):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
-        if self.ignore_lstm:
+        if "ignore" in self.lstm_type:
             return hidden, lstm_state
-        if self.no_recurrence:
+        if "norecurrence" in self.lstm_type:
             done = torch.ones_like(done)
 
         # LSTM logic
@@ -131,6 +130,8 @@ class AgentLSTM(nn.Module):
             )
             new_hidden += [h]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
+        if "residual" in self.lstm_type:
+            new_hidden = new_hidden + hidden
         return new_hidden, lstm_state
 
     def get_value(self, x, lstm_state, done):
@@ -194,7 +195,7 @@ class E3B(nn.Module):
         self.idm = IDM(obs_shape, n_actions, n_features, idm_merge)
 
         self.Il = nn.Parameter(torch.eye(n_features) / lmbda)  # d, d
-        self.Cinv = nn.Parameter(torch.zeros(num_envs, 100, 100))  # b, d, d
+        self.Cinv = nn.Parameter(torch.zeros(num_envs, n_features, n_features))  # b, d, d
         self.Il.requires_grad_(False)
         self.Cinv.requires_grad_(False)
 
@@ -212,6 +213,7 @@ class E3B(nn.Module):
         v = self.idm.calc_features(obs)[..., :, None]  # b, d, 1
         u = self.Cinv @ v  # b, d, 1
         b = v.mT @ u  # b, 1, 1
-        self.Cinv[:] = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
+        self.Cinv[~done] = (self.Cinv - u @ u.mT / (1.0 + b))[~done]  # b, d, d
         rew_eps = b[..., 0, 0].detach()
+        rew_eps[done] = 0.0
         return rew_eps

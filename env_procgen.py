@@ -57,12 +57,14 @@ class E3BReward(gym.Wrapper):
         self.e3b = e3b
 
     def reset(self):
-        return self.env.reset()
+        obs, info = self.env.reset()
+        done = torch.ones(self.num_envs, dtype=bool, device=info['obs'].device)
+        info['e3b'] = self.e3b.calc_reward(info['obs'], done=done)
+        return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        e3b_rew = self.e3b.calc_reward(info['obs'], done=info['done'])
-        info['e3b'] = e3b_rew
+        info['e3b'] = self.e3b.calc_reward(info['obs'], done=info['done'])
         return obs, rew, done, info
         
 class StoreReturns(gym.Wrapper):
