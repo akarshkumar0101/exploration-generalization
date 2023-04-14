@@ -80,6 +80,7 @@ def parse_args():
         help="the target KL divergence threshold")
 
     # My arguments
+    parser.add_argument("--actions", type=str, default='all')
     parser.add_argument("--lstm-type", type=str, default='lstm')
     parser.add_argument('--num-levels', type=lambda x: int(float(x)), default=0)
     parser.add_argument('--start-level', type=lambda x: int(float(x)), default=None)
@@ -171,7 +172,7 @@ def main(args):
 
     print("Creating agent...")
     obs_shape = (64, 64, 3)
-    n_actions = 15
+    n_actions = 15 if args.action == "all" else 5
     agent, agent0 = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device), None
     if args.load_agent is not None:
         print("Loading agent...")
@@ -199,7 +200,7 @@ def main(args):
         encoder=idm,
         device=device,
         cov=True,
-        actions="all",
+        actions=args.actions,
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -370,20 +371,20 @@ def main(args):
         data["meta/global_step"] = global_step
 
         data["idm/idm_loss"] = loss_idm.mean().item()
-        for i in range(n_actions):
-            data[f"idm_losses/loss_action_{i}"] = loss_idm[mb_actions_flat_now == i].mean().item()
+        for i, am in enumerate(envs.action_meanings):
+            data[f"idm_losses/loss_action_{am}"] = loss_idm[mb_actions_flat_now == i].mean().item()
         # if args.load_agent is not None:
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
 
         data_ret = record_agent_data(envs, store_vid=args.track and viz_slow)
         data.update({f"{k}_train": v for k, v in data_ret.items()})
-        # if args.track and viz_slow:
-        #     print("Rolling out test envs...")
-        #     envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device)
-        #     envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
-        #     data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
-        #     data.update({f"{k}_test": v for k, v in data_ret.items()})
+        if args.track and viz_slow:
+            print("Rolling out test envs...")
+            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device)
+            envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
+            data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
+            data.update({f"{k}_test": v for k, v in data_ret.items()})
 
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
