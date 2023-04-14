@@ -172,7 +172,7 @@ def main(args):
 
     print("Creating agent...")
     obs_shape = (64, 64, 3)
-    n_actions = 15 if args.action == "all" else 5
+    n_actions = 15 if args.actions == "all" else 5
     agent, agent0 = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device), None
     if args.load_agent is not None:
         print("Loading agent...")
