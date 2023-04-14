@@ -69,14 +69,14 @@ def main(args):
         if i_batch % (args.n_steps // 50) == 0:
             n_actions = env.single_action_space.n
             fig = plt.figure()
-            plt.barh(np.arange(n_actions), [np.e**ce[action_now==i].mean().item() for i in range(n_actions)])
+            plt.barh(np.arange(n_actions), [np.e ** ce[action_now == i].mean().item() for i in range(n_actions)])
             plt.yticks(np.arange(n_actions), labels=env.action_meanings)
             plt.xlim(0, n_actions)
             plt.grid()
-            data['action_losses'] = wandb.Image(fig)
-            plt.close('all')
+            data["action_losses"] = wandb.Image(fig)
+            plt.close("all")
 
-        keys_tqdm = ['loss', 'v1len', 'v2len', 'vdist', 'accuracy']
+        keys_tqdm = ["loss", "v1len", "v2len", "vdist", "accuracy"]
         pbar.set_postfix({k: data[k] for k in keys_tqdm})
         if args.track:
             wandb.log(data)
@@ -94,7 +94,7 @@ parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(5e4))
 parser.add_argument("--batch-size", type=int, default=2048)
 
 parser.add_argument("--idm-merge", type=str, default="both")
-parser.add_argument("--idm-normalize", type=lambda x: x.lower()=='true', default=True)
+parser.add_argument("--idm-normalize", type=lambda x: x.lower() == "true", default=True)
 parser.add_argument("--actions", type=str, default="ordinal")
 
 parser.add_argument("--freq-collect", type=lambda x: int(float(x)), default=128)
