@@ -181,7 +181,7 @@ def main(args):
     ])
 
     if args.track:
-        wandb.watch((agent, idm), log='all', log_freq=args.total_timesteps//100)
+        wandb.watch((agent, idm), log='all', log_freq=args.total_timesteps // args.batch_size//100)
 
     # env setup
     print('Creating env...')
