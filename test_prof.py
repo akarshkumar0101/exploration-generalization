@@ -8,12 +8,12 @@ from env_procgen import make_env
 
 
 def test_env(args):
-    encoder = IDM((64, 64, 3), 15, 10, merge="sub").to(args.device)
+    encoder = IDM((64, 64, 3), 15, 10, merge="diff").to(args.device)
     # for env_id in ["miner", "heist", "jumper", "coinrun", "fruitbot", "caveflyer"]:
     for env_id in ["miner"]:
         for distribution_mode in ["easy", "hard"]:
             n_steps, n_envs = 256, 64
-            env = make_env(env_id, "ext", n_envs, 0, 0, distribution_mode, 0.999, encoder=encoder, device=args.device)
+            env = make_env(env_id, "ext", n_envs, 0, 0, distribution_mode, 0.999, encoder=encoder, device=args.device, cov=True)
             start = time.time()
             obs, info = env.reset()
             for t in range(n_steps):
@@ -39,7 +39,7 @@ def test_train(args):
 
     x = torch.randint(0, 255, (256, 8, 64, 64, 3), dtype=torch.uint8, device=args.device)
     agent = Agent((64, 64, 3), 15).to(args.device)
-    idm = IDM((64, 64, 3), 15, 10, merge="sub").to(args.device)
+    idm = IDM((64, 64, 3), 15, 10, merge="both").to(args.device)
     opt = torch.optim.Adam(agent.parameters(), lr=1e-3)
 
     start = time.time()
@@ -48,7 +48,7 @@ def test_train(args):
             xb = x.reshape(2048, 64, 64, 3)
             _, logprob, _, _, _ = agent.get_action_and_value(xb)
             # logits = idm(xb, xb)
-            logits = idm.forward_smart(x)
+            v1, v2, logits = idm.forward_smart(x)
             loss = logprob.sum()+logits.sum()
 
             opt.zero_grad()
