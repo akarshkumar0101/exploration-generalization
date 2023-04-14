@@ -104,8 +104,9 @@ class StoreReturns(gym.Wrapper):
     def __init__(self, env, store_limit=1000):
         super().__init__(env)
         # running returns
-        self._ret_ext, self._ret_e3b, self._traj_len = None, None, None
-        self.rets_ext, self.rets_e3b, self.traj_lens = [], [], []
+        self._ret_ext, self._ret_e3b, self._ret_cov, self._traj_len = None, None, None, None
+        self.rets_ext, self.rets_e3b, self.rets_cov, self.traj_lens = [], [], [], []
+
         self.store_limit = store_limit
 
     def step(self, action):
@@ -114,23 +115,29 @@ class StoreReturns(gym.Wrapper):
         if self._ret_ext is None:
             self._ret_ext = torch.zeros_like(info["ext"])
             self._ret_e3b = torch.zeros_like(info["ext"])
+            self._ret_cov = torch.zeros_like(info["ext"])
             self._traj_len = torch.zeros_like(info["ext"]).to(torch.int)
 
         self._ret_ext += info["ext"]
         if "e3b" in info:
             self._ret_e3b += info["e3b"]
+        if "cov" in info:
+            self._ret_cov += info["cov"]
         self._traj_len += 1
 
         self.rets_ext.append(self._ret_ext[info["done"]])
         self.rets_e3b.append(self._ret_e3b[info["done"]])
+        self.rets_cov.append(self._ret_cov[info["done"]])
         self.traj_lens.append(self._traj_len[info["done"]])
 
         self.rets_ext = self.rets_ext[-self.store_limit :]
         self.rets_e3b = self.rets_e3b[-self.store_limit :]
+        self.rets_cov = self.rets_cov[-self.store_limit :]
         self.traj_lens = self.traj_lens[-self.store_limit :]
 
         self._ret_ext[info["done"]] = 0.0
         self._ret_e3b[info["done"]] = 0.0
+        self._ret_cov[info["done"]] = 0.0
         self._traj_len[info["done"]] = 0
 
         return obs, rew, done, info
@@ -180,7 +187,7 @@ class MinerCoverageReward(gym.Wrapper):
         dmask = (self.pobs != o).any(dim=-1)
         rew_eps = (dmask & ~self.mask_episodic).any(dim=-1).any(dim=-1).float()
         rew_eps[info["done"]] = 0.0
-        info['cov'] = rew_eps
+        info["cov"] = rew_eps
         self.mask_episodic = self.mask_episodic | dmask
         self.pobs = o
         self.mask_episodic[done] = self.mask_episodic_single

@@ -20,7 +20,6 @@ from agent_procgen import AgentLSTM, IDM
 from env_procgen import make_env
 
 
-
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -104,12 +103,13 @@ def parse_args():
     # fmt: on
     return args
 
+
 @torch.no_grad()
 def rollout_agent_test_env(agent, envs, n_steps=1000):
     _, info = envs.reset()
-    device = info['obs'].device
-    
-    next_obs = info['obs']
+    device = info["obs"].device
+
+    next_obs = info["obs"]
     next_done = torch.zeros(envs.num_envs).to(device)
     next_lstm_state = (
         torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device),
@@ -118,27 +118,32 @@ def rollout_agent_test_env(agent, envs, n_steps=1000):
     for _ in range(n_steps):
         action, _, _, _, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
         _, _, _, info = envs.step(action.cpu().numpy())
-        next_obs, next_done = info['obs'], info['done'].to(torch.uint8)
+        next_obs, next_done = info["obs"], info["done"].to(torch.uint8)
     return envs
+
 
 def record_agent_data(envs, store_vid=True):
     data = {}
     rets_ext = torch.cat(envs.rets_ext).cpu().numpy()
     rets_e3b = torch.cat(envs.rets_e3b).cpu().numpy()
+    rets_cov = torch.cat(envs.rets_cov).cpu().numpy()
     traj_lens = torch.cat(envs.traj_lens).cpu().numpy()
-    data['charts/ret_ext'] = rets_ext.mean()
-    data['charts_hist/ret_ext'] = wandb.Histogram(rets_ext)
-    data['charts/ret_e3b'] = rets_e3b.mean()
-    data['charts_hist/ret_e3b'] = wandb.Histogram(rets_e3b)
-    data['charts/traj_len'] = traj_lens.mean()
-    data['charts_hist/traj_len'] = wandb.Histogram(traj_lens)
+    data["charts/ret_ext"] = rets_ext.mean()
+    data["charts_hist/ret_ext"] = wandb.Histogram(rets_ext)
+    data["charts/ret_e3b"] = rets_e3b.mean()
+    data["charts_hist/ret_e3b"] = wandb.Histogram(rets_e3b)
+    data["charts/ret_cov"] = rets_cov.mean()
+    data["charts_hist/ret_cov"] = wandb.Histogram(rets_cov)
+    data["charts/traj_len"] = traj_lens.mean()
+    data["charts_hist/traj_len"] = wandb.Histogram(traj_lens)
     if store_vid:
         vid = np.stack(envs.past_obs)  # 1000, 25, 64, 64, 3
         vid[:, :, 0, :, :] = 0  # black border on first row
         vid[:, :, :, 0, :] = 0  # black border on first col
-        vid = rearrange(vid, 't (H W) h w c -> t (H h) (W w) c', H=5, W=5)
-        data[f'media/vid'] = wandb.Video(rearrange(vid, 't h w c->t c h w'), fps=15)
+        vid = rearrange(vid, "t (H W) h w c -> t (H h) (W w) c", H=5, W=5)
+        data[f"media/vid"] = wandb.Video(rearrange(vid, "t h w c->t c h w"), fps=15)
     return data
+
 
 def main(args):
     if args.start_level is None:
@@ -151,14 +156,8 @@ def main(args):
         args.load_agent = args.load_agent.format(**args.__dict__)
     print(args)
     if args.track:
-        print(f'Starting wandb with run name {args.name}...')
-
-        wandb.init(
-            project=args.project,
-            config=args,
-            name=args.name,
-            save_code=True,
-        )
+        print(f"Starting wandb with run name {args.name}...")
+        wandb.init(project=args.project, config=args, name=args.name, save_code=True)
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -168,31 +167,44 @@ def main(args):
 
     device = torch.device(args.device)
     # device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    print(f'Using device: {device}')
+    print(f"Using device: {device}")
 
-    print('Creating agent...')
+    print("Creating agent...")
     obs_shape = (64, 64, 3)
     n_actions = 15
-    agent = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device)
-    idm = IDM(obs_shape, n_actions, n_features=100, merge='sub').to(device)
-    optimizer = optim.Adam([
-        {'params': agent.parameters(), 'lr': args.learning_rate, 'eps': 1e-5},
-        {'params': idm.parameters(), 'lr': args.idm_lr, 'eps': 1e-8}
-    ])
+    agent, agent0 = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device), None
+    if args.load_agent is not None:
+        print("Loading agent...")
+        agent0 = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device)
+        agent0.load_state_dict(torch.load(f"{args.load_agent}/agent.pt"))
+        agent.load_state_dict(agent0.state_dict())
+    idm = IDM(obs_shape, n_actions, n_features=64, normalize=True, merge="both").to(device)
+    optimizer = optim.Adam(
+        [{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}]
+    )
 
     if args.track:
-        wandb.watch((agent, idm), log='all', log_freq=args.total_timesteps // args.batch_size//100)
+        wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
 
     # env setup
-    print('Creating env...')
-
-    envs = make_env(args.env_id, args.obj, args.num_envs,
-                    args.start_level, args.num_levels, args.distribution_mode,
-                    args.gamma, encoder=idm, device=device)
+    print("Creating env...")
+    envs = make_env(
+        args.env_id,
+        args.obj,
+        args.num_envs,
+        args.start_level,
+        args.num_levels,
+        args.distribution_mode,
+        args.gamma,
+        encoder=idm,
+        device=device,
+        cov=True,
+        actions="all",
+    )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # ALGO Logic: Storage setup
-    print('Creating buffers...')
+    print("Creating buffers...")
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -205,7 +217,7 @@ def main(args):
     start_time = time.time()
     # next_obs = torch.Tensor(envs.reset()).to(device)
     _, info = envs.reset()
-    next_obs = info['obs']
+    next_obs = info["obs"]
     next_done = torch.zeros(args.num_envs).to(device)
     next_lstm_state = (
         torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
@@ -214,7 +226,7 @@ def main(args):
     num_updates = args.total_timesteps // args.batch_size
     best_ret_train = -np.inf
 
-    print('Starting learning...')
+    print("Starting learning...")
     pbar = tqdm(range(1, num_updates + 1))
     for update in pbar:
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
@@ -240,15 +252,11 @@ def main(args):
             next_obs, reward, done, info = envs.step(action.cpu().numpy())
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             # next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
-            next_obs, next_done = info['obs'], info['done'].to(torch.uint8)
+            next_obs, next_done = info["obs"], info["done"].to(torch.uint8)
 
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = agent.get_value(
-                next_obs,
-                next_lstm_state,
-                next_done,
-            ).reshape(1, -1)
+            next_value = agent.get_value(next_obs, next_lstm_state, next_done).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -312,11 +320,7 @@ def main(args):
                 newvalue = newvalue.view(-1)
                 if args.clip_vloss:
                     v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                    v_clipped = b_values[mb_inds] + torch.clamp(
-                        newvalue - b_values[mb_inds],
-                        -args.clip_coef,
-                        args.clip_coef,
-                    )
+                    v_clipped = b_values[mb_inds] + torch.clamp(newvalue - b_values[mb_inds], -args.clip_coef, args.clip_coef)
                     v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                     v_loss = 0.5 * v_loss_max.mean()
@@ -324,15 +328,15 @@ def main(args):
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 # IDM loss, TODO: make this more efficient by not computing v twice
-                mb_obs = b_obs[mb_inds].reshape(args.num_steps, envsperbatch, *obs_shape) # T, N, H, W, C
+                mb_obs = b_obs[mb_inds].reshape(args.num_steps, envsperbatch, *obs_shape)  # T, N, H, W, C
                 # mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
                 # mb_obs_flat_nxt = rearrange(mb_obs[ 1:], 't n h w c -> (t n) h w c')
-                mb_actions = b_actions.long()[mb_inds].reshape(args.num_steps, envsperbatch) # T, N
-                mb_actions_flat_now = rearrange(mb_actions[:-1], 't n -> (t n)')
+                mb_actions = b_actions.long()[mb_inds].reshape(args.num_steps, envsperbatch)  # T, N
+                mb_actions_flat_now = rearrange(mb_actions[:-1], "t n -> (t n)")
                 # logits_idm = e3b.idm(mb_obs_flat_now, mb_obs_flat_nxt)
-                logits_idm = idm.forward_smart(mb_obs) # T-1 N A
+                v1, v2, logits_idm = idm.forward_smart(mb_obs)  # T-1 N A
                 logits_idm = logits_idm.flatten(0, 1)
-                loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction='none')
+                loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction="none")
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
@@ -353,54 +357,52 @@ def main(args):
         viz_slow = (update - 1) % (num_updates // 10) == 0
 
         data = {}
-        data['details/learning_rate'] = optimizer.param_groups[0]["lr"]
-        data['details/value_loss'] = v_loss.item()
-        data['details/policy_loss'] = pg_loss.item()
-        data['details/entropy'] = entropy_loss.item()
-        data['details/old_approx_kl'] = old_approx_kl.item()
-        data['details/approx_kl'] = approx_kl.item()
-        data['details/clipfrac'] = np.mean(clipfracs)
-        data['details/explained_variance'] = explained_var
-        data['meta/SPS'] = int(global_step / (time.time() - start_time))
-        data['meta/global_step'] = global_step
+        data["details/learning_rate"] = optimizer.param_groups[0]["lr"]
+        data["details/value_loss"] = v_loss.item()
+        data["details/policy_loss"] = pg_loss.item()
+        data["details/entropy"] = entropy_loss.item()
+        data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy())
+        data["details/old_approx_kl"] = old_approx_kl.item()
+        data["details/approx_kl"] = approx_kl.item()
+        data["details/clipfrac"] = np.mean(clipfracs)
+        data["details/explained_variance"] = explained_var
+        data["meta/SPS"] = int(global_step / (time.time() - start_time))
+        data["meta/global_step"] = global_step
 
-        data['idm/idm_loss'] = loss_idm.mean().item()
+        data["idm/idm_loss"] = loss_idm.mean().item()
         for i in range(n_actions):
-            data[f'idm_losses/loss_action_{i}'] = loss_idm[mb_actions_flat_now==i].mean().item()
+            data[f"idm_losses/loss_action_{i}"] = loss_idm[mb_actions_flat_now == i].mean().item()
         # if args.load_agent is not None:
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
 
         data_ret = record_agent_data(envs, store_vid=args.track and viz_slow)
-        data.update({f'{k}_train': v for k, v in data_ret.items()})
-        if args.track and viz_slow:
-            print('Rolling out test envs...')
-            envs_test = make_env(args.env_id, args.obj, args.num_envs,
-                                 1000000, 0, args.distribution_mode,
-                                 args.gamma, encoder=idm, device=device)
-            envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
-            data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
-            data.update({f'{k}_test': v for k, v in data_ret.items()})
+        data.update({f"{k}_train": v for k, v in data_ret.items()})
+        # if args.track and viz_slow:
+        #     print("Rolling out test envs...")
+        #     envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device)
+        #     envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
+        #     data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
+        #     data.update({f"{k}_test": v for k, v in data_ret.items()})
 
         if viz_slow and args.save_agent is not None:
-            print('Saving agent...')
+            print("Saving agent...")
             os.makedirs(args.save_agent, exist_ok=True)
-            torch.save(agent.state_dict(), f'{args.save_agent}/agent_{global_step:012.0f}.pt')
-            torch.save(idm.state_dict(), f'{args.save_agent}/idm_{global_step:012.0f}.pt')
-            if data[f'charts/ret_{args.obj}_train'] > best_ret_train:
-                best_ret_train = data[f'charts/ret_{args.obj}_train']
-                torch.save(agent.state_dict(), f'{args.save_agent}/agent.pt')
-                torch.save(idm.state_dict(), f'{args.save_agent}/idm.pt')
-                torch.save(data, f'{args.save_agent}/data.pt')
+            torch.save(agent.state_dict(), f"{args.save_agent}/agent_{global_step:012.0f}.pt")
+            torch.save(idm.state_dict(), f"{args.save_agent}/idm_{global_step:012.0f}.pt")
+            if data[f"charts/ret_{args.obj}_train"] > best_ret_train:
+                best_ret_train = data[f"charts/ret_{args.obj}_train"]
+                torch.save(agent.state_dict(), f"{args.save_agent}/agent.pt")
+                torch.save(idm.state_dict(), f"{args.save_agent}/idm.pt")
+                torch.save(data, f"{args.save_agent}/data.pt")
 
-        keys_tqdm = ['charts/ret_ext_train', 'charts/ret_e3b_train', 'meta/SPS']
-        pbar.set_postfix({k.split('/')[-1]: data[k] for k in keys_tqdm})
+        keys_tqdm = ["charts/ret_ext_train", "charts/ret_e3b_train", "charts/ret_cov_train", "meta/SPS"]
+        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm})
         if args.track:
             wandb.log(data, step=global_step)
 
     envs.close()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main(parse_args())
-
-
