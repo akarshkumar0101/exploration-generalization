@@ -90,7 +90,7 @@ parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--track", default=False, action="store_true")
 
 parser.add_argument("--lr", type=float, default=5e-4)
-parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(5e4))
+parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(5e3))
 parser.add_argument("--batch-size", type=int, default=2048)
 
 parser.add_argument("--idm-merge", type=str, default="both")
