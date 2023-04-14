@@ -5,16 +5,25 @@ import gym
 from procgen import ProcgenEnv
 
 
-class NormalGym(gym.Wrapper):
+class ProcgenWrapper(gym.Wrapper):
     def __init__(self, env):
+        # env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
         super().__init__(env)
+        self.single_action_space = env.action_space
+        self.action_space = gym.spaces.MultiDiscrete([self.single_action_space.n] * self.num_envs)
+        self.single_observation_space = env.observation_space["rgb"]
+        self.observation_space = None  # TODO implement this
+        self.is_vector_env = True
+        self.action_meanings = ["leftdown", "left", "leftup", "down", "noop", "up", "rightdown", "right", "rightup", "d", "a", "w", "s", "q", "e"]
 
     def reset(self):
         obs = self.env.reset()
+        obs = obs["rgb"]
         return obs, {}
 
     def step(self, action):
         obs, rew, done, infos = self.env.step(action)
+        obs = obs["rgb"]
         return obs, rew, done, {}
 
 
@@ -138,23 +147,61 @@ class RewardSelector(gym.Wrapper):
         return obs, rew, done, info
 
 
-def make_env(env_id, obj, num_envs, start_level, num_levels, distribution_mode, gamma, encoder=None, device="cpu"):
+class OrdinalActions(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        am_udlr = ["noop", "up", "down", "left", "right"]
+        self.i_actions = np.array([i for i, am in enumerate(self.action_meanings) if am in am_udlr])
+        self.action_meanings = [self.action_meanings[i] for i in self.i_actions]
+        self.single_action_space = gym.spaces.Discrete(len(self.action_meanings))
+        self.action_space = gym.spaces.MultiDiscrete([self.single_action_space.n] * self.num_envs)
+
+    def step(self, action):
+        action = self.i_actions[action]
+        obs, rew, done, info = self.env.step(action)
+        return obs, rew, done, info
+
+
+class MinerCoverageReward(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.pobs, self.mask_episodic = None, None
+
+    def reset(self):
+        obs, info = self.env.reset()
+        self.pobs = info["obs"][:, ::2, ::2, :]  # n_envs, h, w, c
+        self.mask_episodic = (self.pobs != self.pobs).any(dim=-1)
+        self.mask_episodic_single = self.mask_episodic[0].clone()
+        return obs, info
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        o = info["obs"][:, ::2, ::2, :]
+        dmask = (self.pobs != o).any(dim=-1)
+        rew_eps = (dmask & ~self.mask_episodic).any(dim=-1).any(dim=-1).float()
+        rew_eps[info["done"]] = 0.0
+        info['cov'] = rew_eps
+        self.mask_episodic = self.mask_episodic | dmask
+        self.pobs = o
+        self.mask_episodic[done] = self.mask_episodic_single
+        return obs, rew, done, info
+
+
+def make_env(env_id, obj, num_envs, start_level, num_levels, distribution_mode, gamma, encoder=None, device="cpu", cov=True, actions="all"):
     env = ProcgenEnv(num_envs=num_envs, env_name=env_id, num_levels=num_levels, start_level=start_level, distribution_mode=distribution_mode)
-    env = gym.wrappers.TransformObservation(env, lambda obs: obs["rgb"])
-    env.single_action_space = env.action_space
-    env.action_space = gym.spaces.MultiDiscrete([env.action_space.n] * num_envs)
-    env.single_observation_space = env.observation_space["rgb"]
-    env.observation_space = None # TODO implement this
-    env.is_vector_env = True
-    env = NormalGym(env)
+    env = ProcgenWrapper(env)
     env = StoreObs(env)
     env = ToTensor(env, device=device)
     if encoder is not None:
         env = E3BReward(env, encoder=encoder, lmbda=0.1)
+    if cov:
+        env = MinerCoverageReward(env)
     env = StoreReturns(env)
     env = RewardSelector(env, obj)
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    if actions == "ordinal":
+        env = OrdinalActions(env)
     return env
 
 

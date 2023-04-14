@@ -148,7 +148,8 @@ class AgentLSTM(nn.Module):
 
 
 class IDM(nn.Module):
-    def __init__(self, obs_shape, n_actions, n_features=100, merge="cat"):
+    def __init__(self, obs_shape, n_actions, n_features=100, normalize=False, merge="cat"):
+        # cat, diff, both, catdinit
         super().__init__()
         self.n_features = n_features
         h, w, c = obs_shape
@@ -167,34 +168,46 @@ class IDM(nn.Module):
         ]
         self.network = nn.Sequential(*conv_seqs)
 
-        # self.idm = layer_init(nn.Linear(2*n_features, n_actions), std=0.01)
-        self.merge = merge
-        n_inputs_idm = 2 * n_features if merge == "cat" else n_features
+        self.normalize, self.merge = normalize, merge
+        n_features_merge = n_features * dict(cat=2, diff=1, both=3, catdinit=2)[self.merge]
         self.idm = nn.Sequential(
-            nn.Linear(n_inputs_idm, n_features),
+            nn.Linear(n_features_merge, n_features),
             nn.ReLU(),
             nn.Linear(n_features, n_features),
             nn.ReLU(),
             nn.Linear(n_features, n_actions),
         )
+        if "dinit" in self.merge:
+            self.idm[0].weight.data[:, :n_features] = -1.0
+            self.idm[0].weight.data[:, n_features:] = +1.0
 
     def calc_features(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
+        if self.normalize:
+            hidden = torch.nn.functional.normalize(hidden, dim=-1)
         return hidden
 
+    def forward_idm(self, v1, v2):
+        if "cat" in self.merge:
+            v = torch.cat([v1, v2], dim=-1)
+        elif "diff" in self.merge:
+            v = v2 - v1
+        elif 'both' in self.merge:
+            v = torch.cat([v1, v2, v2 - v1], dim=-1)
+        else:
+            raise NotImplementedError
+        return self.idm(v)  # logits
+
     def forward(self, obs, next_obs):
-        l1 = self.calc_features(obs)
-        l2 = self.calc_features(next_obs)
-        l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l2 - l1
-        logits = self.idm(l)
-        return logits
+        v1 = self.calc_features(obs)
+        v2 = self.calc_features(next_obs)
+        logits = self.forward_idm(v1, v2)
+        return v1, v2, logits
 
     def forward_smart(self, obs):  # obs has shape: (t n h w c)
-        x = rearrange(obs, "t n h w c -> (t n) c h w") / 255.0
-        hidden = self.network(x) # (t n) d
-        hidden = rearrange(hidden, "(t n) d -> t n d", t=len(obs)) # t n d
-        l1, l2 = hidden[:-1], hidden[1:] # t-1 n d
-        l = torch.cat([l1, l2], dim=-1) if self.merge == "cat" else l2 - l1
-        logits = self.idm(l)
-        return logits # t-1 n a
-
+        t, n, _, _, _ = obs.shape
+        obs = rearrange(obs, "t n h w c -> (t n) h w c")
+        v = rearrange(self.calc_features(obs), "(t n) d -> t n d", t=t)  # t n d
+        v1, v2 = v[:-1], v[1:]  # t-1 n d
+        logits = self.forward_idm(v1, v2)
+        return v1, v2, logits  # t-1 n a
