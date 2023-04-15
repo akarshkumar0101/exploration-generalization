@@ -76,14 +76,19 @@ class E3BReward(gym.Wrapper):
         self.Il = torch.eye(n_features) / lmbda  # d, d
         self.Cinv = torch.zeros(self.num_envs, n_features, n_features)  # b, d, d
 
+    def set_encoder(self, encoder):
+        self.encoder = encoder
+
     def reset(self):
         obs, info = self.env.reset()
-        info["e3b"] = self.step_e3b(info["obs"], info["done"])
+        if self.encoder is not None:
+            info["e3b"] = self.step_e3b(info["obs"], info["done"])
         return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        info["e3b"] = self.step_e3b(info["obs"], info["done"])
+        if self.encoder is not None:
+            info["e3b"] = self.step_e3b(info["obs"], info["done"])
         return obs, rew, done, info
 
     @torch.no_grad()  # this is required

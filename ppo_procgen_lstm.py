@@ -112,10 +112,8 @@ def rollout_agent_test_env(agent, envs, n_steps=1000):
 
     next_obs = info["obs"]
     next_done = torch.zeros(envs.num_envs).to(device)
-    next_lstm_state = (
-        torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device),
-        torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device),
-    )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+    # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+    next_lstm_state = (torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device), torch.zeros(agent.lstm.num_layers, envs.num_envs, agent.lstm.hidden_size).to(device))
     for _ in range(n_steps):
         action, _, _, _, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
         _, _, _, info = envs.step(action.cpu().numpy())
@@ -170,9 +168,14 @@ def main(args):
     # device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
     print(f"Using device: {device}")
 
+    # env setup
+    print("Creating env...")
+    envs = make_env(args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, encoder=None, device=device, cov=True, actions=args.actions)
+    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+
     print("Creating agent...")
-    obs_shape = (64, 64, 3)
-    n_actions = 15 if args.actions == "all" else 5
+    obs_shape = envs.single_observation_space.shape
+    n_actions = envs.single_action_space.n
     agent, agent0 = AgentLSTM(obs_shape, n_actions, lstm_type=args.lstm_type).to(device), None
     if args.load_agent is not None:
         print("Loading agent...")
@@ -180,29 +183,11 @@ def main(args):
         agent0.load_state_dict(torch.load(f"{args.load_agent}/agent.pt"))
         agent.load_state_dict(agent0.state_dict())
     idm = IDM(obs_shape, n_actions, n_features=64, normalize=True, merge="both").to(device)
-    optimizer = optim.Adam(
-        [{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}]
-    )
+    optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}])
+    envs.set_encoder(idm)
 
     if args.track:
         wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
-
-    # env setup
-    print("Creating env...")
-    envs = make_env(
-        args.env_id,
-        args.obj,
-        args.num_envs,
-        args.start_level,
-        args.num_levels,
-        args.distribution_mode,
-        args.gamma,
-        encoder=idm,
-        device=device,
-        cov=True,
-        actions=args.actions,
-    )
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # ALGO Logic: Storage setup
     print("Creating buffers...")
@@ -220,10 +205,8 @@ def main(args):
     _, info = envs.reset()
     next_obs = info["obs"]
     next_done = torch.zeros(args.num_envs).to(device)
-    next_lstm_state = (
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
-    )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+    # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+    next_lstm_state = (torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device), torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device))
     num_updates = args.total_timesteps // args.batch_size
     best_ret_train = -np.inf
 
@@ -381,7 +364,8 @@ def main(args):
         data.update({f"{k}_train": v for k, v in data_ret.items()})
         if args.track and viz_slow:
             print("Rolling out test envs...")
-            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device)
+            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device, cov=True, actions=args.actions)
+
             envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
             data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
             data.update({f"{k}_test": v for k, v in data_ret.items()})
