@@ -70,14 +70,14 @@ class ToTensor(gym.Wrapper):
 class E3BReward(gym.Wrapper):
     def __init__(self, env, encoder, lmbda=0.1):
         super().__init__(env)
-        self.encoder = encoder
-        n_features = self.encoder.n_features
+        self.set_encoder(encoder, lmbda)
 
-        self.Il = torch.eye(n_features) / lmbda  # d, d
-        self.Cinv = torch.zeros(self.num_envs, n_features, n_features)  # b, d, d
-
-    def set_encoder(self, encoder):
+    def set_encoder(self, encoder, lmbda=0.1):
         self.encoder = encoder
+        if encoder is not None:
+            n_features = self.encoder.n_features
+            self.Il = torch.eye(n_features) / lmbda  # d, d
+            self.Cinv = torch.zeros(self.num_envs, n_features, n_features)  # b, d, d
 
     def reset(self):
         obs, info = self.env.reset()
@@ -204,10 +204,8 @@ def make_env(env_id, obj, num_envs, start_level, num_levels, distribution_mode, 
     env = ProcgenWrapper(env)
     env = StoreObs(env)
     env = ToTensor(env, device=device)
-    if encoder is not None:
-        env = E3BReward(env, encoder=encoder, lmbda=0.1)
-    if cov:
-        env = MinerCoverageReward(env)
+    env = E3BReward(env, encoder=encoder, lmbda=0.1)
+    env = MinerCoverageReward(env)
     env = StoreReturns(env)
     env = RewardSelector(env, obj)
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
