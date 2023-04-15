@@ -210,9 +210,24 @@ def main(args):
     num_updates = args.total_timesteps // args.batch_size
     best_ret_train = -np.inf
 
+    warmup_critic_steps = 0 if args.warmup_critic_steps is None else args.warmup_critic_steps
+    num_updates = num_updates + warmup_critic_steps // args.batch_size
+    critic_warm = True if args.warmup_critic_steps is None else False
+    if not critic_warm:  # freeze network + actor for critic warmup
+        print('Freezing everything except the critic')
+        for name, p in agent.named_parameters():
+            if not name.startswith('critic'):
+                p.requires_grad_(False)
+
     print("Starting learning...")
     pbar = tqdm(range(1, num_updates + 1))
     for update in pbar:
+        if not critic_warm and global_step > args.warmup_critic_steps:  # unfreeze network+actor
+            critic_warm = True
+            print('Unfreezing everything')
+            for name, p in agent.named_parameters():
+                p.requires_grad_(True)
+
         initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
