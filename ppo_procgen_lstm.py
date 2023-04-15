@@ -88,8 +88,8 @@ def parse_args():
     parser.add_argument('--kl0-coef', type=float, default=0.)
     parser.add_argument("--pre-env-id", type=str, default="miner")
     parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
-    parser.add_argument('--pre-obj', type=str, default='ext')
-    parser.add_argument("--pre-seed", type=int, default=0, help="seed of the experiment")
+    parser.add_argument('--pre-obj', type=str, default=None)
+    parser.add_argument("--pre-seed", type=int, default=None, help="seed of the experiment")
     parser.add_argument("--warmup-critic-steps", type=lambda x: int(float(x)), default=None)
     parser.add_argument('--load-agent', type=str, default=None)
     parser.add_argument('--save-agent', type=str, default=None)
@@ -186,8 +186,8 @@ def main(args):
     optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}])
     envs.set_encoder(idm)
 
-    if args.track:
-        wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
+    # if args.track:
+    #     wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
 
     # ALGO Logic: Storage setup
     print("Creating buffers...")
