@@ -392,6 +392,12 @@ def main(args):
             plt.xlabel('cov return'); plt.ylabel('e3b return')
             data['e3b/e3b_vs_cov_returns'] = wandb.Image(fig)
 
+            fig = plt.figure()
+            plt.hist(b_actions.cpu().numpy(), bins=envs.single_action_space.n*2)
+            plt.xticks(ticks=np.arange(envs.single_action_space.n), labels=envs.action_meanings)
+            plt.title('Action distribution')
+            data['e3b/action_distribution'] = wandb.Image(fig)
+
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
             os.makedirs(args.save_agent, exist_ok=True)
