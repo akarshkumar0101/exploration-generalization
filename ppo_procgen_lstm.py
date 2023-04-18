@@ -390,7 +390,7 @@ def main(args):
             fig = plt.figure()
             plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
             plt.xlabel('cov return'); plt.ylabel('e3b return')
-            data['e3b/e3b_vs_cov_returns'] = fig # wandb.Image(fig)
+            data['e3b/e3b_vs_cov_returns'] = wandb.Image(fig)
 
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
