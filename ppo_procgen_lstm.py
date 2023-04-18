@@ -6,17 +6,16 @@ import time
 from distutils.util import strtobool
 
 import gym
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from einops import rearrange
-
 from tqdm.auto import tqdm
-import wandb
 
-from agent_procgen import AgentLSTM, IDM
+import wandb
+from agent_procgen import IDM, AgentLSTM
 from env_procgen import make_env
 
 
@@ -336,6 +335,7 @@ def main(args):
                 v1, v2, logits_idm = idm.forward_smart(mb_obs)  # T-1 N A
                 logits_idm = logits_idm.flatten(0, 1)
                 loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction="none")
+                acc_idm = (logits_idm.argmax(dim=-1)==mb_actions_flat_now).float().mean()
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
@@ -368,9 +368,10 @@ def main(args):
         data["meta/SPS"] = int(global_step / (time.time() - start_time))
         data["meta/global_step"] = global_step
 
-        data["idm/idm_loss"] = loss_idm.mean().item()
+        data["e3b/idm_loss"] = loss_idm.mean().item()
+        data["e3b/idm_accuracy"] = acc_idm.item()
         for i, am in enumerate(envs.action_meanings):
-            data[f"idm_losses/loss_action_{am}"] = loss_idm[mb_actions_flat_now == i].mean().item()
+            data[f"e3b_details/loss_action_{am}"] = loss_idm[mb_actions_flat_now == i].mean().item()
         # if args.load_agent is not None:
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
@@ -384,6 +385,12 @@ def main(args):
             envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
             data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
             data.update({f"{k}_test": v for k, v in data_ret.items()})
+        
+        if args.track and viz_slow:
+            fig = plt.figure()
+            plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
+            plt.xlabel('cov return'); plt.ylabel('e3b return')
+            data['e3b/e3b_vs_cov_returns'] = fig # wandb.Image(fig)
 
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
@@ -400,6 +407,7 @@ def main(args):
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm})
         if args.track:
             wandb.log(data, step=global_step)
+        plt.close('all')
 
     envs.close()
 

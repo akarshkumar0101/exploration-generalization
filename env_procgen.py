@@ -109,41 +109,41 @@ class StoreReturns(gym.Wrapper):
     def __init__(self, env, store_limit=1000):
         super().__init__(env)
         # running returns
-        self._ret_ext, self._ret_e3b, self._ret_cov, self._traj_len = None, None, None, None
+        self.ret_ext, self.ret_e3b, self.ret_cov, self.traj_len = None, None, None, None
+        # list (past store_limit timesteps) of tensors (envs that were done) of returns
         self.rets_ext, self.rets_e3b, self.rets_cov, self.traj_lens = [], [], [], []
-
         self.store_limit = store_limit
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
 
-        if self._ret_ext is None:
-            self._ret_ext = torch.zeros_like(info["ext"])
-            self._ret_e3b = torch.zeros_like(info["ext"])
-            self._ret_cov = torch.zeros_like(info["ext"])
-            self._traj_len = torch.zeros_like(info["ext"]).to(torch.int)
+        if self.ret_ext is None:
+            self.ret_ext = torch.zeros_like(info["ext"])
+            self.ret_e3b = torch.zeros_like(info["ext"])
+            self.ret_cov = torch.zeros_like(info["ext"])
+            self.traj_len = torch.zeros_like(info["ext"]).to(torch.int)
 
-        self._ret_ext += info["ext"]
+        self.ret_ext += info["ext"]
         if "e3b" in info:
-            self._ret_e3b += info["e3b"]
+            self.ret_e3b += info["e3b"]
         if "cov" in info:
-            self._ret_cov += info["cov"]
-        self._traj_len += 1
+            self.ret_cov += info["cov"]
+        self.traj_len += 1
 
-        self.rets_ext.append(self._ret_ext[info["done"]])
-        self.rets_e3b.append(self._ret_e3b[info["done"]])
-        self.rets_cov.append(self._ret_cov[info["done"]])
-        self.traj_lens.append(self._traj_len[info["done"]])
+        self.rets_ext.append(self.ret_ext[info["done"]])
+        self.rets_e3b.append(self.ret_e3b[info["done"]])
+        self.rets_cov.append(self.ret_cov[info["done"]])
+        self.traj_lens.append(self.traj_len[info["done"]])
 
         self.rets_ext = self.rets_ext[-self.store_limit :]
         self.rets_e3b = self.rets_e3b[-self.store_limit :]
         self.rets_cov = self.rets_cov[-self.store_limit :]
         self.traj_lens = self.traj_lens[-self.store_limit :]
 
-        self._ret_ext[info["done"]] = 0.0
-        self._ret_e3b[info["done"]] = 0.0
-        self._ret_cov[info["done"]] = 0.0
-        self._traj_len[info["done"]] = 0
+        self.ret_ext[info["done"]] = 0.0
+        self.ret_e3b[info["done"]] = 0.0
+        self.ret_cov[info["done"]] = 0.0
+        self.traj_len[info["done"]] = 0
 
         return obs, rew, done, info
 
