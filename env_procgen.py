@@ -175,20 +175,21 @@ class OrdinalActions(gym.Wrapper):
 
 
 class MinerCoverageReward(gym.Wrapper):
-    def __init__(self, env):
+    def __init__(self, env, res=1):
         super().__init__(env)
         self.pobs, self.mask_episodic = None, None
+        self.res = res
 
     def reset(self):
         obs, info = self.env.reset()
-        self.pobs = info["obs"][:, ::2, ::2, :]  # n_envs, h, w, c
+        self.pobs = info["obs"][:, ::self.res, ::self.res, :]  # n_envs, h, w, c
         self.mask_episodic = (self.pobs != self.pobs).any(dim=-1)
         self.mask_episodic_single = self.mask_episodic[0].clone()
         return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        o = info["obs"][:, ::2, ::2, :]
+        o = info["obs"][:, ::self.res, ::self.res, :]
         dmask = (self.pobs != o).any(dim=-1)
         rew_eps = (dmask & ~self.mask_episodic).any(dim=-1).any(dim=-1).float()
         rew_eps[info["done"]] = 0.0
