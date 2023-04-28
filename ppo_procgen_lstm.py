@@ -124,9 +124,8 @@ def record_agent_data(envs, store_vid=True):
     data = {}
     for key, rets in envs.key2past_rets.items():
         rets = torch.cat(rets).cpu().numpy()
-        if len(rets) > 0:
-            data[f"charts/{key}"] = rets.mean()
-            data[f"charts_hist/{key}"] = wandb.Histogram(rets)
+        data[f"charts/{key}"] = rets.mean()
+        data[f"charts_hist/{key}"] = wandb.Histogram(rets)
     if store_vid:
         vid = np.stack(envs.past_obs)  # 1000, 25, 64, 64, 3
         vid[:, :, 0, :, :] = [255, 0, 0]  # red border on first row
