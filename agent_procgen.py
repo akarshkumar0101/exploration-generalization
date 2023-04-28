@@ -181,7 +181,7 @@ class IDM(nn.Module):
             self.idm[0].weight.data[:, :n_features] = -1.0
             self.idm[0].weight.data[:, n_features:] = +1.0
 
-    def calc_features(self, x):
+    def encode(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)  # "bhwc" -> "bchw"
         if self.normalize:
             hidden = torch.nn.functional.normalize(hidden, dim=-1)
@@ -199,15 +199,15 @@ class IDM(nn.Module):
         return self.idm(v)  # logits
 
     def forward(self, obs, next_obs):
-        v1 = self.calc_features(obs)
-        v2 = self.calc_features(next_obs)
+        v1 = self.encode(obs)
+        v2 = self.encode(next_obs)
         logits = self.forward_idm(v1, v2)
         return v1, v2, logits
 
     def forward_smart(self, obs):  # obs has shape: (t n h w c)
         t, n, _, _, _ = obs.shape
         obs = rearrange(obs, "t n h w c -> (t n) h w c")
-        v = rearrange(self.calc_features(obs), "(t n) d -> t n d", t=t)  # t n d
+        v = rearrange(self.encode(obs), "(t n) d -> t n d", t=t)  # t n d
         v1, v2 = v[:-1], v[1:]  # t-1 n d
         logits = self.forward_idm(v1, v2)
         return v1, v2, logits  # t-1 n a

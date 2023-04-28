@@ -1,8 +1,8 @@
+import gym
 import numpy as np
 import torch
-
-import gym
 from procgen import ProcgenEnv
+from torch import nn
 
 
 class ProcgenWrapper(gym.Wrapper):
@@ -28,10 +28,10 @@ class ProcgenWrapper(gym.Wrapper):
 
 
 class StoreObs(gym.Wrapper):
-    def __init__(self, env, n_envs=25, store_limit=1000):
+    def __init__(self, env, n_envs=25, buf_size=1000):
         super().__init__(env)
         self.n_envs = n_envs
-        self.store_limit = store_limit
+        self.buf_size = buf_size
         self.past_obs = []
 
     def reset(self):
@@ -42,7 +42,7 @@ class StoreObs(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         self.past_obs.append(obs[: self.n_envs])
-        self.past_obs = self.past_obs[-self.store_limit :]
+        self.past_obs = self.past_obs[-self.buf_size :]
         info["past_obs"] = self.past_obs
         return obs, rew, done, info
 
@@ -55,97 +55,59 @@ class ToTensor(gym.Wrapper):
     def reset(self):
         obs, info = self.env.reset()
         info["obs"] = torch.from_numpy(obs).to(self.device)
-        info["done"] = torch.ones(self.num_envs, dtype=bool, device=info["obs"].device)
+        info["rew_ext"] = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        info["rew_alive"] = torch.ones_like(info["rew_ext"])
+        info["done"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
+
+        self.timestep = torch.zeros(self.num_envs, dtype=int, device=self.device)
+        info["timestep"] = self.timestep
         return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         info["obs"] = torch.from_numpy(obs).to(self.device)
-        info["rew"] = torch.from_numpy(rew).to(self.device)
-        info["ext"] = torch.from_numpy(rew).to(self.device)
+        info["rew_ext"] = torch.from_numpy(rew).to(self.device)
+        info["rew_alive"] = torch.ones_like(info["rew_ext"])
         info["done"] = torch.from_numpy(done).to(self.device)
+
+        self.timestep += 1
+        self.timestep[info["done"]] = 0
+        info["timestep"] = self.timestep
         return obs, rew, done, info
 
 
-class E3BReward(gym.Wrapper):
-    def __init__(self, env, encoder, lmbda=0.1):
+class StoreReturns(gym.Wrapper):
+    def __init__(self, env, buf_size=1000):
         super().__init__(env)
-        self.set_encoder(encoder, lmbda)
-
-    def set_encoder(self, encoder, lmbda=0.1):
-        self.encoder = encoder
-        if encoder is not None:
-            n_features = self.encoder.n_features
-            self.Il = torch.eye(n_features) / lmbda  # d, d
-            self.Cinv = torch.zeros(self.num_envs, n_features, n_features)  # b, d, d
+        self.buf_size = buf_size
+        # running returns
+        self.key2running_ret = {}
+        # list of past returns
+        self.key2past_rets = {}
 
     def reset(self):
         obs, info = self.env.reset()
-        if self.encoder is not None:
-            info["e3b"] = self.step_e3b(info["obs"], info["done"])
+        self.update_rets(info, resetting=True)
         return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        if self.encoder is not None:
-            info["e3b"] = self.step_e3b(info["obs"], info["done"])
+        self.update_rets(info)
         return obs, rew, done, info
 
-    @torch.no_grad()  # this is required
-    def step_e3b(self, obs, done):
-        self.Il, self.Cinv = self.Il.to(obs.device), self.Cinv.to(obs.device)
-        assert done.dtype == torch.bool
-        self.Cinv[done] = self.Il
-        v = self.encoder.calc_features(obs)[..., :, None]  # b, d, 1
-        u = self.Cinv @ v  # b, d, 1
-        b = v.mT @ u  # b, 1, 1
-        self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
-        rew_e3b = b[..., 0, 0].detach()
-        rew_e3b[done] = 0.0
-        return rew_e3b
-
-
-class StoreReturns(gym.Wrapper):
-    def __init__(self, env, store_limit=1000):
-        super().__init__(env)
-        # running returns
-        self.ret_ext, self.ret_e3b, self.ret_cov, self.traj_len = None, None, None, None
-        # list (past store_limit timesteps) of tensors (envs that were done) of returns
-        self.rets_ext, self.rets_e3b, self.rets_cov, self.traj_lens = [], [], [], []
-        self.store_limit = store_limit
-
-    def step(self, action):
-        obs, rew, done, info = self.env.step(action)
-
-        if self.ret_ext is None:
-            self.ret_ext = torch.zeros_like(info["ext"])
-            self.ret_e3b = torch.zeros_like(info["ext"])
-            self.ret_cov = torch.zeros_like(info["ext"])
-            self.traj_len = torch.zeros_like(info["ext"]).to(torch.int)
-
-        self.ret_ext += info["ext"]
-        if "e3b" in info:
-            self.ret_e3b += info["e3b"]
-        if "cov" in info:
-            self.ret_cov += info["cov"]
-        self.traj_len += 1
-
-        self.rets_ext.append(self.ret_ext[info["done"]])
-        self.rets_e3b.append(self.ret_e3b[info["done"]])
-        self.rets_cov.append(self.ret_cov[info["done"]])
-        self.traj_lens.append(self.traj_len[info["done"]])
-
-        self.rets_ext = self.rets_ext[-self.store_limit :]
-        self.rets_e3b = self.rets_e3b[-self.store_limit :]
-        self.rets_cov = self.rets_cov[-self.store_limit :]
-        self.traj_lens = self.traj_lens[-self.store_limit :]
-
-        self.ret_ext[info["done"]] = 0.0
-        self.ret_e3b[info["done"]] = 0.0
-        self.ret_cov[info["done"]] = 0.0
-        self.traj_len[info["done"]] = 0
-
-        return obs, rew, done, info
+    def update_rets(self, info, resetting=False):
+        for key in info:
+            if not key.startswith("rew"):
+                continue
+            keyr = key.replace("rew", "ret")
+            if keyr not in self.key2running_ret:
+                self.key2running_ret[keyr] = torch.zeros_like(info[key])
+                self.key2past_rets[keyr] = []
+            self.key2running_ret[keyr] += info[key].to(self.device)
+            if not resetting:
+                self.key2past_rets[keyr].append(self.key2running_ret[keyr][info["done"]])
+            self.key2past_rets[keyr] = self.key2past_rets[keyr][-self.buf_size :]
+            self.key2running_ret[keyr][info["done"]] = 0.0
 
 
 class RewardSelector(gym.Wrapper):
@@ -155,7 +117,7 @@ class RewardSelector(gym.Wrapper):
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        rew = info[self.obj].detach().cpu().numpy()
+        rew = info[f"rew_{self.obj}"].detach().cpu().numpy()
         return obs, rew, done, info
 
 
@@ -182,31 +144,49 @@ class MinerCoverageReward(gym.Wrapper):
 
     def reset(self):
         obs, info = self.env.reset()
-        self.pobs = info["obs"][:, ::self.res, ::self.res, :]  # n_envs, h, w, c
+        self.pobs = info["obs"][:, :: self.res, :: self.res, :]  # n_envs, h, w, c
         self.mask_episodic = (self.pobs != self.pobs).any(dim=-1)
         self.mask_episodic_single = self.mask_episodic[0].clone()
         return obs, info
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        o = info["obs"][:, ::self.res, ::self.res, :]
+        o = info["obs"][:, :: self.res, :: self.res, :]
         dmask = (self.pobs != o).any(dim=-1)
-        rew_eps = (dmask & ~self.mask_episodic).any(dim=-1).any(dim=-1).float()
-        rew_eps[info["done"]] = 0.0
-        info["cov"] = rew_eps
+        rew_cov = (dmask & ~self.mask_episodic).any(dim=-1).any(dim=-1).float()
+        rew_cov[info["done"]] = 0.0
+        info["rew_cov"] = rew_cov
         self.mask_episodic = self.mask_episodic | dmask
         self.pobs = o
         self.mask_episodic[done] = self.mask_episodic_single
         return obs, rew, done, info
 
 
-def make_env(env_id, obj, num_envs, start_level, num_levels, distribution_mode, gamma, encoder=None, device="cpu", cov=True, actions="all"):
+def make_env(
+    env_id="miner",
+    obj="nov",
+    num_envs=64,
+    start_level=0,
+    num_levels=0,
+    distribution_mode="hard",
+    gamma=0.999,
+    latent_keys=[],
+    device="cpu",
+    cov=True,
+    actions="all",
+):
     env = ProcgenEnv(num_envs=num_envs, env_name=env_id, num_levels=num_levels, start_level=start_level, distribution_mode=distribution_mode)
     env = ProcgenWrapper(env)
     env = StoreObs(env)
     env = ToTensor(env, device=device)
-    env = E3BReward(env, encoder=encoder, lmbda=0.1)
+
+    env = ObservationEncoder(env)
+
+    for latent_key in latent_keys:
+        env = E3BReward(env, latent_key=latent_key, lmbda=0.1)
+        env = NoveltyReward(env, latent_key=latent_key, buf_size=1000)
     env = MinerCoverageReward(env)
+
     env = StoreReturns(env)
     env = RewardSelector(env, obj)
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
@@ -218,6 +198,7 @@ def make_env(env_id, obj, num_envs, start_level, num_levels, distribution_mode, 
 
 import argparse
 import time
+
 from tqdm.auto import tqdm
 
 parser = argparse.ArgumentParser()
@@ -250,3 +231,109 @@ if __name__ == "__main__":
     # import matplotlib.pyplot as plt
     # plt.scatter(a.cpu().numpy(), b.cpu().numpy())
     # plt.show()
+
+
+class ObservationEncoder(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.key2encoder = {}
+
+    def add_encoder(self, key, encoder):
+        self.key2encoder[key] = encoder
+
+    def reset(self):
+        obs, info = self.env.reset()
+        self.update_info(info)
+        return obs, info
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        self.update_info(info)
+        return obs, rew, done, info
+
+    @torch.no_grad()  # this is required
+    def update_info(self, info):
+        for key, encoder in self.key2encoder.items():
+            encoder = encoder.to(self.device)
+            info[key] = encoder.encode(info["obs"])
+
+
+class NoveltyReward(gym.Wrapper):
+    def __init__(self, env, latent_key=None, buf_size=100):
+        super().__init__(env)
+        self.latent_key = latent_key
+        self.buf_size = buf_size
+
+    def reset(self):
+        obs, info = self.env.reset()
+        # episodic archive of all latents seen in this episode
+        if self.latent_key in info:
+            self.archive = torch.full((self.num_envs, self.buf_size, info[self.latent_key].shape[-1]), torch.inf, device=self.device)
+            info[f"rew_nov_{self.latent_key}"] = self.step_nov(info[self.latent_key], info["done"], info["timestep"])
+        return obs, info
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        if self.latent_key in info:
+            info[f"rew_nov_{self.latent_key}"] = self.step_nov(info[self.latent_key], info["done"], info["timestep"])
+        return obs, rew, done, info
+
+    @torch.no_grad()  # this is required
+    def step_nov(self, latent, done, timestep):
+        assert done.dtype == torch.bool
+        self.archive[done, :, :] = torch.inf  # reset archive for envs starting in a new obs
+        rew_nov = (self.archive - latent[:, None, :]).norm(dim=-1).min(dim=-1).values  # compute novelty of this latent
+        rew_nov[done] = 0.0
+        self.archive[range(len(timestep)), timestep, :] = latent  # update archive with this latent
+        return rew_nov
+
+
+class E3BReward(gym.Wrapper):
+    def __init__(self, env, latent_key, lmbda=0.1):
+        super().__init__(env)
+        self.latent_key = latent_key
+        self.lmbda = lmbda
+
+    def reset(self):
+        obs, info = self.env.reset()
+        if self.latent_key in info:
+            latent = info[self.latent_key]
+            self.Il = torch.eye(latent.shape[-1]) / self.lmbda  # d, d
+            self.Cinv = torch.zeros(self.num_envs, latent.shape[-1], latent.shape[-1])  # b, d, d
+            info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(info[self.latent_key], info["done"])
+        return obs, info
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        if self.latent_key in info:
+            info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(info[self.latent_key], info["done"])
+        return obs, rew, done, info
+
+    @torch.no_grad()  # this is required
+    def step_e3b(self, latent, done):
+        self.Il, self.Cinv = self.Il.to(self.device), self.Cinv.to(self.device)
+        assert done.dtype == torch.bool
+        self.Cinv[done] = self.Il
+        v = latent[..., :, None]  # b, d, 1
+        u = self.Cinv @ v  # b, d, 1
+        b = v.mT @ u  # b, 1, 1
+        rew_e3b = b[..., 0, 0]
+        rew_e3b[done] = 0.0
+        self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
+        return rew_e3b
+
+
+class MinerXYEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.agent_color = torch.tensor([111, 196, 169])
+
+    def encode(self, obs):
+        self.agent_color = self.agent_color.to(obs.device)
+        col_dist = (obs - self.agent_color).float().norm(dim=-1)
+        vals, x = col_dist.min(dim=-1)
+        y = vals.argmin(dim=-1)
+        x = x[range(len(y)), y]
+        x = torch.stack([x, y], dim=-1)
+        latent = x.float() / obs.shape[-2]
+        return latent

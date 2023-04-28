@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 
 import wandb
 from agent_procgen import IDM, AgentLSTM
-from env_procgen import make_env
+from env_procgen import make_env, MinerXYEncoder
 
 
 def parse_args():
@@ -122,22 +122,15 @@ def rollout_agent_test_env(agent, envs, n_steps=1000):
 
 def record_agent_data(envs, store_vid=True):
     data = {}
-    rets_ext = torch.cat(envs.rets_ext).cpu().numpy()
-    rets_e3b = torch.cat(envs.rets_e3b).cpu().numpy()
-    rets_cov = torch.cat(envs.rets_cov).cpu().numpy()
-    traj_lens = torch.cat(envs.traj_lens).cpu().numpy()
-    data["charts/ret_ext"] = rets_ext.mean()
-    data["charts_hist/ret_ext"] = wandb.Histogram(rets_ext)
-    data["charts/ret_e3b"] = rets_e3b.mean()
-    data["charts_hist/ret_e3b"] = wandb.Histogram(rets_e3b)
-    data["charts/ret_cov"] = rets_cov.mean()
-    data["charts_hist/ret_cov"] = wandb.Histogram(rets_cov)
-    data["charts/traj_len"] = traj_lens.mean()
-    data["charts_hist/traj_len"] = wandb.Histogram(traj_lens)
+    for key, rets in envs.key2past_rets.items():
+        rets = torch.cat(rets).cpu().numpy()
+        if len(rets) > 0:
+            data[f"charts/{key}"] = rets.mean()
+            data[f"charts_hist/{key}"] = wandb.Histogram(rets)
     if store_vid:
         vid = np.stack(envs.past_obs)  # 1000, 25, 64, 64, 3
-        vid[:, :, 0, :, :] = 0  # black border on first row
-        vid[:, :, :, 0, :] = 0  # black border on first col
+        vid[:, :, 0, :, :] = [255, 0, 0]  # red border on first row
+        vid[:, :, :, 0, :] = [255, 0, 0]  # red border on first col
         vid = rearrange(vid, "t (H W) h w c -> t (H h) (W w) c", H=5, W=5)
         data[f"media/vid"] = wandb.Video(rearrange(vid, "t h w c->t c h w"), fps=15)
     return data
@@ -169,7 +162,10 @@ def main(args):
 
     # env setup
     print("Creating env...")
-    envs = make_env(args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, encoder=None, device=device, cov=True, actions=args.actions)
+    envs = make_env(
+        # args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, latent_keys=["idmf", "xy"], device=device, cov=True, actions=args.actions
+        args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, latent_keys=[], device=device, cov=True, actions=args.actions
+    )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     print("Creating agent...")
@@ -183,7 +179,8 @@ def main(args):
         agent.load_state_dict(agent0.state_dict())
     idm = IDM(obs_shape, n_actions, n_features=64, normalize=True, merge="both").to(device)
     optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}])
-    envs.set_encoder(idm)
+    # envs.add_encoder("idmf", idm)
+    # envs.add_encoder("xy", MinerXYEncoder())
 
     # if args.track:
     #     wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
@@ -213,9 +210,9 @@ def main(args):
     num_updates = num_updates + warmup_critic_steps // args.batch_size
     critic_warm = True if args.warmup_critic_steps is None else False
     if not critic_warm:  # freeze network + actor for critic warmup
-        print('Freezing everything except the critic')
+        print("Freezing everything except the critic")
         for name, p in agent.named_parameters():
-            if not name.startswith('critic'):
+            if not name.startswith("critic"):
                 p.requires_grad_(False)
 
     print("Starting learning...")
@@ -223,7 +220,7 @@ def main(args):
     for update in pbar:
         if not critic_warm and global_step > args.warmup_critic_steps:  # unfreeze network+actor
             critic_warm = True
-            print('Unfreezing everything')
+            print("Unfreezing everything")
             for name, p in agent.named_parameters():
                 p.requires_grad_(True)
 
@@ -335,7 +332,7 @@ def main(args):
                 v1, v2, logits_idm = idm.forward_smart(mb_obs)  # T-1 N A
                 logits_idm = logits_idm.flatten(0, 1)
                 loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction="none")
-                acc_idm = (logits_idm.argmax(dim=-1)==mb_actions_flat_now).float().mean()
+                acc_idm = (logits_idm.argmax(dim=-1) == mb_actions_flat_now).float().mean()
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
@@ -380,23 +377,27 @@ def main(args):
         data.update({f"{k}_train": v for k, v in data_ret.items()})
         if args.track and viz_slow:
             print("Rolling out test envs...")
-            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, encoder=idm, device=device, cov=True, actions=args.actions)
+            # envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, latent_keys=["idmf", "xy"], device=device, cov=True, actions=args.actions)
+            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, latent_keys=[], device=device, cov=True, actions=args.actions)
+            # envs_test.add_encoder("idmf", idm)
+            # envs_test.add_encoder("xy", MinerXYEncoder())
 
             envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
             data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
             data.update({f"{k}_test": v for k, v in data_ret.items()})
-        
-        if args.track and viz_slow:
-            fig = plt.figure()
-            plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
-            plt.xlabel('cov return'); plt.ylabel('e3b return')
-            data['e3b/e3b_vs_cov_returns'] = wandb.Image(fig)
 
-            fig = plt.figure()
-            plt.hist(b_actions.cpu().numpy(), bins=envs.single_action_space.n*2)
-            plt.xticks(ticks=np.arange(envs.single_action_space.n), labels=envs.action_meanings)
-            plt.title('Action distribution')
-            data['e3b/action_distribution'] = wandb.Image(fig)
+        # if args.track and viz_slow:
+            # fig = plt.figure()
+            # plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
+            # plt.xlabel("cov return")
+            # plt.ylabel("e3b return")
+            # data["e3b/e3b_vs_cov_returns"] = wandb.Image(fig)
+
+            # fig = plt.figure()
+            # plt.hist(b_actions.cpu().numpy(), bins=envs.single_action_space.n * 2)
+            # plt.xticks(ticks=np.arange(envs.single_action_space.n), labels=envs.action_meanings)
+            # plt.title("Action distribution")
+            # data["e3b/action_distribution"] = wandb.Image(fig)
 
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
@@ -409,11 +410,11 @@ def main(args):
                 torch.save(idm.state_dict(), f"{args.save_agent}/idm.pt")
                 torch.save(data, f"{args.save_agent}/data.pt")
 
-        keys_tqdm = ["charts/ret_ext_train", "charts/ret_e3b_train", "charts/ret_cov_train", "meta/SPS"]
-        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm})
+        keys_tqdm = ["charts/ret_ext_train", "charts/ret_e3b_idmf_train", "charts/ret_cov_train", "meta/SPS"]
+        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track:
             wandb.log(data, step=global_step)
-        plt.close('all')
+        plt.close("all")
 
     envs.close()
 

@@ -13,7 +13,7 @@ def test_env(args):
     for env_id in ["miner"]:
         for distribution_mode in ["easy", "hard"]:
             n_steps, n_envs = 256, 64
-            env = make_env(env_id, "ext", n_envs, 0, 0, distribution_mode, 0.999, encoder=encoder, device=args.device, cov=True)
+            env = make_env(env_id, "ext", n_envs, 0, 0, distribution_mode, 0.999, latent_keys=[], device=args.device, cov=True)
             start = time.time()
             obs, info = env.reset()
             for t in range(n_steps):
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     start = time.time()
     test_env(args)
-    test_rollout(args)
-    test_train(args)
+    # test_rollout(args)
+    # test_train(args)
     sps = 256 * 64 / (time.time() - start)
     print(sps)
