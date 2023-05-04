@@ -164,7 +164,7 @@ def main(args):
         wandb.init(project=args.project, name=args.name, config=args, save_code=True)
 
     net = IDM(args.init)
-    torchinfo.summary(net, [(64, 64, 3), (64, 64, 3)])
+    torchinfo.summary(net, input_size=[(args.batch_size, 64, 64, 3), (args.batch_size, 64, 64, 3)])
 
     net = net.to(args.device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)  # , weight_decay=1e-5)
