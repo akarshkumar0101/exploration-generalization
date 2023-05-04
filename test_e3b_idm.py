@@ -3,6 +3,7 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torchinfo
 from torch import nn
 from tqdm.auto import tqdm
 
@@ -65,32 +66,32 @@ class IDM(nn.Module):
         super().__init__()
         self.encoder = nn.Sequential(
             *[
-                nn.LayerNorm([3, 64, 64], elementwise_affine=False),
+                # nn.LayerNorm([3, 64, 64], elementwise_affine=False),
                 nn.Conv2d(3, 32, 3, padding=1),
                 nn.ReLU(),
-                nn.LayerNorm([32, 64, 64], elementwise_affine=False),
+                # nn.LayerNorm([32, 64, 64], elementwise_affine=False),
                 nn.Conv2d(32, 32, 3, padding=1),
                 nn.ReLU(),
-                nn.LayerNorm([32, 64, 64], elementwise_affine=False),
-                nn.Conv2d(32, 32, 3, padding=1),
-                nn.ReLU(),
-                nn.MaxPool2d(3),
-                nn.LayerNorm([32, 21, 21], elementwise_affine=False),
-                nn.Conv2d(32, 32, 3, padding=1),
-                nn.ReLU(),
-                nn.LayerNorm([32, 21, 21], elementwise_affine=False),
+                # nn.LayerNorm([32, 64, 64], elementwise_affine=False),
                 nn.Conv2d(32, 32, 3, padding=1),
                 nn.ReLU(),
                 nn.MaxPool2d(3),
-                nn.LayerNorm([32, 7, 7], elementwise_affine=False),
+                # nn.LayerNorm([32, 21, 21], elementwise_affine=False),
                 nn.Conv2d(32, 32, 3, padding=1),
                 nn.ReLU(),
-                nn.LayerNorm([32, 7, 7], elementwise_affine=False),
+                # nn.LayerNorm([32, 21, 21], elementwise_affine=False),
+                nn.Conv2d(32, 32, 3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool2d(3),
+                # nn.LayerNorm([32, 7, 7], elementwise_affine=False),
+                nn.Conv2d(32, 32, 3, padding=1),
+                nn.ReLU(),
+                # nn.LayerNorm([32, 7, 7], elementwise_affine=False),
                 nn.Conv2d(32, 32, 3, padding=1),
                 nn.ReLU(),
                 nn.MaxPool2d(3),
                 nn.Flatten(),
-                nn.LayerNorm([128], elementwise_affine=False),
+                # nn.LayerNorm([128], elementwise_affine=False),
                 nn.LazyLinear(64),
                 nn.ReLU(),
             ]
@@ -163,6 +164,8 @@ def main(args):
         wandb.init(project=args.project, name=args.name, config=args, save_code=True)
 
     net = IDM(args.init)
+    torchinfo.summary(net, [(64, 64, 3), (64, 64, 3)])
+
     net = net.to(args.device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)  # , weight_decay=1e-5)
 
