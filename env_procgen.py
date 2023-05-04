@@ -82,6 +82,7 @@ class StoreReturns(gym.Wrapper):
         self.buf_size = buf_size
         # running returns
         self.key2running_ret = {}
+        self.key2running_ret_dsc = {} # discounted
         # list of past returns
         self.key2past_rets = {}
 
@@ -185,7 +186,8 @@ def make_env(
     for latent_key in latent_keys:
         env = E3BReward(env, latent_key=latent_key, lmbda=0.1)
         env = NoveltyReward(env, latent_key=latent_key, buf_size=1000)
-    env = MinerCoverageReward(env)
+    if cov: 
+        env = MinerCoverageReward(env)
 
     env = StoreReturns(env)
     env = RewardSelector(env, obj)
