@@ -48,3 +48,8 @@ python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_
 python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data seq --distribution-mode easy --seed 8 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
 python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data iid --distribution-mode hard --seed 8 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
 python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data seq --distribution-mode hard --seed 8 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
+
+python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data iid --distribution-mode easy --seed 9 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
+python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data seq --distribution-mode easy --seed 9 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
+python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data iid --distribution-mode hard --seed 9 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
+python test_e3b_idm.py --lr 3e-4 --n-steps 2e3 --batch-size 2048 --init kaiming_in --data seq --distribution-mode hard --seed 9 --device cuda --track --name run_{init}_{lr}_{batch_size}_{seed}
