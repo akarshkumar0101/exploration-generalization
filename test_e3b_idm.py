@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchinfo
+from einops import rearrange
 from torch import nn
 from tqdm.auto import tqdm
 
@@ -12,11 +13,11 @@ from agent_procgen import IDM
 from env_procgen import make_env
 
 
-def get_batch(batch_size=128):
-    env = make_env("miner", "ext", 128, 0, 0, "easy", gamma=0.999, latent_keys=[], device="cpu", cov=False, actions="ordinal")
+def get_batch(n_envs=64, n_steps=256, batch_size=128, distribution_mode="easy"):
+    env = make_env("miner", "ext", n_envs, 0, 0, distribution_mode, gamma=0.999, latent_keys=[], device="cpu", cov=False, actions="ordinal")
     obs, info = env.reset()
     x, y = [obs], []
-    for i in range(256):
+    for i in range(n_steps):
         action = env.action_space.sample()
         obs, rew, done, info = env.step(action)
         x.append(obs)
@@ -28,6 +29,24 @@ def get_batch(batch_size=128):
     i_step, i_env = np.random.randint(0, n_steps, size=batch_size), np.arange(batch_size) % n_envs
     obs_now, obs_nxt, act_now = x[i_step, i_env], x[i_step + 1, i_env], y[i_step, i_env]
     return obs_now, obs_nxt, act_now
+
+
+def get_batch_seq(n_envs=64, n_steps=256, n_envs_batch=8, distribution_mode="easy"):
+    env = make_env("miner", "ext", n_envs, 0, 0, distribution_mode, gamma=0.999, latent_keys=[], device="cpu", cov=False, actions="ordinal")
+    obs, info = env.reset()
+    x, y = [obs], []
+    for i in range(n_steps):
+        action = env.action_space.sample()
+        obs, rew, done, info = env.step(action)
+        x.append(obs)
+        y.append(action)
+    x = np.stack(x)
+    y = np.stack(y)
+
+    n_steps, n_envs = y.shape
+    i_env = np.random.permutation(n_envs)[:n_envs_batch]
+    obs_all, act_now = x[:, i_env], y[:, i_env]
+    return obs_all, act_now
 
 
 # def create_net():
@@ -132,6 +151,17 @@ class IDM(nn.Module):
         logits = self.idm(latent)
         return logits, latent_now, latent_nxt
 
+    def forward_smart(self, obs_all):
+        n_steps, n_envs, _, _, _ = obs_all.shape
+        obs_all = rearrange(obs_all, "t b h w c -> (t b) h w c")
+        latent_all = self.encode(obs_all)
+        latent_all = rearrange(latent_all, "(t b) d -> t b d", t=n_steps, b=n_envs)
+        latent_now, latent_nxt = latent_all[:-1], latent_all[1:]
+        latent = torch.cat([latent_now, latent_nxt], dim=-1)
+        latent = rearrange(latent, "t b d -> (t b) d")
+        logits = self.idm(latent)
+        return logits, latent_now, latent_nxt
+
 
 def plot_grad(net):
     gs = []
@@ -174,15 +204,25 @@ def main(args):
 
     pbar = tqdm(range(args.n_steps))
     for i_step in pbar:
-        obs_now, obs_nxt, act_now = get_batch(args.batch_size)
+        if args.data == "seq":
+            n_envs_batch = args.batch_size//256
+            obs_all, act_now = get_batch_seq(n_envs=64, n_steps=256, n_envs_batch=n_envs_batch, distribution_mode=args.distribution_mode)
+            obs_all = torch.from_numpy(obs_all).to(args.device)
+            act_now = torch.from_numpy(act_now).to(args.device)
+            act_now = act_now.flatten()
+            logits, v1, v2 = net.forward_smart(obs_all)
 
-        obs_now = torch.from_numpy(obs_now).to(args.device)
-        obs_nxt = torch.from_numpy(obs_nxt).to(args.device)
-        act_now = torch.from_numpy(act_now).to(args.device)
-        logits, v1, v2 = net(obs_now, obs_nxt)
+            ce = torch.nn.functional.cross_entropy(logits, act_now, reduction="none")
+            loss = ce.mean()
+        elif args.data == "iid":
+            obs_now, obs_nxt, act_now = get_batch(n_envs=64, n_steps=256, batch_size=args.batch_size, distribution_mode=args.distribution_mode)
+            obs_now = torch.from_numpy(obs_now).to(args.device)
+            obs_nxt = torch.from_numpy(obs_nxt).to(args.device)
+            act_now = torch.from_numpy(act_now).to(args.device)
+            logits, v1, v2 = net(obs_now, obs_nxt)
 
-        ce = torch.nn.functional.cross_entropy(logits, act_now, reduction="none")
-        loss = ce.mean()
+            ce = torch.nn.functional.cross_entropy(logits, act_now, reduction="none")
+            loss = ce.mean()
 
         opt.zero_grad()
         loss.backward()
@@ -216,6 +256,9 @@ parser.add_argument("--n-steps", type=lambda x: int(float(x)), default=int(2e3))
 parser.add_argument("--batch-size", type=int, default=2048)
 
 parser.add_argument("--init", type=str, default="none")
+
+parser.add_argument("--data", type=str, default="iid")
+parser.add_argument("--distribution-mode", type=str, default="easy")
 
 # parser.add_argument("--idm-merge", type=str, default="both")
 # parser.add_argument("--idm-normalize", type=lambda x: x.lower() == "true", default=True)
