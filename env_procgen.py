@@ -82,7 +82,7 @@ class StoreReturns(gym.Wrapper):
         self.buf_size = buf_size
         # running returns
         self.key2running_ret = {}
-        self.key2running_ret_dsc = {} # discounted
+        self.key2running_ret_dsc = {}  # discounted
         # list of past returns
         self.key2past_rets = {}
 
@@ -119,6 +119,24 @@ class RewardSelector(gym.Wrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         rew = info[f"rew_{self.obj}"].detach().cpu().numpy()
+        return obs, rew, done, info
+
+
+class RewardSelectorMiner(gym.Wrapper):
+    def __init__(self, env, obj="ext"):
+        super().__init__(env)
+        self.obj = obj
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        if self.obj == "ext":
+            rew = info["rew_ext"].detach().cpu().numpy()
+        elif self.obj == "nov":
+            rew = info["rew_nov_xy"].detach().cpu().numpy()
+        elif self.obj == "ext+nov":
+            rew = torch.sign(info["rew_ext"]).detach().cpu().numpy() + info["rew_nov_xy"].detach().cpu().numpy()
+        else:
+            raise NotImplementedError
         return obs, rew, done, info
 
 
@@ -161,78 +179,6 @@ class MinerCoverageReward(gym.Wrapper):
         self.pobs = o
         self.mask_episodic[done] = self.mask_episodic_single
         return obs, rew, done, info
-
-
-def make_env(
-    env_id="miner",
-    obj="nov",
-    num_envs=64,
-    start_level=0,
-    num_levels=0,
-    distribution_mode="hard",
-    gamma=0.999,
-    latent_keys=[],
-    device="cpu",
-    cov=True,
-    actions="all",
-):
-    env = ProcgenEnv(num_envs=num_envs, env_name=env_id, num_levels=num_levels, start_level=start_level, distribution_mode=distribution_mode)
-    env = ProcgenWrapper(env)
-    env = StoreObs(env)
-    env = ToTensor(env, device=device)
-
-    env = ObservationEncoder(env)
-
-    for latent_key in latent_keys:
-        env = E3BReward(env, latent_key=latent_key, lmbda=0.1)
-        env = NoveltyReward(env, latent_key=latent_key, buf_size=1000)
-    if cov: 
-        env = MinerCoverageReward(env)
-
-    env = StoreReturns(env)
-    env = RewardSelector(env, obj)
-    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-    if actions == "ordinal":
-        env = OrdinalActions(env)
-    return env
-
-
-import argparse
-import time
-
-from tqdm.auto import tqdm
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--device", type=str, default="cpu")
-parser.add_argument("--e3b", default=False, action="store_true")
-
-if __name__ == "__main__":
-    args = parser.parse_args()
-    from agent_procgen import E3B
-
-    obs_shape = (64, 64, 3)
-    n_actions = 15
-    e3b = E3B(64, obs_shape, n_actions, 100).to(args.device) if args.e3b else None
-    envs = make_env("miner", "rew", 64, 0, 0, "hard", 0.999, e3b=e3b, device=args.device)
-    obs, info = envs.reset()
-    n_steps = 10000
-    start = time.time()
-    for i in tqdm(range(n_steps)):
-        obs, rew, done, info = envs.step(np.random.randint(0, 5, size=64))
-    print((n_steps * 64) / (time.time() - start), "SPS")
-
-    # print(torch.cat(envs.rets_ext))
-    # print(torch.cat(envs.rets_e3b))
-    # print(torch.cat(envs.traj_lens))
-    # print(torch.cat(envs.traj_lens).sum())
-
-    # a = torch.cat(envs.traj_lens)
-    # b = torch.cat(envs.rets_e3b)
-
-    # import matplotlib.pyplot as plt
-    # plt.scatter(a.cpu().numpy(), b.cpu().numpy())
-    # plt.show()
 
 
 class ObservationEncoder(gym.Wrapper):
@@ -337,5 +283,55 @@ class MinerXYEncoder(nn.Module):
         y = vals.argmin(dim=-1)
         x = x[range(len(y)), y]
         x = torch.stack([x, y], dim=-1)
-        latent = x.float() / obs.shape[-2]
+        latent = 10 * x.float() / obs.shape[-2]
         return latent
+
+
+def make_env(env_id="miner", obj="ext", num_envs=64, start_level=0, num_levels=0, distribution_mode="hard", gamma=0.999, latent_keys=[], device="cpu", cov=True, actions="all"):
+    env = ProcgenEnv(num_envs=num_envs, env_name=env_id, num_levels=num_levels, start_level=start_level, distribution_mode=distribution_mode)
+    env = ProcgenWrapper(env)
+    env = StoreObs(env)
+    env = ToTensor(env, device=device)
+
+    env = ObservationEncoder(env)
+
+    for latent_key in latent_keys:
+        # env = E3BReward(env, latent_key=latent_key, lmbda=0.1)
+        env = NoveltyReward(env, latent_key=latent_key, buf_size=1000)
+    if cov:
+        env = MinerCoverageReward(env)
+
+    env = StoreReturns(env)
+
+    # env = RewardSelector(env, obj)
+    env = RewardSelectorMiner(env, obj)
+
+    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    if actions == "ordinal":
+        env = OrdinalActions(env)
+    return env
+
+
+import argparse
+import time
+
+from tqdm.auto import tqdm
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--device", type=str, default="cpu")
+parser.add_argument("--e3b", default=False, action="store_true")
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+
+    obs_shape = (64, 64, 3)
+    n_actions = 15
+    # e3b = E3B(64, obs_shape, n_actions, 100).to(args.device) if args.e3b else None
+    # envs = make_env("miner", "rew", 64, 0, 0, "hard", 0.999, e3b=e3b, device=args.device)
+    # obs, info = envs.reset()
+    # n_steps = 10000
+    # start = time.time()
+    # for i in tqdm(range(n_steps)):
+    #     obs, rew, done, info = envs.step(np.random.randint(0, 5, size=64))
+    # print((n_steps * 64) / (time.time() - start), "SPS")

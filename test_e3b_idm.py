@@ -49,37 +49,6 @@ def get_batch_seq(n_envs=64, n_steps=256, n_envs_batch=8, distribution_mode="eas
     return obs_all, act_now
 
 
-# def create_net():
-#     net = nn.Sequential(
-#         *[
-#             nn.Conv2d(6, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.MaxPool2d(3),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.MaxPool2d(3),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 32, 3, padding=1),
-#             nn.ReLU(),
-#             nn.MaxPool2d(3),
-#             nn.Flatten(),
-#             nn.LazyLinear(64),
-#             nn.ReLU(),
-#             nn.Linear(64, 64),
-#             nn.ReLU(),
-#             nn.Linear(64, 64),
-#             nn.ReLU(),
-#             nn.Linear(64, 5),
-#         ]
-#     )
-#     return net
 class IDM(nn.Module):
     def __init__(self, init="kaiming"):
         super().__init__()
@@ -151,7 +120,7 @@ class IDM(nn.Module):
         logits = self.idm(latent)
         return logits, latent_now, latent_nxt
 
-    def forward_smart(self, obs_all):
+    def forward(self, obs_all):
         n_steps, n_envs, _, _, _ = obs_all.shape
         obs_all = rearrange(obs_all, "t b h w c -> (t b) h w c")
         latent_all = self.encode(obs_all)
@@ -205,7 +174,7 @@ def main(args):
     pbar = tqdm(range(args.n_steps))
     for i_step in pbar:
         if args.data == "seq":
-            n_envs_batch = args.batch_size//256
+            n_envs_batch = args.batch_size // 256
             obs_all, act_now = get_batch_seq(n_envs=64, n_steps=256, n_envs_batch=n_envs_batch, distribution_mode=args.distribution_mode)
             obs_all = torch.from_numpy(obs_all).to(args.device)
             act_now = torch.from_numpy(act_now).to(args.device)
@@ -268,4 +237,14 @@ parser.add_argument("--distribution-mode", type=str, default="easy")
 # parser.add_argument("--freq-batch", type=lambda x: int(float(x)), default=1)
 
 if __name__ == "__main__":
-    main(parser.parse_args())
+    # main(parser.parse_args())
+    args = parser.parse_args()
+    net = IDM(args.init)
+    torchinfo.summary(net, input_size=(256, 8, 64, 64, 3))
+    print("done!")
+
+    from agent_procgen import IDM
+
+    idm = IDM((64, 64, 3), 5, n_features=64, normalize=True, merge="both")
+    torchinfo.summary(idm, input_size=(256, 8, 64, 64, 3))
+    print("done!")

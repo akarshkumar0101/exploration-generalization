@@ -162,7 +162,17 @@ def main(args):
     print("Creating env...")
     envs = make_env(
         # args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, latent_keys=["idmf", "xy"], device=device, cov=True, actions=args.actions
-        args.env_id, args.obj, args.num_envs, args.start_level, args.num_levels, args.distribution_mode, args.gamma, latent_keys=[], device=device, cov=True, actions=args.actions
+        args.env_id,
+        args.obj,
+        args.num_envs,
+        args.start_level,
+        args.num_levels,
+        args.distribution_mode,
+        args.gamma,
+        latent_keys=["xy"],
+        device=device,
+        cov=True,
+        actions=args.actions,
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -178,7 +188,7 @@ def main(args):
     idm = IDM(obs_shape, n_actions, n_features=64, normalize=True, merge="both").to(device)
     optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5}, {"params": idm.parameters(), "lr": args.idm_lr, "eps": 1e-8}])
     # envs.add_encoder("idmf", idm)
-    # envs.add_encoder("xy", MinerXYEncoder())
+    envs.add_encoder("xy", MinerXYEncoder())
 
     # if args.track:
     #     wandb.watch((agent, idm), log="all", log_freq=args.total_timesteps // args.batch_size // 100)
@@ -320,6 +330,7 @@ def main(args):
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
+                """
                 # IDM loss, TODO: make this more efficient by not computing v twice
                 mb_obs = b_obs[mb_inds].reshape(args.num_steps, envsperbatch, *obs_shape)  # T, N, H, W, C
                 # mb_obs_flat_now = rearrange(mb_obs[:-1], 't n h w c -> (t n) h w c')
@@ -331,9 +342,11 @@ def main(args):
                 logits_idm = logits_idm.flatten(0, 1)
                 loss_idm = nn.functional.cross_entropy(logits_idm, mb_actions_flat_now, reduction="none")
                 acc_idm = (logits_idm.argmax(dim=-1) == mb_actions_flat_now).float().mean()
+                """
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
+                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm.mean()
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -363,10 +376,11 @@ def main(args):
         data["meta/SPS"] = int(global_step / (time.time() - start_time))
         data["meta/global_step"] = global_step
 
-        data["e3b/idm_loss"] = loss_idm.mean().item()
-        data["e3b/idm_accuracy"] = acc_idm.item()
-        for i, am in enumerate(envs.action_meanings):
-            data[f"e3b_details/loss_action_{am}"] = loss_idm[mb_actions_flat_now == i].mean().item()
+        # data["e3b/idm_loss"] = loss_idm.mean().item()
+        # data["e3b/idm_accuracy"] = acc_idm.item()
+        # for i, am in enumerate(envs.action_meanings):
+        # data[f"e3b_details/loss_action_{am}"] = loss_idm[mb_actions_flat_now == i].mean().item()
+
         # if args.load_agent is not None:
         #     data['details/ce0'] = ce0.mean().item()
         #     data['details/kl0'] = kl0.mean().item()
@@ -376,26 +390,26 @@ def main(args):
         if args.track and viz_slow:
             print("Rolling out test envs...")
             # envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, latent_keys=["idmf", "xy"], device=device, cov=True, actions=args.actions)
-            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, latent_keys=[], device=device, cov=True, actions=args.actions)
+            envs_test = make_env(args.env_id, args.obj, args.num_envs, 1000000, 0, args.distribution_mode, args.gamma, latent_keys=["xy"], device=device, cov=True, actions=args.actions)
             # envs_test.add_encoder("idmf", idm)
-            # envs_test.add_encoder("xy", MinerXYEncoder())
+            envs_test.add_encoder("xy", MinerXYEncoder())
 
             envs_test = rollout_agent_test_env(agent, envs_test, n_steps=1000)
             data_ret = record_agent_data(envs_test, store_vid=args.track and viz_slow)
             data.update({f"{k}_test": v for k, v in data_ret.items()})
 
         # if args.track and viz_slow:
-            # fig = plt.figure()
-            # plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
-            # plt.xlabel("cov return")
-            # plt.ylabel("e3b return")
-            # data["e3b/e3b_vs_cov_returns"] = wandb.Image(fig)
+        # fig = plt.figure()
+        # plt.scatter(torch.cat(envs.rets_cov).tolist(), torch.cat(envs.rets_e3b).tolist())
+        # plt.xlabel("cov return")
+        # plt.ylabel("e3b return")
+        # data["e3b/e3b_vs_cov_returns"] = wandb.Image(fig)
 
-            # fig = plt.figure()
-            # plt.hist(b_actions.cpu().numpy(), bins=envs.single_action_space.n * 2)
-            # plt.xticks(ticks=np.arange(envs.single_action_space.n), labels=envs.action_meanings)
-            # plt.title("Action distribution")
-            # data["e3b/action_distribution"] = wandb.Image(fig)
+        # fig = plt.figure()
+        # plt.hist(b_actions.cpu().numpy(), bins=envs.single_action_space.n * 2)
+        # plt.xticks(ticks=np.arange(envs.single_action_space.n), labels=envs.action_meanings)
+        # plt.title("Action distribution")
+        # data["e3b/action_distribution"] = wandb.Image(fig)
 
         if viz_slow and args.save_agent is not None:
             print("Saving agent...")
@@ -408,7 +422,7 @@ def main(args):
                 torch.save(idm.state_dict(), f"{args.save_agent}/idm.pt")
                 torch.save(data, f"{args.save_agent}/data.pt")
 
-        keys_tqdm = ["charts/ret_ext_train", "charts/ret_e3b_idmf_train", "charts/ret_cov_train", "meta/SPS"]
+        keys_tqdm = ["charts/ret_ext_train", "charts/ret_nov_xy_train", "charts/ret_e3b_idmf_train", "charts/ret_cov_train", "meta/SPS"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track:
             wandb.log(data, step=global_step)

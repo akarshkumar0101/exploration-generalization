@@ -192,7 +192,7 @@ class IDM(nn.Module):
             v = torch.cat([v1, v2], dim=-1)
         elif "diff" in self.merge:
             v = v2 - v1
-        elif 'both' in self.merge:
+        elif "both" in self.merge:
             v = torch.cat([v1, v2, v2 - v1], dim=-1)
         else:
             raise NotImplementedError
@@ -211,3 +211,23 @@ class IDM(nn.Module):
         v1, v2 = v[:-1], v[1:]  # t-1 n d
         logits = self.forward_idm(v1, v2)
         return v1, v2, logits  # t-1 n a
+
+    def forward(self, obs, next_obs=None):
+        if next_obs is not None:
+            obs = torch.stack([obs, next_obs], dim=0)
+        n_steps, n_envs, _, _, _ = obs.shape
+        obs = rearrange(obs, "t n h w c -> (t n) h w c")
+        v = self.encode(obs)  # (t n), d
+        v = rearrange(v, "(t n) d -> t n d", t=n_steps, n=n_envs)  # t n d
+        v1, v2 = v[:-1], v[1:]  # t-1 n d
+        logits = self.forward_idm(v1, v2)
+        return v1, v2, logits  # t-1 n a
+
+
+if __name__ == "__main__":
+    device = "mps"
+    idm = IDM((64, 64, 3), 5, n_features=64, normalize=True, merge="both").to(device)
+    import torchinfo
+    torchinfo.summary(idm, input_size=(256, 8, 64, 64, 3))
+
+
