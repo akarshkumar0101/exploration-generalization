@@ -131,6 +131,7 @@ def record_agent_data(envs, store_vid=True):
         vid[:, :, 0, :, :] = [255, 0, 0]  # red border on first row
         vid[:, :, :, 0, :] = [255, 0, 0]  # red border on first col
         vid = rearrange(vid, "t (H W) h w c -> t (H h) (W w) c", H=5, W=5)
+        data[f"media/vid"] = wandb.Video(rearrange(vid, "t h w c->t c h w"), fps=15)
     return data
 
 
