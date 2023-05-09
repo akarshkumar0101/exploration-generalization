@@ -20,7 +20,7 @@ python_file: ppo_procgen_lstm.py
 --actions: ordinal
 --lstm-type: residual
 --num-levels: [4, 8, 16, 32, 64, 128]
---distribution-mode: easy
+--distribution-mode: hard
 
 --obj: [ext, mex]
 
