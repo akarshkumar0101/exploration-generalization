@@ -83,3 +83,5 @@ if __name__ == "__main__":
 
     with open(args.file.replace(".yaml", ".sh"), "w") as f:
         f.write(commands)
+
+    print(f"Done generating {n} commands.")
