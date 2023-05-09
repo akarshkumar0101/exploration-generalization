@@ -3,7 +3,7 @@ python_file: ppo_procgen_lstm.py
 device: cuda
 
 track: true
-project: egb-lstm-8
+project: egb-lstm-9
 name: "{env_id}_{distribution_mode}_{num_levels:06.0f}_{obj}_{seed}"
 
 seed: [0, 1, 2, 3, 4]
