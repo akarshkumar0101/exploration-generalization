@@ -86,7 +86,7 @@ def parse_args():
     parser.add_argument('--distribution-mode', type=str, default='easy')
     parser.add_argument('--kl0-coef', type=float, default=0.)
     parser.add_argument("--pre-env-id", type=str, default="miner")
-    parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=0)
+    parser.add_argument('--pre-num-levels', type=lambda x: int(float(x)), default=None)
     parser.add_argument('--pre-obj', type=str, default=None)
     parser.add_argument("--pre-seed", type=int, default=None, help="seed of the experiment")
     parser.add_argument("--warmup-critic-steps", type=lambda x: int(float(x)), default=None)

@@ -1,0 +1,13 @@
+python_file: ppo_procgen_lstm.py
+
+device: cuda
+
+track: true
+project: egb-lstm-8
+name: simple
+
+seed: [0, 1, 2, 3, 4]
+
+env-id: miner
+num-levels: [1e0, 2e0, 4e0, 8e0, 16e0]
+obj: [ext, nov, ext+nov]
