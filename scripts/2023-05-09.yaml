@@ -5,7 +5,7 @@ python_file: ppo_procgen_lstm.py
 --project: egb-lstm-9
 --name: "{env_id}_{distribution_mode}_{num_levels:06.0f}_{obj}_{seed}"
 
---seed: [0, 1, 2, 3, 4]
+--seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 --env-id: miner
 --total-timesteps: 25e6
@@ -19,7 +19,7 @@ python_file: ppo_procgen_lstm.py
 
 --actions: ordinal
 --lstm-type: residual
---num-levels: [4, 8, 16, 32, 64, 128]
+--num-levels: [4, 8, 16, 32, 64, 128, 256]
 --distribution-mode: hard
 
 --obj: [ext, mex]
