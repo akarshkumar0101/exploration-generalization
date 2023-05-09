@@ -24,7 +24,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
     #     help="the name of this experiment")
-    parser.add_argument("--name", type=str, default='{env_id}_{num_levels:2.1e}_{obj}_{seed}')
+    parser.add_argument("--project", type=str, default=None)
+    parser.add_argument("--name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
@@ -32,11 +33,8 @@ def parse_args():
     # parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         # help="if toggled, cuda will be enabled by default")
     parser.add_argument("--device", type=str, default='cpu')
-    parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
     # parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
     #     help="the wandb's project name")
-    parser.add_argument("--project", type=str, default='egb')
     parser.add_argument("--wandb-entity", type=str, default=None,
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
@@ -136,6 +134,7 @@ def record_agent_data(envs, store_vid=True):
 
 
 def main(args):
+    args.track = args.project is not None and args.name is not None
     if args.start_level is None:
         args.start_level = args.seed * args.num_levels
     if args.name:

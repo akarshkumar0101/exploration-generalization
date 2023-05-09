@@ -122,23 +122,6 @@ class RewardSelector(gym.Wrapper):
         return obs, rew, done, info
 
 
-class RewardSelectorMiner(gym.Wrapper):
-    def __init__(self, env, obj="ext"):
-        super().__init__(env)
-        self.obj = obj
-
-    def step(self, action):
-        obs, rew, done, info = self.env.step(action)
-        if self.obj == "ext":
-            rew = info["rew_ext"].detach().cpu().numpy()
-        elif self.obj == "nov":
-            rew = info["rew_nov_xy"].detach().cpu().numpy()
-        elif self.obj == "ext+nov":
-            rew = torch.sign(info["rew_ext"]).detach().cpu().numpy() + info["rew_nov_xy"].detach().cpu().numpy()
-        else:
-            raise NotImplementedError
-        return obs, rew, done, info
-
 
 class OrdinalActions(gym.Wrapper):
     def __init__(self, env):
@@ -180,6 +163,14 @@ class MinerCoverageReward(gym.Wrapper):
         self.mask_episodic[done] = self.mask_episodic_single
         return obs, rew, done, info
 
+class MinerOracleExplorationReward(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        info['rew_mex'] = info["rew_nov_xy"] + torch.sign(info["rew_ext"])
+        return obs, rew, done, info
 
 class ObservationEncoder(gym.Wrapper):
     def __init__(self, env):
@@ -283,7 +274,7 @@ class MinerXYEncoder(nn.Module):
         y = vals.argmin(dim=-1)
         x = x[range(len(y)), y]
         x = torch.stack([x, y], dim=-1)
-        latent = 10 * x.float() / obs.shape[-2]
+        latent = 10*x.float() / obs.shape[-2]
         return latent
 
 
@@ -300,11 +291,11 @@ def make_env(env_id="miner", obj="ext", num_envs=64, start_level=0, num_levels=0
         env = NoveltyReward(env, latent_key=latent_key, buf_size=1000)
     if cov:
         env = MinerCoverageReward(env)
+    env = MinerOracleExplorationReward(env)
 
     env = StoreReturns(env)
 
-    # env = RewardSelector(env, obj)
-    env = RewardSelectorMiner(env, obj)
+    env = RewardSelector(env, obj)
 
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
