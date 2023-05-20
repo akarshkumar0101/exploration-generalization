@@ -203,8 +203,9 @@ def main(args):
             data["meta/global_step"] = i_update * args.collect_size
 
             ret_ext = torch.cat(env.key2past_rets["ret_ext"]).tolist()
-            data["charts/ret_ext"] = np.mean(ret_ext)
-            data["charts_hist/ret_ext"] = wandb.Histogram(ret_ext)
+            if len(ret_ext) > 0:
+                data["charts/ret_ext"] = np.mean(ret_ext)
+                data["charts_hist/ret_ext"] = wandb.Histogram(ret_ext)
         if i_update % viz_midd == 0:
             pass
         if i_update % viz_slow == 0:
@@ -215,8 +216,6 @@ def main(args):
         if args.track:
             wandb.log(data, step=i_update * args.collect_size)
         plt.close("all")
-
-        print(nn.utils.parameters_to_vector(agent.parameters()).sum().item())
 
     env.close()
 
