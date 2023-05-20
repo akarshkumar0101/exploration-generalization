@@ -1,0 +1,13 @@
+python_file: ppo_atari.py
+
+--device: cuda
+
+--project: egb-atari
+--name: "{env_id}_{seed}"
+
+--seed: [0, 1, 2]
+
+--env-id: [Pong, Breakout]
+--total-steps: 10e6
+
+--anneal-lr: [True, False]

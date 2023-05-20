@@ -1,0 +1,12 @@
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=0 --env-id=Pong     --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=0 --env-id=Pong     --total-steps=10e6 --anneal-lr=False
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=0 --env-id=Breakout --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=0 --env-id=Breakout --total-steps=10e6 --anneal-lr=False
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=1 --env-id=Pong     --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=1 --env-id=Pong     --total-steps=10e6 --anneal-lr=False
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=1 --env-id=Breakout --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=1 --env-id=Breakout --total-steps=10e6 --anneal-lr=False
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=2 --env-id=Pong     --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=2 --env-id=Pong     --total-steps=10e6 --anneal-lr=False
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=2 --env-id=Breakout --total-steps=10e6 --anneal-lr=True 
+python ppo_atari.py --device=cuda --project=egb-atari --name={env_id}_{seed} --seed=2 --env-id=Breakout --total-steps=10e6 --anneal-lr=False
