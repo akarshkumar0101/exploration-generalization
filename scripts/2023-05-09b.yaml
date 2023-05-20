@@ -1,0 +1,40 @@
+python_file: ppo_procgen_lstm.py
+
+--device: cuda
+
+--project: egb-lstm-9
+--name: "{env_id}_{distribution_mode}_{num_levels:06.0f}_{obj}_{seed}"
+--name: "{env_id}_{distribution_mode}_{pre_obj}_{obj}_{seed}_ft"
+
+--seed: [0, 1, 2]
+
+--env-id: miner
+--total-timesteps: 5e6
+--learning-rate: 5e-4
+--idm-lr: 5e-4
+--num-envs: 64
+--num-steps: 256
+--num-minibatches: 8
+--update-epochs: 3
+--ent-coef: 1e-2
+
+--actions: ordinal
+--lstm-type: residual
+--num-levels: 1
+--distribution-mode: hard
+
+--obj: ext
+
+--warmup-critic-steps: 2e6
+
+--start-level: 1000015
+
+--pre-env-id: miner
+--pre-num-levels: [4, 8, 16, 32, 64, 128, 256]
+--pre-obj: [ext, mex]
+--pre-seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+--save-agent: "data/{project}/{name}"
+--load-agent: "data/{project}/residual_miner_000010_{pre_obj}_{pre_seed}"
+--load-agent: "data/{project}/{env_id}_{distribution_mode}_{num_levels:06.0f}_{obj}_{seed}"
+
