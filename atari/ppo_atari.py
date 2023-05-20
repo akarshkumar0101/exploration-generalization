@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchinfo
 from agent_atari import Agent
 from env_atari import make_env
 from tqdm.auto import tqdm
@@ -75,6 +76,7 @@ def main(args):
     assert isinstance(env.action_space, gym.spaces.MultiDiscrete), "only discrete action space is supported"
 
     agent = Agent(env).to(args.device)
+    torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape)
     optimizer = optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
 
     obs = torch.zeros((args.n_steps, args.n_envs) + env.single_observation_space.shape, dtype=torch.uint8, device=args.device)
