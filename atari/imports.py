@@ -9,10 +9,11 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from einops import rearrange, repeat
+from einops import rearrange, repeat, einsum
 from IPython.display import clear_output
 from torch import nn
 from tqdm.auto import tqdm
 
 from env_atari import *
 from agent_atari import *
+from time_contrastive import *

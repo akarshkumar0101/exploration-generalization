@@ -16,25 +16,26 @@ import torch
 #     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
 
-def make_env_single(env_id="Breakout"):
+def make_env_single(env_id="Breakout", frame_stack=4):
     env = gym.make(f"ALE/{env_id}-v5", frameskip=1, full_action_space=True)
     # TODO: reduce space of actions
     env = gym.wrappers.AtariPreprocessing(env, terminal_on_life_loss=True)
 
-    env = gym.wrappers.FrameStack(env, num_stack=4)
+    env = gym.wrappers.FrameStack(env, num_stack=frame_stack)
     return env
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", gamma=0.999, device="cpu", seed=0):
-    make_fn = partial(make_env_single, env_id=env_id)
+def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0):
+    make_fn = partial(make_env_single, env_id=env_id, frame_stack=frame_stack)
     make_fns = [make_fn for _ in range(n_envs)]
     env = gym.vector.SyncVectorEnv(make_fns)
 
     env = StoreObs(env, n_envs=25, buf_size=1000)
 
-    # env = gym.wrappers.FrameStack(env, num_stack=4, lz4_compress=False)
-
     env = ToTensor(env, device=device)
+
+    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+
     env = StoreReturns(env, buf_size=128)
 
     env = RewardSelector(env, obj=obj)
@@ -94,12 +95,12 @@ class StoreObs(gym.Wrapper):
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        self.past_obs.append(obs[: self.n_envs])
+        self.past_obs.append(obs[: self.n_envs, -1])
         return obs, info
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        self.past_obs.append(obs[: self.n_envs])
+        self.past_obs.append(obs[: self.n_envs, -1])
         self.past_obs = self.past_obs[-self.buf_size :]
         info["past_obs"] = self.past_obs
         return obs, rew, term, trunc, info
@@ -118,6 +119,7 @@ class ToTensor(gym.Wrapper):
         # info["term"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
         # info["trunc"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
         # info["done"] = info["term"] | info["trunc"]
+        info["done"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
 
         self.timestep = torch.zeros(self.num_envs, dtype=int, device=self.device)
         info["timestep"] = self.timestep
@@ -174,3 +176,50 @@ class StoreReturns(gym.Wrapper):
             self.key2running_ret[keyr][info["done"]] = 0.0
 
         return obs, rew, term, trunc, info
+
+
+class E3BReward(gym.Wrapper):
+    def __init__(self, env, encode_fn, lmbda=0.1):
+        super().__init__(env)
+        self.encode_fn = encode_fn
+        self.lmbda = lmbda
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        # if self.latent_key in info:
+        # latent, done = info[self.latent_key], info["done"]
+        if self.encode_fn is not None:
+            latent, done = self.encode_fn(info["obs"]), info["done"]
+
+            self.Il = torch.eye(latent.shape[-1]) / self.lmbda  # d, d
+            self.Cinv = torch.zeros(self.num_envs, latent.shape[-1], latent.shape[-1])  # b, d, d
+
+            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
+            self.step_e3b(latent, done)
+        return obs, info
+
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        # if self.latent_key in info:
+        # latent, done = info[self.latent_key], info["done"]
+        if self.encode_fn is not None:
+            latent, done = self.encode_fn(info["obs"]), info["done"]
+
+            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
+            info[f"rew_e3b"] = self.step_e3b(latent, done)
+
+        return obs, rew, term, trunc, info
+
+    @torch.no_grad()  # this is required
+    def step_e3b(self, latent, done):
+        self.Il, self.Cinv = self.Il.to(self.device), self.Cinv.to(self.device)
+        assert done.dtype == torch.bool
+        self.Cinv[done] = self.Il
+        v = latent[..., :, None]  # b, d, 1
+        u = self.Cinv @ v  # b, d, 1
+        b = v.mT @ u  # b, 1, 1
+        rew_e3b = b[..., 0, 0].clone()  # cloning is important, otherwise b will be written to
+        rew_e3b[done] = 0.0
+        self.u, self.v, self.b = u, v, b
+        self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
+        return rew_e3b

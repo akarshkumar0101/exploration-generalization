@@ -1,0 +1,15 @@
+python_file: ppo_atari.py
+
+--device: cuda
+
+--project: egb-atari
+--name: "{env_id}_{obj}_{seed}"
+
+--seed: [0, 1, 2, 3, 4]
+
+--frame-stack: [4, 8, 16]
+--obj: [ext, e3b]
+--env-id: MontezumaRevenge
+--total-steps: 10e6
+
+--anneal-lr: False

@@ -1,8 +1,7 @@
-# adapted from CleanRL's ppo_atari_envpool.py
+# Adapted from CleanRL's ppo_atari_envpool.py
 import argparse
 import random
 import time
-from collections import deque
 from distutils.util import strtobool
 
 import gymnasium as gym
@@ -12,8 +11,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchinfo
-from agent_atari import Agent
+from agent_atari import Agent, Encoder
+from einops import rearrange
 from env_atari import make_env
+from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
 from tqdm.auto import tqdm
 
 import wandb
@@ -48,6 +49,10 @@ parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of t
 parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
 parser.add_argument("--target-kl", type=float, default=None, help="the target KL divergence threshold")
 
+parser.add_argument("--frame-stack", type=int, default=4, help="the number of frames to stack as input to the model")
+parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
+parser.add_argument("--lr-tc", type=float, default=4e-3, help="learning rate for time contrastive encoder")
+
 
 def parse_args(*args, **kwargs):
     args = parser.parse_args(*args, **kwargs)
@@ -72,12 +77,15 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    env = make_env(args.env_id, n_envs=args.n_envs, obj="ext", gamma=args.gamma, device=args.device, seed=args.seed)
-    assert isinstance(env.action_space, gym.spaces.MultiDiscrete), "only discrete action space is supported"
+    encoder = Encoder((1, 84, 84), 64).to(args.device)
+    e3b_encode_fn = lambda obs: encoder.encode(obs[:, [-1]])  # encode only the latest frame
+    env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=e3b_encode_fn, gamma=args.gamma, device=args.device, seed=args.seed)
+    assert isinstance(env.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(env).to(args.device)
-    torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape)
-    optimizer = optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
+    agent = Agent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
+    torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
+    # optimizer = optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
+    optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
 
     obs = torch.zeros((args.n_steps, args.n_envs) + env.single_observation_space.shape, dtype=torch.uint8, device=args.device)
     actions = torch.zeros((args.n_steps, args.n_envs) + env.single_action_space.shape, dtype=torch.uint8, device=args.device)
@@ -171,7 +179,11 @@ def main(args):
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+
+                obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
+                loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -196,7 +208,6 @@ def main(args):
             data["details/value_loss"] = v_loss.item()
             data["details/policy_loss"] = pg_loss.item()
             data["details/entropy"] = entropy_loss.item()
-            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy())
             data["details/old_approx_kl"] = old_approx_kl.item()
             data["details/approx_kl"] = approx_kl.item()
             data["details/clipfrac"] = np.mean(clipfracs)
@@ -204,16 +215,25 @@ def main(args):
             data["meta/SPS"] = int(i_update * args.collect_size / (time.time() - start_time))
             data["meta/global_step"] = i_update * args.collect_size
 
-            ret_ext = torch.cat(env.key2past_rets["ret_ext"]).tolist()
-            if len(ret_ext) > 0:
-                data["charts/ret_ext"] = np.mean(ret_ext)
-                data["charts_hist/ret_ext"] = wandb.Histogram(ret_ext)
-        if i_update % viz_midd == 0:
-            pass
-        if i_update % viz_slow == 0:
-            pass
+            data["details/loss_tc"] = loss_tc.item()
 
-        keys_tqdm = ["charts/ret_ext", "meta/SPS"]
+            for key, val in env.key2past_rets.items():
+                rets = torch.cat(val).tolist()
+                if len(rets) > 0:
+                    data[f"charts/{key}"] = np.mean(rets)
+                    data[f"charts_hist/{key}"] = wandb.Histogram(rets) # TODO move to viz_midd
+        if i_update % viz_midd == 0:
+            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy())
+            # data["details_hist/action"] = wandb.Histogram(b_actions.detach().cpu().numpy())
+
+        if i_update % viz_slow == 0:
+            vid = np.stack(env.past_obs).copy()
+            vid[:, :, -1, :] = 0
+            vid[:, :, :, -1] = 0
+            vid = rearrange(vid, "t (H W) h w -> t (H h) (W w)", H=2, W=4)
+            data["media/vid"] = wandb.Video(rearrange(vid, "t h w -> t 1 h w"), fps=15)
+
+        keys_tqdm = ["charts/ret_ext", "charts/ret_e3b", "meta/SPS"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track:
             wandb.log(data, step=i_update * args.collect_size)
