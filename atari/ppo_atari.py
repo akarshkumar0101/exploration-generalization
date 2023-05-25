@@ -51,7 +51,7 @@ parser.add_argument("--target-kl", type=float, default=None, help="the target KL
 
 parser.add_argument("--frame-stack", type=int, default=4, help="the number of frames to stack as input to the model")
 parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
-parser.add_argument("--lr-tc", type=float, default=4e-3, help="learning rate for time contrastive encoder")
+parser.add_argument("--lr-tc", type=float, default=3e-4, help="learning rate for time contrastive encoder")
 
 
 def parse_args(*args, **kwargs):
@@ -99,6 +99,10 @@ def main(args):
     next_obs = info["obs"]
     next_done = torch.zeros(args.n_envs, dtype=torch.bool, device=args.device)
 
+    viz_slow = set(np.linspace(0, args.n_updates - 1, 10).astype(int))
+    viz_midd = set(np.linspace(0, args.n_updates - 1, 100).astype(int)).union(viz_slow)
+    viz_fast = set(np.linspace(0, args.n_updates - 1, 1000).astype(int)).union(viz_midd)
+
     pbar = tqdm(range(args.n_updates))
     for i_update in pbar:
         if args.anneal_lr:  # Annealing the rate if instructed to do so.
@@ -106,19 +110,19 @@ def main(args):
             lrnow = frac * args.lr
             optimizer.param_groups[0]["lr"] = lrnow
 
-        for step in range(args.n_steps):
-            obs[step] = next_obs
-            dones[step] = next_done
+        for i_step in range(args.n_steps):
+            obs[i_step] = next_obs
+            dones[i_step] = next_done
 
             with torch.no_grad():
                 action, logprob, _, value = agent.get_action_and_value(next_obs)
-                values[step] = value.flatten()
-            actions[step] = action
-            logprobs[step] = logprob
+                values[i_step] = value.flatten()
+            actions[i_step] = action
+            logprobs[i_step] = logprob
 
             _, reward, _, _, info = env.step(action.cpu().numpy())
             next_obs, next_done = info["obs"], info["done"]
-            rewards[step] = torch.as_tensor(reward).to(args.device)
+            rewards[i_step] = torch.as_tensor(reward).to(args.device)
 
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
@@ -198,12 +202,8 @@ def main(args):
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-        viz_fast = np.clip(args.n_updates // 1000, 1, None)
-        viz_midd = viz_fast * 10
-        viz_slow = viz_midd * 10
-
         data = {}
-        if i_update % viz_fast == 0:
+        if i_update in viz_fast:  # log ex. points with fast frequency
             data["details/lr"] = optimizer.param_groups[0]["lr"]
             data["details/value_loss"] = v_loss.item()
             data["details/policy_loss"] = pg_loss.item()
@@ -221,12 +221,11 @@ def main(args):
                 rets = torch.cat(val).tolist()
                 if len(rets) > 0:
                     data[f"charts/{key}"] = np.mean(rets)
-                    data[f"charts_hist/{key}"] = wandb.Histogram(rets) # TODO move to viz_midd
-        if i_update % viz_midd == 0:
+                    data[f"charts_hist/{key}"] = wandb.Histogram(rets)  # TODO move to viz_midd
+        if i_update in viz_midd:  # log ex. histograms with midd frequency
             data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy())
             # data["details_hist/action"] = wandb.Histogram(b_actions.detach().cpu().numpy())
-
-        if i_update % viz_slow == 0:
+        if i_update in viz_slow:  # log ex. videos with slow frequency
             vid = np.stack(env.past_obs).copy()
             vid[:, :, -1, :] = 0
             vid[:, :, :, -1] = 0
