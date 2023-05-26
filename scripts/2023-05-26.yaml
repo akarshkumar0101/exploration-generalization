@@ -14,4 +14,4 @@ python_file: ppo_atari.py
 
 --anneal-lr: False
 
---save-agent: data/{project}/{name}/agent.pt
+--save-agent: ../data/{project}/{name}/agent.pt
