@@ -1,5 +1,6 @@
 # Adapted from CleanRL's ppo_atari_envpool.py
 import argparse
+import os
 import random
 import time
 from distutils.util import strtobool
@@ -20,6 +21,7 @@ from tqdm.auto import tqdm
 import wandb
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
 parser.add_argument("--entity", type=str, default=None, help="the entity (team) of wandb's project")
 parser.add_argument("--project", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--name", type=str, default=None, help="the name of this experiment")
@@ -53,16 +55,20 @@ parser.add_argument("--frame-stack", type=int, default=4, help="the number of fr
 parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
 parser.add_argument("--lr-tc", type=float, default=3e-4, help="learning rate for time contrastive encoder")
 
+parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
+parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
+
 
 def parse_args(*args, **kwargs):
     args = parser.parse_args(*args, **kwargs)
-
-    args.track = args.project is not None
     if args.project is not None:
         args.project = args.project.format(**vars(args))
     if args.name is not None:
         args.name = args.name.format(**vars(args))
-
+    if args.load_agent is not None:
+        args.load_agent = args.load_agent.format(**vars(args))
+    if args.save_agent is not None:
+        args.save_agent = args.save_agent.format(**vars(args))
     args.collect_size = int(args.n_envs * args.n_steps)
     args.n_updates = args.total_steps // args.collect_size
     return args
@@ -83,6 +89,8 @@ def main(args):
     assert isinstance(env.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
+    if args.load_agent is not None:
+        agent.load_state_dict(torch.load(args.load_agent))
     torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
     # optimizer = optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
     optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
@@ -231,6 +239,12 @@ def main(args):
             vid[:, :, :, -1] = 0
             vid = rearrange(vid, "t (H W) h w -> t (H h) (W w)", H=2, W=4)
             data["media/vid"] = wandb.Video(rearrange(vid, "t h w -> t 1 h w"), fps=15)
+
+            # save agent
+            if args.save_agent is not None:
+                print("Saving agent...")
+                os.makedirs(args.save_agent, exist_ok=True)
+                torch.save(agent.state_dict(), f"{args.save_agent}")
 
         keys_tqdm = ["charts/ret_ext", "charts/ret_e3b", "meta/SPS"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})

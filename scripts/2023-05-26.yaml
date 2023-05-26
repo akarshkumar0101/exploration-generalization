@@ -1,0 +1,17 @@
+python_file: ppo_atari.py
+
+--track: True
+--project: egb-atari-1
+--name: "{env_id}_{obj}_{seed}"
+
+--device: cuda
+--seed: [0, 1, 2]
+
+--frame-stack: 4
+--obj: ext
+--env-id: [Breakout, Pong, BeamRider, SpaceInvaders, Boxing]
+--total-steps: 10e6
+
+--anneal-lr: False
+
+--save-agent: data/{project}/{name}/agent.pt
