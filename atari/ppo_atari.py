@@ -243,7 +243,7 @@ def main(args):
             # save agent
             if args.save_agent is not None:
                 print("Saving agent...")
-                os.makedirs(args.save_agent, exist_ok=True)
+                os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
                 torch.save(agent.state_dict(), f"{args.save_agent}")
 
         keys_tqdm = ["charts/ret_ext", "charts/ret_e3b", "meta/SPS"]
