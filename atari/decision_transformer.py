@@ -124,7 +124,7 @@ class DecisionTransformer(nn.Module):
 
         self.encode_step = nn.Embedding(config.n_steps_max, config.n_embd)
         self.encode_obs = nn.Sequential(
-            nn.Conv2d(4, 32, 8, stride=4, padding=0),
+            nn.Conv2d(1, 32, 8, stride=4, padding=0),
             nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2, padding=0),
             nn.ReLU(),
@@ -163,7 +163,7 @@ class DecisionTransformer(nn.Module):
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layer))
 
     def forward(self, rtg, obs, act):
         # rtg: (batch_size, n_steps)
@@ -183,7 +183,7 @@ class DecisionTransformer(nn.Module):
         act = rearrange(act, "b t -> (b t)")
 
         x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
-        x_obs = self.encode_obs(obs)  # (batch_size * n_steps, n_embd)
+        x_obs = self.encode_obs(obs / 255.0)  # (batch_size * n_steps, n_embd)
         x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
 
         x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
@@ -206,7 +206,8 @@ class DecisionTransformer(nn.Module):
 
         logits = self.lm_head(x)  # (batch_size, n_steps, n_actions)
 
-        return logits, None
+
+        return logits
         # if targets is not None:
         #     # if we are given some desired targets also calculate the loss
         #     logits = self.lm_head(x)
@@ -285,7 +286,7 @@ if __name__ == "__main__":
     # print(sum(p.numel() for p in dt.parameters()))
 
     batch_size = 256
-    torchinfo.summary(dt, input_size=[(batch_size, config.n_steps_max), (batch_size, config.n_steps_max, 4, 84, 84), (batch_size, config.n_steps_max)], dtypes=[torch.float, torch.float, torch.long])
+    torchinfo.summary(dt, input_size=[(batch_size, config.n_steps_max), (batch_size, config.n_steps_max, 1, 84, 84), (batch_size, config.n_steps_max)], dtypes=[torch.float, torch.float, torch.long])
 
     # rtg = torch.randn(batch_size, config.n_steps_max)
     # obs = torch.randn(batch_size, config.n_steps_max, 4, 84, 84)

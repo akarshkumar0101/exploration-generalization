@@ -93,7 +93,7 @@ def main(args):
         agent.load_state_dict(torch.load(args.load_agent))
     torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
     # optimizer = optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
-    optimizer = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
+    opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
 
     obs = torch.zeros((args.n_steps, args.n_envs) + env.single_observation_space.shape, dtype=torch.uint8, device=args.device)
     actions = torch.zeros((args.n_steps, args.n_envs) + env.single_action_space.shape, dtype=torch.uint8, device=args.device)
@@ -111,12 +111,16 @@ def main(args):
     viz_midd = set(np.linspace(0, args.n_updates - 1, 100).astype(int)).union(viz_slow)
     viz_fast = set(np.linspace(0, args.n_updates - 1, 1000).astype(int)).union(viz_midd)
 
+    dtime_env = 0.0
+    dtime_inference = 0.0
+    dtime_learning = 0.0
+
     pbar = tqdm(range(args.n_updates))
     for i_update in pbar:
         if args.anneal_lr:  # Annealing the rate if instructed to do so.
             frac = 1.0 - (i_update) / args.n_updates
             lrnow = frac * args.lr
-            optimizer.param_groups[0]["lr"] = lrnow
+            opt.param_groups[0]["lr"] = lrnow
 
         for i_step in range(args.n_steps):
             obs[i_step] = next_obs
@@ -124,12 +128,12 @@ def main(args):
 
             with torch.no_grad():
                 action, logprob, _, value = agent.get_action_and_value(next_obs)
-                values[i_step] = value.flatten()
-            actions[i_step] = action
-            logprobs[i_step] = logprob
-
             _, reward, _, _, info = env.step(action.cpu().numpy())
             next_obs, next_done = info["obs"], info["done"]
+
+            values[i_step] = value.flatten()
+            actions[i_step] = action
+            logprobs[i_step] = logprob
             rewards[i_step] = torch.as_tensor(reward).to(args.device)
 
         with torch.no_grad():
@@ -197,10 +201,10 @@ def main(args):
                 loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
 
-                optimizer.zero_grad()
+                opt.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                optimizer.step()
+                opt.step()
 
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
@@ -212,7 +216,7 @@ def main(args):
 
         data = {}
         if i_update in viz_fast:  # log ex. points with fast frequency
-            data["details/lr"] = optimizer.param_groups[0]["lr"]
+            data["details/lr"] = opt.param_groups[0]["lr"]
             data["details/value_loss"] = v_loss.item()
             data["details/policy_loss"] = pg_loss.item()
             data["details/entropy"] = entropy_loss.item()
