@@ -1,0 +1,28 @@
+python_file: train_dt.py
+
+--track: True
+--project: egb-atari-1
+--name: "{env_id}_{obj}_{seed}_dtgpt"
+
+--device: cuda
+--seed: [0, 1, 2]
+
+--frame-stack: 4
+--obj: ext
+--env-id: [Breakout, Pong, BeamRider, SpaceInvaders, Boxing]
+
+--n-envs: 64
+--n-steps: 256
+--batch-size: 1024
+
+--ctx-len: 10
+--n-iters: 50000
+--freq-collect: 10
+--lr: 6e-4
+--lr-min: 6e-5
+--lr-schedule: [True]
+
+--ent-coef: 0.0
+--max-grad-norm: 1.0
+
+--load-agent: ../data/egb-atari-1/{env_id}_{obj}_{seed}/agent.pt
