@@ -40,7 +40,7 @@ parser.add_argument("--batch-size", type=int, default=1024, help="the number of 
 
 parser.add_argument("--ctx-len", type=int, default=10, help="context length of the transformer")
 parser.add_argument("--n-iters", type=int, default=1000, help="the K epochs to update the policy")
-parser.add_argument("--freq_collect", type=int, default=10, help="context length of the transformer")
+parser.add_argument("--freq-collect", type=int, default=10, help="context length of the transformer")
 
 parser.add_argument("--lr", type=float, default=6e-4, help="the learning rate of the optimizer")
 parser.add_argument("--lr-min", type=float, default=6e-5, help="the learning rate of the optimizer")

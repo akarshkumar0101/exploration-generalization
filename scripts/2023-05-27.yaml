@@ -17,7 +17,7 @@ python_file: train_dt.py
 
 --ctx-len: 10
 --n-iters: 50000
---freq-collect: 10
+--freq-collect: 16
 --lr: 6e-4
 --lr-min: 6e-5
 --lr-schedule: [True]
