@@ -38,7 +38,7 @@ class CausalSelfAttention(nn.Module):
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
+            self.register_buffer("bias", torch.tril(torch.ones(config.n_steps_max * 3, config.n_steps_max * 3)).view(1, 1, config.n_steps_max * 3, config.n_steps_max * 3))
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
@@ -205,7 +205,6 @@ class DecisionTransformer(nn.Module):
         x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
         logits = self.lm_head(x)  # (batch_size, n_steps, n_actions)
-
 
         return logits
         # if targets is not None:
