@@ -183,7 +183,7 @@ class DecisionTransformer(nn.Module):
 
         x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
         x_obs = self.encode_obs(obs / 255.0)  # (batch_size * n_steps, n_embd)
-        x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
+        x_act = self.encode_act(act.clamp(0))  # (batch_size * n_steps, n_embd)
 
         x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
         x_obs = x_step + rearrange(x_obs, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
