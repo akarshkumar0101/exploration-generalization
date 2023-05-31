@@ -12,10 +12,10 @@ import torch.nn as nn
 import torch.optim as optim
 import torchinfo
 from agent_atari import Agent, Encoder
+from buffers import Buffer, MultiBuffer
 from decision_transformer import Config, DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
-from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
 from tqdm.auto import tqdm
 
 import wandb
@@ -38,7 +38,7 @@ parser.add_argument("--n-envs", type=int, default=64, help="the number of parall
 parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
 parser.add_argument("--batch-size", type=int, default=1024, help="the number of mini-batches")
 
-parser.add_argument("--ctx-len", type=int, default=10, help="context length of the transformer")
+parser.add_argument("--ctx-len", type=int, default=4, help="context length of the transformer")
 parser.add_argument("--n-iters", type=int, default=1000, help="the K epochs to update the policy")
 parser.add_argument("--freq-collect", type=int, default=10, help="context length of the transformer")
 
@@ -71,38 +71,19 @@ def parse_args(*args, **kwargs):
     return args
 
 
-class Buffer:
-    def __init__(self, args, env, agent):
-        self.args, self.env, self.agent = args, env, agent
+def get_lr(args, i_iter):
+    if not args.lr_schedule:
+        return args.lr
 
-        self.obs = torch.zeros((args.n_steps, args.n_envs) + env.single_observation_space.shape, dtype=torch.uint8, device=args.device)
-        self.actions = torch.zeros((args.n_steps, args.n_envs) + env.single_action_space.shape, dtype=torch.long, device=args.device)
-        self.logprobs = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-        self.rewards = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-        self.dones = torch.zeros((args.n_steps, args.n_envs), dtype=torch.bool, device=args.device)
-        self.values = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-
-        # self.adv = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-
-        _, info = env.reset()
-        self.next_obs = info["obs"]
-        self.next_done = torch.zeros(args.n_envs, dtype=torch.bool, device=args.device)
-
-    def collect(self):
-        self.agent.eval()
-        for i_step in range(self.args.n_steps):
-            self.obs[i_step] = self.next_obs
-            self.dones[i_step] = self.next_done
-
-            with torch.no_grad():
-                action, logprob, _, value = self.agent.get_action_and_value(self.next_obs)
-            _, reward, _, _, info = self.env.step(action.cpu().numpy())
-            self.next_obs, self.next_done = info["obs"], info["done"]
-
-            self.values[i_step] = value.flatten()
-            self.actions[i_step] = action
-            self.logprobs[i_step] = logprob
-            self.rewards[i_step] = torch.as_tensor(reward).to(self.args.device)
+    n_iters_warmup = args.n_iters // 100
+    if i_iter < n_iters_warmup:
+        return args.lr * i_iter / n_iters_warmup
+    if i_iter > args.n_iters:
+        return args.lr_min
+    decay_ratio = (i_iter - n_iters_warmup) / (args.n_iters - n_iters_warmup)
+    coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
+    assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
+    return args.lr_min + coeff * (args.lr - args.lr_min)
 
 
 def main(args):
@@ -114,16 +95,16 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
-    env_test = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+    # env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+    # env_test = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
 
-    agent = Agent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
-    if args.load_agent is not None:
-        agent.load_state_dict(torch.load(args.load_agent))
-    print("Printing Base Agent Summary...")
-    torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
+    # agent = Agent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
+    # if args.load_agent is not None:
+    # agent.load_state_dict(torch.load(args.load_agent))
+    # print("Printing Base Agent Summary...")
+    # torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
 
-    config = Config(n_steps_max=args.ctx_len, n_actions=env.single_action_space.n, n_layer=4, n_head=4, n_embd=4 * 64, dropout=0.0, bias=False)
+    config = Config(n_steps_max=args.ctx_len, n_actions=18, n_layer=1, n_head=1, n_embd=1 * 16, dropout=0.0, bias=False)
     dtgpt = DecisionTransformer(config).to(args.device)
     print("Printing DTGPT Summary...")
     torchinfo.summary(
@@ -133,51 +114,51 @@ def main(args):
         device=args.device,
     )
 
-    print(sum(p.numel() for p in agent.parameters()))
+    # print(sum(p.numel() for p in agent.parameters()))
     print(sum(p.numel() for p in dtgpt.parameters()))
 
     # opt = torch.optim.Adam(dtgpt.parameters(), lr=args.lr)
     opt = dtgpt.configure_optimizers(0.0, args.lr, (0.9, 0.95), args.device)
 
-    buffer = Buffer(args, env, agent)
+    env_ids = ["Boxing", "Breakout", "Pong", "SpaceInvaders"]
+    agents = []
+    envs = []
+    envs2 = []
+    for i in range(4):
+        agent = Agent((4, 84, 84), 18).to(args.device)
+        agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0"))
+        agents.append(agent)
+        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+        envs.append(env)
+        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+        envs2.append(env)
+    multibuffer = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs, device=args.device)
+    multibuffer_test = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs2, device=args.device)
 
-    def get_lr(i_iter):
-        if not args.lr_schedule:
-            return args.lr
-
-        n_iters_warmup = args.n_iters // 100
-        if i_iter < n_iters_warmup:
-            return args.lr * i_iter / n_iters_warmup
-        if i_iter > args.n_iters:
-            return args.lr_min
-        decay_ratio = (i_iter - n_iters_warmup) / (args.n_iters - n_iters_warmup)
-        coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
-        assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
-        return args.lr_min + coeff * (args.lr - args.lr_min)
+    viz_slow = set(np.linspace(0, args.n_iters - 1, 10).astype(int))
+    viz_midd = set(np.linspace(0, args.n_iters - 1, 100).astype(int)).union(viz_slow)
+    viz_fast = set(np.linspace(0, args.n_iters - 1, 1000).astype(int)).union(viz_midd)
 
     pbar = tqdm(range(args.n_iters))
     for i_iter in pbar:
-        lr = get_lr(i_iter)
+        lr = get_lr(args, i_iter)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
 
         if i_iter % args.freq_collect == 0:
-            buffer.collect()
+            print("Collecting data...")
+            multibuffer.collect(agents)
 
-        i_env = torch.randint(0, args.n_envs, (args.batch_size,), device=args.device)
-        i_step = torch.randint(0, args.n_steps + 1 - args.ctx_len, (args.batch_size,), device=args.device)
+        batch = multibuffer.generate_batch(args.batch_size)
 
-        obs = torch.stack([buffer.obs[i : i + args.ctx_len, j, [-1]] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        act = torch.stack([buffer.actions[i : i + args.ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
+        dtgpt.train()
+        obs, dist_teacher, act = batch["obs"], batch["dist"], batch["act"]
+        dist_student, values = dtgpt.forward(rtg=None, obs=obs, act=act)
 
-        logits = dtgpt.forward(rtg=None, obs=obs, act=act)
-        entropy = torch.distributions.Categorical(logits=logits).entropy()
-        bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), ignore_index=-100, reduction="none")
-        bc = bc.reshape(args.batch_size, args.ctx_len)
-
-        # TODO: divide obs by 255. to the transformer
-        loss_bc, loss_entropy = bc.mean(), entropy.mean()
-        loss = loss_bc + args.ent_coef * loss_entropy
+        kl_div = torch.distributions.kl.kl_divergence(dist_student, dist_teacher)
+        entropy = dist_student.entropy()
+        loss_kl, loss_entropy = kl_div.mean(), entropy.mean()
+        loss = loss_kl + args.ent_coef * loss_entropy
 
         opt.zero_grad()
         loss.backward()
@@ -185,15 +166,18 @@ def main(args):
         opt.step()
 
         data = {}
-        data["loss_bc"] = loss_bc.item()
+        data["loss_kl"] = loss_kl.item()
         data["loss_entropy"] = loss_entropy.item()
-        data["loss_bc_0"] = bc[:, 0].mean().item()
-        data["loss_bc_-1"] = bc[:, -1].mean().item()
+        data["loss_kl_0"] = kl_div[:, 0].mean().item()
+        data["loss_kl_-1"] = kl_div[:, -1].mean().item()
         data["lr"] = lr
 
-        keys_tqdm = ["loss_bc", "loss_entropy"]
+        if i_iter in viz_midd:
+            multibuffer_test.collect([dtgpt for _ in range(4)])
+
+        keys_tqdm = ["loss_kl", "loss_entropy"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
-        if args.track:
+        if args.track and i_iter in viz_fast:
             wandb.log(data, step=i_iter)
 
 

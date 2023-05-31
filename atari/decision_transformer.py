@@ -141,25 +141,24 @@ class DecisionTransformer(nn.Module):
         self.drop = nn.Dropout(config.dropout)
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        self.lm_head = nn.Linear(config.n_embd, config.n_actions, bias=False)
+        self.actor = nn.Linear(config.n_embd, config.n_actions)
+        self.critic = nn.Linear(config.n_embd, 1)
 
         # tie the weights of the action prediction head to the action embeddings
-        self.lm_head.weight = self.encode_act.weight
+        self.actor.weight = self.encode_act.weight
 
         self.init_weights()
 
     def init_weights(self):
-        def _init_weights(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        def _init_weights(m):
+            if isinstance(m, nn.Linear):
+                torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Embedding):
+                torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
 
-        # init all weights
         self.apply(_init_weights)
-
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
@@ -204,9 +203,9 @@ class DecisionTransformer(nn.Module):
         x = rearrange(x, "b (t c) d -> b t c d", t=n_steps)  # (batch_size, n_steps, 3, n_embd)
         x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
-        logits = self.lm_head(x)  # (batch_size, n_steps, n_actions)
-
-        return logits
+        logits, values = self.actor(x), self.critic(x) # (batch_size, n_steps, n_actions), (batch_size, n_steps, 1)
+        dist = torch.distributions.Categorical(logits=logits)
+        return dist, values[..., 0]
         # if targets is not None:
         #     # if we are given some desired targets also calculate the loss
         #     logits = self.lm_head(x)
@@ -217,6 +216,25 @@ class DecisionTransformer(nn.Module):
         #     loss = None
 
         # return logits, loss
+
+    def act(self, obs, act, done):
+        # obs.shape: n, t, h, w
+        # rew.shape: n, t
+        # act.shape: n, t-1
+        noaction = act[:, [-1]].clone().fill_(-100)
+        act = torch.cat([act, noaction], dim=-1)
+        mask = self.create_mask(done, toks=3)
+        dist, values = self.forward(rtg=None, obs=obs, act=act)
+        dist = torch.distributions.Categorical(logits=dist.logits[:, -1, :])
+        return dist, values[:, -1]
+
+    def create_mask(self, done, toks=1):
+        t, b = done.shape
+        mask = torch.ones(b, t*toks, t*toks, dtype=torch.bool, device=done.device).tril()
+        for i in range(t):
+            # when done=True, me+future (i:) CANNOT attend to past (:i)
+            mask[done[i], i*toks:, :i*toks] = False
+        return mask
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
