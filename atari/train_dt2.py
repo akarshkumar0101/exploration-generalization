@@ -126,7 +126,7 @@ def main(args):
     envs2 = []
     for i in range(4):
         agent = Agent((4, 84, 84), 18).to(args.device)
-        agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
+        # agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
         agents.append(agent)
         env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
         envs.append(env)
