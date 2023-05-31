@@ -16,7 +16,7 @@ python_file: train_dt2.py
 --batch-size: 1024
 
 --ctx-len: 4
---n-iters: 10000
+--n-iters: 30000
 --freq-collect: 32
 --lr: 6e-4
 --lr-min: 6e-5

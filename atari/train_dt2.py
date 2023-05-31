@@ -152,6 +152,11 @@ def main(args):
             for i_env, env_id in enumerate(env_ids):
                 data[f"{env_id}_student_ret_ext"] = torch.cat(multibuffer.envs[i_env].key2past_rets["ret_ext"]).mean().item()
 
+            print("Collecting student data...")
+            multibuffer_test.collect([dtgpt for _ in range(4)])
+            for i_env, env_id in enumerate(env_ids):
+                data[f"{env_id}_dtgpt_ret_ext"] = torch.cat(multibuffer_test.envs[i_env].key2past_rets["ret_ext"]).mean().item()
+
         batch = multibuffer.generate_batch(args.batch_size)
 
         dtgpt.train()
@@ -174,14 +179,7 @@ def main(args):
         data["loss_kl_-1"] = kl_div[:, -1].mean().item()
         data["lr"] = lr
 
-        if i_iter in viz_midd:
-            print("Collecting student data...")
-            multibuffer_test.collect([dtgpt for _ in range(4)])
-
-            for i_env, env_id in enumerate(env_ids):
-                data[f"{env_id}_dtgpt_ret_ext"] = torch.cat(multibuffer_test.envs[i_env].key2past_rets["ret_ext"]).mean().item()
-
-        keys_tqdm = ["loss_kl", "loss_entropy", 'Breakout_student_ret_ext', 'Breakout_student_dtgpt_ext']
+        keys_tqdm = ["loss_kl", "loss_entropy", "Breakout_student_ret_ext", "Breakout_student_dtgpt_ext"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track and i_iter in viz_fast:
             wandb.log(data, step=i_iter)
