@@ -25,7 +25,7 @@ def make_env_single(env_id="Breakout", frame_stack=4):
     return env
 
 
-def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0):
+def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
     make_fn = partial(make_env_single, env_id=env_id, frame_stack=frame_stack)
     make_fns = [make_fn for _ in range(n_envs)]
     env = gym.vector.SyncVectorEnv(make_fns)
@@ -36,7 +36,7 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
 
     env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
 
-    env = StoreReturns(env, buf_size=128)
+    env = StoreReturns(env, buf_size=buf_size)
 
     env = RewardSelector(env, obj=obj)
 

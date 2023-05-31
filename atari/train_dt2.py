@@ -126,11 +126,11 @@ def main(args):
     envs2 = []
     for i in range(4):
         agent = Agent((4, 84, 84), 18).to(args.device)
-        # agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
+        agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
         agents.append(agent)
-        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         envs.append(env)
-        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
+        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         envs2.append(env)
     multibuffer = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs, device=args.device)
     multibuffer_test = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs2, device=args.device)
@@ -141,13 +141,16 @@ def main(args):
 
     pbar = tqdm(range(args.n_iters))
     for i_iter in pbar:
+        data = {}
         lr = get_lr(args, i_iter)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
 
         if i_iter % args.freq_collect == 0:
-            print("Collecting data...")
+            print("Collecting expert data...")
             multibuffer.collect(agents)
+            for i_env, env_id in enumerate(env_ids):
+                data[f"{env_id}_student_ret_ext"] = torch.cat(multibuffer.envs[i_env].key2past_rets["ret_ext"]).mean().item()
 
         batch = multibuffer.generate_batch(args.batch_size)
 
@@ -165,7 +168,6 @@ def main(args):
         nn.utils.clip_grad_norm_(dtgpt.parameters(), args.max_grad_norm)
         opt.step()
 
-        data = {}
         data["loss_kl"] = loss_kl.item()
         data["loss_entropy"] = loss_entropy.item()
         data["loss_kl_0"] = kl_div[:, 0].mean().item()
@@ -173,9 +175,13 @@ def main(args):
         data["lr"] = lr
 
         if i_iter in viz_midd:
+            print("Collecting student data...")
             multibuffer_test.collect([dtgpt for _ in range(4)])
 
-        keys_tqdm = ["loss_kl", "loss_entropy"]
+            for i_env, env_id in enumerate(env_ids):
+                data[f"{env_id}_dtgpt_ret_ext"] = torch.cat(multibuffer_test.envs[i_env].key2past_rets["ret_ext"]).mean().item()
+
+        keys_tqdm = ["loss_kl", "loss_entropy", 'Breakout_student_ret_ext', 'Breakout_student_dtgpt_ext']
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track and i_iter in viz_fast:
             wandb.log(data, step=i_iter)
