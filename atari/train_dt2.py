@@ -104,7 +104,7 @@ def main(args):
     # print("Printing Base Agent Summary...")
     # torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
 
-    config = Config(n_steps_max=args.ctx_len, n_actions=18, n_layer=1, n_head=1, n_embd=1 * 16, dropout=0.0, bias=False)
+    config = Config(n_steps_max=args.ctx_len, n_actions=18, n_layer=4, n_head=4, n_embd=4 * 16, dropout=0.0, bias=False)
     dtgpt = DecisionTransformer(config).to(args.device)
     print("Printing DTGPT Summary...")
     torchinfo.summary(
@@ -128,12 +128,12 @@ def main(args):
         agent = Agent((4, 84, 84), 18).to(args.device)
         agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
         agents.append(agent)
-        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        env = make_env(env_ids[i], n_envs=128 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         envs.append(env)
-        env = make_env(env_ids[i], n_envs=16 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        env = make_env(env_ids[i], n_envs=32 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         envs2.append(env)
-    multibuffer = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs, device=args.device)
-    multibuffer_test = MultiBuffer(args.n_steps, 16, args.ctx_len, envs=envs2, device=args.device)
+    multibuffer = MultiBuffer(args.n_steps, 128, args.ctx_len, envs=envs, device=args.device)
+    multibuffer_test = MultiBuffer(args.n_steps, 32, args.ctx_len, envs=envs2, device=args.device)
 
     viz_slow = set(np.linspace(0, args.n_iters - 1, 10).astype(int))
     viz_midd = set(np.linspace(0, args.n_iters - 1, 100).astype(int)).union(viz_slow)
