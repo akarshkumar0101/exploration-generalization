@@ -22,7 +22,7 @@ class LayerNorm(nn.LayerNorm):
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
+        assert config.n_embd % config.n_heads == 0
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
@@ -30,7 +30,7 @@ class CausalSelfAttention(nn.Module):
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
-        self.n_head = config.n_head
+        self.n_heads = config.n_heads
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
@@ -38,16 +38,16 @@ class CausalSelfAttention(nn.Module):
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.n_steps_max * 3, config.n_steps_max * 3)).view(1, 1, config.n_steps_max * 3, config.n_steps_max * 3))
+            self.register_buffer("bias", torch.tril(torch.ones(config.n_steps * 3, config.n_steps * 3)).view(1, 1, config.n_steps * 3, config.n_steps * 3))
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+        k = k.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)  # (B, nh, T, hs)
+        q = q.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)  # (B, nh, T, hs)
+        v = v.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2)  # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -108,21 +108,21 @@ class Block(nn.Module):
 
 @dataclass
 class Config:
-    n_steps_max: int = 50
-    n_actions: int = 15
-    n_layer: int = 4
-    n_head: int = 4
+    n_steps: int = 50
+    n_acts: int = 15
+    n_layers: int = 4
+    n_heads: int = 4
     n_embd: int = 4 * 64
     dropout: float = 0.0
     bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 
 class DecisionTransformer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, n_steps=50, n_acts=18, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True):
         super().__init__()
-        self.config = config
+        self.config = Config(n_steps=n_steps, n_acts=n_acts, n_layers=n_layers, n_heads=n_heads, n_embd=n_embd, dropout=dropout, bias=bias)
 
-        self.encode_step = nn.Embedding(config.n_steps_max, config.n_embd)
+        self.encode_step = nn.Embedding(self.config.n_steps, self.config.n_embd)
         self.encode_obs = nn.Sequential(
             nn.Conv2d(1, 32, 8, stride=4, padding=0),
             nn.ReLU(),
@@ -131,18 +131,18 @@ class DecisionTransformer(nn.Module):
             nn.Conv2d(64, 64, 3, stride=1, padding=0),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(3136, config.n_embd),
+            nn.Linear(3136, self.config.n_embd),
             nn.Tanh(),
         )
-        self.encode_rtg = nn.Sequential(nn.Linear(1, config.n_embd), nn.Tanh())
-        # self.encode_act = nn.Sequential(nn.Embedding(config.n_actions, config.n_embd), nn.Tanh())
-        self.encode_act = nn.Embedding(config.n_actions, config.n_embd)
+        self.encode_rtg = nn.Sequential(nn.Linear(1, self.config.n_embd), nn.Tanh())
+        # self.encode_act = nn.Sequential(nn.Embedding(config.n_acts, config.n_embd), nn.Tanh())
+        self.encode_act = nn.Embedding(self.config.n_acts, self.config.n_embd)
 
-        self.drop = nn.Dropout(config.dropout)
-        self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
-        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        self.actor = nn.Linear(config.n_embd, config.n_actions)
-        self.critic = nn.Linear(config.n_embd, 1)
+        self.drop = nn.Dropout(self.config.dropout)
+        self.blocks = nn.Sequential(*[Block(self.config) for _ in range(self.config.n_layers)])
+        self.ln_f = LayerNorm(self.config.n_embd, bias=self.config.bias)
+        self.actor = nn.Linear(self.config.n_embd, self.config.n_acts)
+        self.critic = nn.Linear(self.config.n_embd, 1)
 
         # tie the weights of the action prediction head to the action embeddings
         self.actor.weight = self.encode_act.weight
@@ -162,15 +162,15 @@ class DecisionTransformer(nn.Module):
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layer))
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layers))
 
-    def forward(self, rtg, obs, act):
-        # rtg: (batch_size, n_steps)
-        # obs: (batch_size, n_steps, c, 84, 84)
-        # act: (batch_size, n_steps)
+    def forward(self, obs, rtg, act, done=None):
+        # obs: (b, t, c, 84, 84)
+        # rtg: (b, t)
+        # act: (b, t)
 
         batch_size, n_steps, _, _, _ = obs.shape
-        assert n_steps <= self.config.n_steps_max, f"Sequence too long"
+        assert n_steps <= self.config.n_steps, f"Sequence too long"
         if rtg is None:
             rtg = torch.zeros(batch_size, n_steps, dtype=torch.float32, device=obs.device)  # (batch_size, n_steps)
 
@@ -183,7 +183,7 @@ class DecisionTransformer(nn.Module):
 
         x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
         x_obs = self.encode_obs(obs / 255.0)  # (batch_size * n_steps, n_embd)
-        x_act = self.encode_act(act.clamp(0))  # (batch_size * n_steps, n_embd)
+        x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
 
         x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
         x_obs = x_step + rearrange(x_obs, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
@@ -203,37 +203,29 @@ class DecisionTransformer(nn.Module):
         x = rearrange(x, "b (t c) d -> b t c d", t=n_steps)  # (batch_size, n_steps, 3, n_embd)
         x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
-        logits, values = self.actor(x), self.critic(x) # (batch_size, n_steps, n_actions), (batch_size, n_steps, 1)
-        dist = torch.distributions.Categorical(logits=logits)
-        return dist, values[..., 0]
-        # if targets is not None:
-        #     # if we are given some desired targets also calculate the loss
-        #     logits = self.lm_head(x)
-        #     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        # else:
-        #     # inference-time mini-optimization: only forward the lm_head on the very last position
-        #     logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
-        #     loss = None
+        logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
+        return logits, values[..., 0]
 
-        # return logits, loss
+    def act(self, obs, act=None, done=None):
+        # obs.shape: b, t, c, h, w
+        # act.shape: b, t (or b, t-1)
+        # done.shape: b, t
 
-    def act(self, obs, act, done):
-        # obs.shape: n, t, h, w
-        # rew.shape: n, t
-        # act.shape: n, t-1
-        noaction = act[:, [-1]].clone().fill_(-100)
-        act = torch.cat([act, noaction], dim=-1)
-        mask = self.create_mask(done, toks=3)
-        dist, values = self.forward(rtg=None, obs=obs, act=act)
-        dist = torch.distributions.Categorical(logits=dist.logits[:, -1, :])
-        return dist, values[:, -1]
+        # logits.shape: b, t, n_acts
+        # values.shape: b, t
+        if act.shape[1] == obs.shape[1] - 1:  # pad action
+            noaction = act[:, [-1]].clone()
+            act = torch.cat([act, noaction], dim=-1)
+        # mask = self.create_mask(done, toks=3)
+        logits, values = self.forward(rtg=None, obs=obs, act=act)
+        return torch.distributions.Categorical(logits=logits), values
 
     def create_mask(self, done, toks=1):
         t, b = done.shape
-        mask = torch.ones(b, t*toks, t*toks, dtype=torch.bool, device=done.device).tril()
+        mask = torch.ones(b, t * toks, t * toks, dtype=torch.bool, device=done.device).tril()
         for i in range(t):
             # when done=True, me+future (i:) CANNOT attend to past (:i)
-            mask[done[i], i*toks:, :i*toks] = False
+            mask[done[i], i * toks :, : i * toks] = False
         return mask
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
@@ -256,36 +248,10 @@ class DecisionTransformer(nn.Module):
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
         print(f"using fused AdamW: {use_fused}")
-
         return optimizer
 
-    # @torch.no_grad()
-    # def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-    #     """
-    #     Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-    #     the sequence max_new_tokens times, feeding the predictions back into the model each time.
-    #     Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-    #     """
-    #     for _ in range(max_new_tokens):
-    #         # if the sequence context is growing too long we must crop it at block_size
-    #         idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size :]
-    #         # forward the model to get the logits for the index in the sequence
-    #         logits, _ = self(idx_cond)
-    #         # pluck the logits at the final step and scale by desired temperature
-    #         logits = logits[:, -1, :] / temperature
-    #         # optionally crop the logits to only the top k options
-    #         if top_k is not None:
-    #             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-    #             logits[logits < v[:, [-1]]] = -float("Inf")
-    #         # apply softmax to convert logits to (normalized) probabilities
-    #         probs = F.softmax(logits, dim=-1)
-    #         # sample from the distribution
-    #         idx_next = torch.multinomial(probs, num_samples=1)
-    #         # append sampled index to the running sequence and continue
-    #         idx = torch.cat((idx, idx_next), dim=1)
 
-    #     return idx
-
+# TODO proper masking
 
 # TODO things to consider:
 # - Which parameters experience weight decay? (ex. all weight matrices, but not biases or layernorms)
@@ -296,16 +262,16 @@ class DecisionTransformer(nn.Module):
 if __name__ == "__main__":
     import torchinfo
 
-    # config = Config(n_steps_max=8, n_actions=15, n_layer=4, n_head=4, n_embd=64, bias=False)
-    config = Config(n_steps_max=16, n_actions=15, n_layer=6, n_head=12, n_embd=768, bias=False)
+    # config = Config(n_steps_max=8, n_acts=15, n_layers=4, n_heads=4, n_embd=64, bias=False)
+    config = Config(n_steps=16, n_acts=15, n_layers=6, n_heads=12, n_embd=768, bias=False)
     dt = DecisionTransformer(config)
 
     # print(sum(p.numel() for p in dt.parameters()))
 
     batch_size = 256
-    torchinfo.summary(dt, input_size=[(batch_size, config.n_steps_max), (batch_size, config.n_steps_max, 1, 84, 84), (batch_size, config.n_steps_max)], dtypes=[torch.float, torch.float, torch.long])
+    torchinfo.summary(dt, input_size=[(batch_size, config.n_steps), (batch_size, config.n_steps, 1, 84, 84), (batch_size, config.n_steps)], dtypes=[torch.float, torch.float, torch.long])
 
-    # rtg = torch.randn(batch_size, config.n_steps_max)
-    # obs = torch.randn(batch_size, config.n_steps_max, 4, 84, 84)
-    # act = torch.randint(0, config.n_actions, (batch_size, config.n_steps_max - 1))
+    # rtg = torch.randn(batch_size, config.n_steps)
+    # obs = torch.randn(batch_size, config.n_steps, 4, 84, 84)
+    # act = torch.randint(0, config.n_acts, (batch_size, config.n_steps - 1))
     # dt(rtg, obs, act)

@@ -4,16 +4,14 @@ import random
 import time
 from distutils.util import strtobool
 
-import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torchinfo
-from agent_atari import Agent, Encoder
+from agent_atari import CNNAgent
 from buffers import Buffer, MultiBuffer
-from decision_transformer import Config, DecisionTransformer
+from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
 from tqdm.auto import tqdm
@@ -32,27 +30,30 @@ parser.add_argument("--seed", type=int, default=0, help="seed of the experiment"
 parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
 parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
 
-# Algorithm specific arguments
-parser.add_argument("--env-id", type=str, default="Pong", help="the id of the environment")
+# Algorithm arguments
+parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
+parser.add_argument("--env-ids-test", type=str, nargs="+", default=[], help="the id of the environment")
+parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
+parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
+parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
 parser.add_argument("--n-envs", type=int, default=64, help="the number of parallel game environments")
 parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
-parser.add_argument("--batch-size", type=int, default=1024, help="the number of mini-batches")
-
-parser.add_argument("--ctx-len", type=int, default=4, help="context length of the transformer")
-parser.add_argument("--n-iters", type=int, default=1000, help="the K epochs to update the policy")
-parser.add_argument("--freq-collect", type=int, default=10, help="context length of the transformer")
-
+parser.add_argument("--batch-size", type=int, default=1024, help="the batch size for training")
+parser.add_argument("--n-updates", type=int, default=16, help="gradient updates per collection")
 parser.add_argument("--lr", type=float, default=6e-4, help="the learning rate of the optimizer")
-parser.add_argument("--lr-min", type=float, default=6e-5, help="the learning rate of the optimizer")
 parser.add_argument("--lr-schedule", type=lambda x: bool(strtobool(x)), default=True, help="Toggle learning rate annealing for policy and value networks")
-
+# parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, help="Toggle learning rate annealing for policy and value networks")
 parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
+# parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
+# parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
 parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
+# parser.add_argument("--clip-coef", type=float, default=0.1, help="the surrogate clipping coefficient")
+# parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
+# parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
 parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
+# parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
 
-parser.add_argument("--frame-stack", type=int, default=4, help="the number of frames to stack as input to the model")
-parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
-
+parser.add_argument("--expert-agent", type=str, default=None, help="file to load the expert agent from")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
 
@@ -63,11 +64,19 @@ def parse_args(*args, **kwargs):
         args.project = args.project.format(**vars(args))
     if args.name is not None:
         args.name = args.name.format(**vars(args))
+    if args.expert_agent is not None:
+        args.expert_agent = args.expert_agent.format(**vars(args))
     if args.load_agent is not None:
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
-    args.collect_size = int(args.n_envs * args.n_steps)
+
+    args.n_envs_per_id = args.n_envs // len(args.env_ids)
+
+    args.collect_size = args.n_envs * args.n_steps
+    args.total_steps = args.total_steps // args.collect_size * args.collect_size
+    args.n_iters = args.total_steps // args.collect_size * args.n_updates
+    args.freq_collect = args.n_updates
     return args
 
 
@@ -87,6 +96,7 @@ def get_lr(args, i_iter):
 
 
 def main(args):
+    print("Running distillation with args: ", args)
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
@@ -104,36 +114,30 @@ def main(args):
     # print("Printing Base Agent Summary...")
     # torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
 
-    config = Config(n_steps_max=args.ctx_len, n_actions=18, n_layer=4, n_head=4, n_embd=4 * 16, dropout=0.0, bias=False)
-    dtgpt = DecisionTransformer(config).to(args.device)
+    agent = DecisionTransformer(n_steps=args.ctx_len, n_acts=18, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True).to(args.device)
     print("Printing DTGPT Summary...")
     torchinfo.summary(
-        dtgpt,
-        input_size=[(args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len)],
+        agent,
+        input_size=[(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
         dtypes=[torch.float, torch.float, torch.long],
         device=args.device,
     )
 
-    # print(sum(p.numel() for p in agent.parameters()))
-    print(sum(p.numel() for p in dtgpt.parameters()))
-
     # opt = torch.optim.Adam(dtgpt.parameters(), lr=args.lr)
-    opt = dtgpt.configure_optimizers(0.0, args.lr, (0.9, 0.95), args.device)
+    opt = agent.configure_optimizers(0.0, args.lr, (0.9, 0.95), args.device)
 
-    env_ids = ["Boxing", "Breakout", "Pong", "SpaceInvaders"]
-    agents = []
-    envs = []
-    envs2 = []
-    for i in range(4):
-        agent = Agent((4, 84, 84), 18).to(args.device)
-        agent.load_state_dict(torch.load(f"../data/egb-atari-1/{env_ids[i]}_ext_0/agent.pt"))
-        agents.append(agent)
-        env = make_env(env_ids[i], n_envs=128 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        envs.append(env)
-        env = make_env(env_ids[i], n_envs=32 // 4, frame_stack=1, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        envs2.append(env)
-    multibuffer = MultiBuffer(args.n_steps, 128, args.ctx_len, envs=envs, device=args.device)
-    multibuffer_test = MultiBuffer(args.n_steps, 32, args.ctx_len, envs=envs2, device=args.device)
+    experts = []
+    mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()
+    for env_id in args.env_ids:
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
+        expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
+        # print("Loading expert from: ", {args.expert_agent.format(env_id=env_id)})
+        # expert.load_state_dict(torch.load(args.expert_agent.format(env_id=env_id)))
+        experts.append(expert)
+    for env_id in args.env_ids_test:
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        mbuffer_test.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
 
     viz_slow = set(np.linspace(0, args.n_iters - 1, 10).astype(int))
     viz_midd = set(np.linspace(0, args.n_iters - 1, 100).astype(int)).union(viz_slow)
@@ -142,50 +146,53 @@ def main(args):
     pbar = tqdm(range(args.n_iters))
     for i_iter in pbar:
         data = {}
+        if i_iter % args.freq_collect == 0:
+            print("Collecting expert data...")
+            mbuffer.collect(experts, args.ctx_len)
+            for env_id, env in zip(args.env_ids, mbuffer.envs):
+                data[f"{env_id}_expert_ret_ext"] = torch.cat(env.key2past_rets["ret_ext"]).mean().item()
+
+            print("Collecting student data...")
+            mbuffer_test.collect(agent, args.ctx_len)
+            for env_id, env in zip(args.env_ids, mbuffer_test.envs):
+                data[f"{env_id}_student_ret_ext"] = torch.cat(env.key2past_rets["ret_ext"]).mean().item()
+
         lr = get_lr(args, i_iter)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
 
-        if i_iter % args.freq_collect == 0:
-            print("Collecting expert data...")
-            multibuffer.collect(agents)
-            for i_env, env_id in enumerate(env_ids):
-                data[f"{env_id}_student_ret_ext"] = torch.cat(multibuffer.envs[i_env].key2past_rets["ret_ext"]).mean().item()
-
-            print("Collecting student data...")
-            multibuffer_test.collect([dtgpt for _ in range(4)])
-            for i_env, env_id in enumerate(env_ids):
-                data[f"{env_id}_dtgpt_ret_ext"] = torch.cat(multibuffer_test.envs[i_env].key2past_rets["ret_ext"]).mean().item()
-
-        batch = multibuffer.generate_batch(args.batch_size)
-
-        dtgpt.train()
-        obs, dist_teacher, act = batch["obs"], batch["dist"], batch["act"]
-        dist_student, values = dtgpt.forward(rtg=None, obs=obs, act=act)
+        agent.train()
+        batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
+        obs, dist_teacher, act, done = batch["obs"], batch["dist"], batch["act"], batch["done"]
+        dist_student, values = agent.act(obs=obs, act=act, done=done)
 
         kl_div = torch.distributions.kl.kl_divergence(dist_student, dist_teacher)
         entropy = dist_student.entropy()
         loss_kl, loss_entropy = kl_div.mean(), entropy.mean()
-        loss = loss_kl + args.ent_coef * loss_entropy
+        loss = loss_kl - args.ent_coef * loss_entropy
 
         opt.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(dtgpt.parameters(), args.max_grad_norm)
+        nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
         opt.step()
 
-        data["loss_kl"] = loss_kl.item()
-        data["loss_entropy"] = loss_entropy.item()
-        data["loss_kl_0"] = kl_div[:, 0].mean().item()
-        data["loss_kl_-1"] = kl_div[:, -1].mean().item()
-        data["lr"] = lr
+        if i_iter in viz_fast:
+            data["loss_kl"] = loss_kl.item()
+            data["loss_entropy"] = loss_entropy.item()
+            data["loss_kl_0"] = kl_div[:, 0].mean().item()
+            data["loss_kl_-1"] = kl_div[:, -1].mean().item()
+            data["lr"] = lr
+        if i_iter in viz_midd:
+            pass
+        if i_iter in viz_slow:
+            pass
 
-        keys_tqdm = ["loss_kl", "loss_entropy", "Breakout_student_ret_ext", "Breakout_student_dtgpt_ext"]
-        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
         if args.track and i_iter in viz_fast:
             wandb.log(data, step=i_iter)
 
+        keys_tqdm = ["loss_kl", "loss_entropy", "Breakout_student_ret_ext", "Breakout_student_dtgpt_ext"]
+        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
+
 
 if __name__ == "__main__":
-    args_hehe = parse_args()
-    print(args_hehe)
-    main(args_hehe)
+    main(parse_args())

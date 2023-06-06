@@ -4,6 +4,14 @@ import gymnasium as gym
 import numpy as np
 import torch
 
+try:
+    import envpool
+
+    has_envpool = True
+except ModuleNotFoundError:
+    print("WARNING: envpool not found.")
+    has_envpool = False
+
 # def make_env_envpool(env_id, num_envs, ):
 #     import envpool
 #     seed = 0
@@ -38,6 +46,54 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
 
     env = StoreReturns(env, buf_size=buf_size)
 
+    env = RewardSelector(env, obj=obj)
+
+    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+
+    for i, envi in enumerate(env.envs):
+        envi.seed(seed + i * 1000)
+        envi.action_space.seed(seed + i * 1000)
+        envi.observation_space.seed(seed + i * 1000)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    return env
+
+
+def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
+    if has_envpool:
+        env = envpool.make(
+            env_id,
+            env_type="gym",
+            num_envs=n_envs,
+            # batch_size=None,
+            # num_threads=None,
+            seed=seed,
+            max_episode_steps=27000,
+            img_height=84,
+            img_width=84,
+            stack_num=1,
+            gray_scale=True,
+            frame_skip=4,
+            noop_max=30,
+            episodic_life=True,
+            zero_discount_on_life_loss=False,
+            reward_clip=False,
+            repeat_action_probability=0,
+            use_inter_area_resize=True,
+            use_fire_reset=True,
+            full_action_space=True
+        )
+    else:
+        make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
+        make_fns = [make_fn for _ in range(n_envs)]
+        env = gym.vector.SyncVectorEnv(make_fns)
+
+    env = StoreObs(env, n_envs=25, buf_size=1000)
+    env = ToTensor(env, device=device)
+    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+    env = StoreReturns(env, buf_size=buf_size)
     env = RewardSelector(env, obj=obj)
 
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)

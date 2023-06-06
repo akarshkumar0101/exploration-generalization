@@ -17,3 +17,5 @@ from tqdm.auto import tqdm
 from env_atari import *
 from agent_atari import *
 from time_contrastive import *
+
+import torchinfo

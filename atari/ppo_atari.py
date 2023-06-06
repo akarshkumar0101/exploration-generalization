@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchinfo
-from agent_atari import Agent, Encoder
+from agent_atari import CNNAgent, Encoder
 from einops import rearrange
 from env_atari import make_env
 from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
@@ -88,7 +88,7 @@ def main(args):
     env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=e3b_encode_fn, gamma=args.gamma, device=args.device, seed=args.seed)
     assert isinstance(env.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
+    agent = CNNAgent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
     if args.load_agent is not None:
         agent.load_state_dict(torch.load(args.load_agent))
     torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
