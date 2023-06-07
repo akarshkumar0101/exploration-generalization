@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
+from tqdm.auto import tqdm
 
 
 def parse_args():
@@ -273,7 +274,7 @@ if __name__ == "__main__":
         clipfracs = []
         time6 = time.time()
         dt_flatten += time6 - time5
-        for epoch in range(args.update_epochs):
+        for epoch in tqdm(range(args.update_epochs)):
             np.random.shuffle(b_inds)
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
