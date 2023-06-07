@@ -6,6 +6,7 @@ import cv2
 
 # import gym # as gym_old
 import gymnasium as gym
+import wandb
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
