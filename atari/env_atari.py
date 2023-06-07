@@ -64,7 +64,7 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
 def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
     if has_envpool:
         env = envpool.make(
-            env_id,
+            task_id=f'{env_id}-v5',
             env_type="gym",
             num_envs=n_envs,
             # batch_size=None,
