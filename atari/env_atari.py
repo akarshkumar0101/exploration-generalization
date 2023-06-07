@@ -6,11 +6,11 @@ import torch
 
 try:
     import envpool
-
     has_envpool = True
+    print("envpool found!")
 except ModuleNotFoundError:
-    print("WARNING: envpool not found.")
     has_envpool = False
+    print("WARNING: envpool not found.")
 
 # def make_env_envpool(env_id, num_envs, ):
 #     import envpool
@@ -60,19 +60,21 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
 
     return env
 
-
+class NoArgsReset(gym.Wrapper):
+    def reset(self, *args, **kwargs):
+        return self.env.reset()
+        
 def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
     if has_envpool:
-        env = envpool.make(
+        env = envpool.make_gymnasium(
             task_id=f'{env_id}-v5',
-            env_type="gym",
             num_envs=n_envs,
             # batch_size=None,
             # num_threads=None,
             seed=seed,
-            # max_episode_steps=27000,
-            # img_height=84,
-            # img_width=84,
+            max_episode_steps=27000,
+            img_height=84,
+            img_width=84,
             stack_num=1,
             gray_scale=True,
             frame_skip=4,
@@ -85,10 +87,12 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
             use_fire_reset=True,
             full_action_space=True,
         )
+        env = NoArgsReset(env)
+        env.num_envs = n_envs
         env.single_observation_space = env.observation_space
         env.single_action_space = env.action_space
-        # env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
-        # env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
+        env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
+        env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
     else:
         make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
         make_fns = [make_fn for _ in range(n_envs)]
@@ -100,14 +104,14 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
 
-    env = StoreObs(env, n_envs=25, buf_size=1000)
-    env = ToTensor(env, device=device)
-    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
-    env = StoreReturns(env, buf_size=buf_size)
-    env = RewardSelector(env, obj=obj)
+    # env = StoreObs(env, n_envs=25, buf_size=1000)
+    # env = ToTensor(env, device=device)
+    # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+    # env = StoreReturns(env, buf_size=buf_size)
+    # env = RewardSelector(env, obj=obj)
 
-    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+    # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
     return env
 
@@ -174,7 +178,7 @@ class ToTensor(gym.Wrapper):
         obs, info = self.env.reset(*args, **kwargs)
         info["obs"] = torch.from_numpy(obs).to(self.device)
         # info["rew_ext"] = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-        # info["rew_alive"] = torch.ones_like(info["rew_ext"])
+        # info["rew_traj"] = torch.ones_like(info["rew_ext"])
         # info["term"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
         # info["trunc"] = torch.ones(self.num_envs, dtype=bool, device=self.device)
         # info["done"] = info["term"] | info["trunc"]
@@ -189,7 +193,7 @@ class ToTensor(gym.Wrapper):
         rew = rew.astype(np.float32)
         info["obs"] = torch.from_numpy(obs).to(self.device)
         info["rew_ext"] = torch.from_numpy(rew).to(self.device)
-        info["rew_alive"] = torch.ones_like(info["rew_ext"])
+        info["rew_traj"] = torch.ones_like(info["rew_ext"])
         info["term"] = torch.from_numpy(term).to(self.device)
         info["trunc"] = torch.from_numpy(trunc).to(self.device)
         info["done"] = info["term"] | info["trunc"]
@@ -222,9 +226,9 @@ class StoreReturns(gym.Wrapper):
         obs, rew, term, trunc, info = self.env.step(action)
 
         for key in info:
-            if not key.startswith("rew"):
+            if not key.startswith("rew_"):
                 continue
-            keyr = key.replace("rew", "ret")
+            keyr = key.replace("rew_", "ret_")
             if keyr not in self.key2running_ret:
                 self.key2running_ret[keyr] = torch.zeros_like(info[key])
                 self.key2past_rets[keyr] = []

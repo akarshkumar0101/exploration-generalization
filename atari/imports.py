@@ -13,9 +13,11 @@ from einops import rearrange, repeat, einsum
 from IPython.display import clear_output
 from torch import nn
 from tqdm.auto import tqdm
+import time
 
 from env_atari import *
 from agent_atari import *
+from buffers import *
 from time_contrastive import *
 
 import torchinfo
