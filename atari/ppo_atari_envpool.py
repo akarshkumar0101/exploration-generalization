@@ -148,6 +148,7 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = parse_args()
+    print(args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
