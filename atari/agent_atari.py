@@ -4,6 +4,10 @@ from torch import nn
 from einops import rearrange, repeat
 
 
+class NatureBackbone(nn.Module):
+    pass
+
+
 class CNNAgent(nn.Module):
     def __init__(self, obs_shape, n_acts):
         super().__init__()
@@ -32,7 +36,7 @@ class CNNAgent(nn.Module):
         torch.nn.init.orthogonal_(self.actor.weight, 0.01)
         torch.nn.init.orthogonal_(self.critic.weight, 1.0)
 
-    def forward(self, obs):
+    def forward_temp(self, obs):
         # obs.shape: b, t, c, h, w
 
         # logits.shape: b, n_acts
@@ -52,7 +56,7 @@ class CNNAgent(nn.Module):
                 obs[i_env, :i_step] = obs[i_env, [i_step]]
         return obs
 
-    def act(self, obs, act=None, done=None):
+    def forward(self, obs, act=None, done=None):
         # obs.shape: b, t, c, h, w
         # act.shape: b, t
         # done.shape: b, t
@@ -61,7 +65,7 @@ class CNNAgent(nn.Module):
         # values.shape: b, t
         b, t, c, h, w = obs.shape
         obs = self.calc_masked_obs(obs, done)
-        logits, values = self.forward(obs)
+        logits, values = self.forward_temp(obs)
         logits, values = repeat(logits, "b a -> b t a", t=t), repeat(values, "b -> b t", t=t)
         return torch.distributions.Categorical(logits=logits), values
 
@@ -104,10 +108,7 @@ class RandomAgent(nn.Module):
         super().__init__()
         self.n_acts = n_acts
 
-    def forward(self, obs):
-        return None
-
-    def act(self, obs, act=None, done=None):
+    def forward(self, obs, act=None, done=None):
         # obs.shape: b, t, c, h, w
         # act.shape: b, t
         # done.shape: b, t
@@ -117,7 +118,7 @@ class RandomAgent(nn.Module):
         b, t, c, h, w = obs.shape
         logits = torch.zeros((b, t, self.n_acts), device=obs.device)
         values = torch.zeros((b, t), device=obs.device)
-        return logits, values
+        return torch.distributions.Categorical(logits=logits), values
 
 
 if __name__ == "__main__":

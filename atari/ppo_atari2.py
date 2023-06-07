@@ -8,11 +8,10 @@ from distutils.util import strtobool
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import torchinfo
-from agent_atari import CNNAgent
+from agent_atari import CNNAgent, RandomAgent
 from buffers import Buffer, MultiBuffer
+from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
 
@@ -44,8 +43,8 @@ parser.add_argument("--n-envs", type=int, default=8, help="the number of paralle
 parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
 parser.add_argument("--batch-size", type=int, default=256, help="the batch size for training")
 parser.add_argument("--n-updates", type=int, default=16, help="gradient updates per collection")
-parser.add_argument("--lr", type=float, default=2.5e-4, help="the learning rate of the optimizer")
-# parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, help="Toggle learning rate annealing for policy and value networks")
+parser.add_argument("--lr", type=float, default=6e-4, help="the learning rate of the optimizer")
+parser.add_argument("--lr-schedule", type=lambda x: bool(strtobool(x)), default=True, help="use lr schedule warmup and cosine decay")
 parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
 parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
 parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
@@ -56,6 +55,7 @@ parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of t
 parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
 parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
 
+parser.add_argument("--arch", type=str, default="cnn", help="either cnn or gpt")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
 
@@ -73,19 +73,33 @@ def parse_args(*args, **kwargs):
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
 
-    # args.n_envs_per_id = args.n_envs // len(args.env_ids)
+    args.n_envs_per_id = args.n_envs // 1  # len(args.env_ids)
 
     args.collect_size = args.n_envs * args.n_steps
     # args.total_steps = args.total_steps // args.collect_size * args.collect_size
     args.n_collects = args.total_steps // args.collect_size
 
-    args.last_token_only = True  # if cnnagent, else False
-
+    args.last_token_only = True if args.arch == "cnn" else False
     return args
 
 
 # steps, updates, iterations
 # timesteps in env, updates to policy, iterations of training
+
+
+def get_lr(lr, i_collect, n_collects, lr_schedule=True):
+    assert i_collect <= n_collects
+    if not lr_schedule:
+        return lr
+    lr_min = lr / 10.0
+
+    n_warmup = n_collects // 100
+    if i_collect < n_warmup:
+        return lr * i_collect / n_warmup
+    decay_ratio = (i_collect - n_warmup) / (n_collects - n_warmup)
+    coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
+    assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
+    return lr_min + coeff * (lr - lr_min)
 
 
 def main(args):
@@ -110,22 +124,36 @@ def main(args):
     # env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
     # mbuffer_test.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
 
-    agent = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
-    torchinfo.summary(agent, input_size=[(args.batch_size, args.ctx_len, 1, 84, 84)], dtypes=[torch.float32], device=args.device)
+    if args.arch == "cnn":
+        agent = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
+    elif args.arch == "gpt":
+        agent = DecisionTransformer(args.ctx_len, 18, 4, 4, 4 * 64, 0.0, True).to(args.device)
+    elif args.arch=='rand':
+        agent = RandomAgent(18).to(args.device)
+    print("Agent Summary: ")
+    torchinfo.summary(
+        agent,
+        input_size=[(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        dtypes=[torch.float, torch.long, torch.bool],
+        device=args.device,
+    )
     if args.load_agent is not None:
         agent.load_state_dict(torch.load(args.load_agent))
-    # torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
-    # opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
-    opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}])
+
+    if args.arch == "cnn" or args.arch == "rand":
+        # opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
+        opt = torch.optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}])
+    elif args.arch == "gpt":
+        opt = agent.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
 
     start_time = time.time()
     dtime_env = 0.0
     dtime_inference = 0.0
     dtime_learning = 0.0
 
-    viz_slow = set(np.linspace(0, args.n_collects - 1, 10).astype(int))
-    viz_midd = set(np.linspace(0, args.n_collects - 1, 100).astype(int)).union(viz_slow)
-    viz_fast = set(np.linspace(0, args.n_collects - 1, 1000).astype(int)).union(viz_midd)
+    viz_slow = set(np.linspace(1, args.n_collects - 1, 10).astype(int))
+    viz_midd = set(np.linspace(1, args.n_collects - 1, 100).astype(int)).union(viz_slow)
+    viz_fast = set(np.linspace(1, args.n_collects - 1, 1000).astype(int)).union(viz_midd)
 
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
@@ -133,17 +161,17 @@ def main(args):
         mbuffer.calc_gae(args.gamma, args.gae_lambda)
         # mbuffer_test.collect(agent, args.ctx_len)
 
-        # if args.anneal_lr:  # Annealing the rate if instructed to do so.
-        #     frac = 1.0 - i_iter / args.n_updates
-        #     lrnow = frac * args.lr
-        #     opt.param_groups[0]["lr"] = lrnow
-
+        lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
+        for param_group in opt.param_groups:
+            param_group["lr"] = lr
         agent.train()
-        for i_update in range(args.n_updates):
+
+        time1 = time.time()
+        for _ in range(args.n_updates):
             batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
             obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
             dist_old, val_old = batch["dist"], batch["val"]
-            dist, val = agent.act(obs=obs, act=act, done=done)
+            dist, val = agent(obs=obs, act=act, done=done)
 
             if args.last_token_only:
                 dist = torch.distributions.Categorical(logits=dist.logits[:, -1])
@@ -179,55 +207,67 @@ def main(args):
 
             opt.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
             opt.step()
-
-            kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
-            if args.max_kl_div is not None and kl_div > args.max_kl_div:
-                break
 
             y_pred, y_true = val_old.flatten().cpu().numpy(), ret.flatten().cpu().numpy()
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+            kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
+            if args.max_kl_div is not None and kl_div > args.max_kl_div:
+                break
+
+        time2 = time.time()
+        dt_learn = time2 - time1
+        # ------------------- Logging ------------------- #
         data = {}
+        for env_id, env in zip([args.env_id], mbuffer.envs):
+            for key, val in env.key2past_rets.items():  # log returns
+                rets = torch.cat(val)
+                if len(rets) ==0:
+                    continue
+                if i_collect in viz_fast:  # log scalar
+                    data[f"charts/{env_id}_{key}"] = torch.cat(val).mean().item()
+                if i_collect in viz_midd:  # log histogram
+                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
+            if args.log_video and i_collect in viz_slow:  # log video
+                vid = np.stack(env.past_obs).copy()[-450:, :4]  # t, b, c, h, w
+                vid[:, :, :, -1, :] = 128
+                vid[:, :, :, :, -1] = 128
+                vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
+                data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
+
         if i_collect in viz_fast:  # fast logging, ex: scalars
+            data["meta/dt_const"] = mbuffer.buffers[0].dt_const
+            data["meta/dt_inf"] = mbuffer.buffers[0].dt_inf
+            data["meta/dt_env"] = mbuffer.buffers[0].dt_env
+            data["meta/dt_learn"] = dt_learn
             data["details/lr"] = opt.param_groups[0]["lr"]
-            data["details/value_loss"] = loss_v.item()
-            data["details/policy_loss"] = loss_pg.item()
+            data["details/loss_value"] = loss_v.item()
+            data["details/loss_policy"] = loss_pg.item()
             data["details/entropy"] = loss_entropy.item()
-            # data["details/kl_div"] = kl_div
+            data["details/perplexity"] = np.e ** loss_entropy.item()
+            data["details/kl_div"] = kl_div
             # data["details/clipfrac"] = np.mean(clipfracs)
             data["details/explained_variance"] = explained_var
             data["meta/SPS"] = i_collect * args.collect_size / (time.time() - start_time)
             data["meta/global_step"] = i_collect * args.collect_size
             # data["details/loss_tc"] = loss_tc.item()
-            for key, val in env.key2past_rets.items():
-                rets = torch.cat(val).tolist()
-                if len(rets) > 0:
-                    data[f"charts/{key}"] = np.mean(rets)
-                    data[f"charts_hist/{key}"] = wandb.Histogram(rets)  # TODO move to viz_midd
         if i_collect in viz_midd:  # midd loggin, ex: histograms
-            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy())
-            # data["details_hist/action"] = wandb.Histogram(b_actions.detach().cpu().numpy())
+            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy().flatten())
+            data["details_hist/action"] = wandb.Histogram(act.detach().cpu().numpy().flatten())
         if i_collect in viz_slow:  # slow logging, ex: videos
-            vid = np.stack(env.past_obs).copy()
-            vid[:, :, -1, :] = 0
-            vid[:, :, :, -1] = 0
-            vid = rearrange(vid, "t (H W) h w -> t (H h) (W w)", H=2, W=4)
-            data["media/vid"] = wandb.Video(rearrange(vid, "t h w -> t 1 h w"), fps=15)
             if args.save_agent is not None:  # save agent
                 print("Saving agent...")
                 os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
-                torch.save(agent.state_dict(), f"{args.save_agent}")
+                torch.save(agent.state_dict(), args.save_agent)
         if args.track and i_collect in viz_fast:  # tracking
             wandb.log(data, step=i_collect * args.collect_size)
-            plt.close("all")
+            # plt.close("all")
 
         keys_tqdm = ["charts/ret_ext", "meta/SPS"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
-
-    env.close()
 
 
 if __name__ == "__main__":

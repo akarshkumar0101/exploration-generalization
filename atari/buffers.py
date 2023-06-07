@@ -31,13 +31,7 @@ class Buffer:
         assert i_step <= self.n_steps
         if i_step < self.n_steps:
             idx = list(range(i_step + 1 - ctx_len, i_step + 1))
-            if i_step >= ctx_len - 1:
-                idx = list(range(i_step - ctx_len + 1, i_step + 1))
-                print(idx)
-            else:
-                idx = list(range(-ctx_len + i_step + 1, 0)) + list(range(0, i_step + 1))
-                print(idx)
-            obs, act, done = self.obss[idx], self.acts[idx[:-1]], self.dones[idx]
+            obs, act, done = self.obss[idx], self.acts[idx[:-1]], self.dones[idx] # this is what takes time...
         else:
             obs = torch.cat([self.obss[-ctx_len + 1 :], self.obs[None]], dim=0)
             act = self.acts[-ctx_len + 1 :]
@@ -45,31 +39,13 @@ class Buffer:
         obs = rearrange(obs, "t n ... -> n t ...")
         act = rearrange(act, "t n ... -> n t ...")
         done = rearrange(done, "t n ... -> n t ...")
-        return dict(obs=obs, act=act, done=done)
-
-    def _construct_agent_input2(self, i_step, ctx_len):
-        # only for use during inference bc that's the only time buffer rolls over (for first observation)
-        assert i_step <= self.n_steps
-        idx = range(i_step + 1 - ctx_len, i_step + 1)
-        if i_step < self.n_steps:
-            if i_step >= ctx_len - 1:
-                idx = list(range(i_step - ctx_len + 1, i_step + 1))
-            else:
-                idx = list(range(-ctx_len + i_step + 1, 0)) + list(range(0, i_step + 1))
-            obs, act, done = self.obss[idx], self.acts[idx[:-1]], self.dones[idx]
-        else:
-            obs = torch.cat([self.obss[-ctx_len + 1 :], self.obs[None]], dim=0)
-            act = self.acts[-ctx_len + 1 :]
-            done = torch.cat([self.dones[-ctx_len + 1 :], self.done[None]], dim=0)
-        obs = rearrange(obs, "t n ... -> n t ...")
-        act = rearrange(act, "t n ... -> n t ...")
-        done = rearrange(done, "t n ... -> n t ...")
+        # return dict(obs=torch.zeros(8, 4, 1, 84, 84, device='mps'), act=torch.zeros(8, 3, dtype=torch.int64, device='mps'), done=torch.zeros(8, 4, dtype=bool, device='mps'))
         return dict(obs=obs, act=act, done=done)
 
     @torch.no_grad()
     def collect(self, agent, ctx_len):
         agent.eval()
-        dt_const, dt_inf, dt_env = 0.0, 0.0, 0.0
+        self.dt_const, self.dt_inf, self.dt_env = 0.0, 0.0, 0.0
         for i_step in range(self.n_steps):
             self.obss[i_step] = self.obs
             self.dones[i_step] = self.done
@@ -78,7 +54,7 @@ class Buffer:
             agent_input = self._construct_agent_input(i_step, ctx_len)
             time2 = time.time()
 
-            self.dist, self.value = agent.act(**agent_input)
+            self.dist, self.value = agent(**agent_input)
             # only get output from last token
             self.dist, self.value = torch.distributions.Categorical(logits=self.dist.logits[:, -1]), self.value[:, -1]
             time3 = time.time()
@@ -93,11 +69,11 @@ class Buffer:
             self.logits[i_step] = self.dist.logits
             self.rews[i_step] = torch.as_tensor(reward).to(self.device)
 
-            dt_const += time2 - time1
-            dt_inf += time3 - time2
-            dt_env += time4 - time3
-        print(f"collect: dt_const={dt_const:.3f}, dt_inf={dt_inf:.3f}, dt_env={dt_env:.3f}")
-        _, self.value = agent.act(**self._construct_agent_input(i_step + 1, ctx_len))  # calculate one more value
+            self.dt_const += time2 - time1
+            self.dt_inf += time3 - time2
+            self.dt_env += time4 - time3
+        # print(f"collect: dt_const={self.dt_const:.3f}, dt_inf={self.dt_inf:.3f}, dt_env={self.dt_env:.3f}")
+        _, self.value = agent(**self._construct_agent_input(i_step + 1, ctx_len))  # calculate one more value
         self.value = self.value[:, -1]
 
         self.dists = torch.distributions.Categorical(logits=self.logits)

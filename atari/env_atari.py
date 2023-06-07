@@ -28,7 +28,7 @@ def make_env_single(env_id="Breakout", frame_stack=4):
     env = gym.make(f"ALE/{env_id}-v5", frameskip=1, full_action_space=True)
     # TODO: reduce space of actions
     env = gym.wrappers.AtariPreprocessing(env, terminal_on_life_loss=True)
-
+    env = gym.wrappers.TransformReward(env, lambda reward: np.sign(reward))
     env = gym.wrappers.FrameStack(env, num_stack=frame_stack)
     return env
 
@@ -70,20 +70,20 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
             # batch_size=None,
             # num_threads=None,
             seed=seed,
-            max_episode_steps=27000,
-            img_height=84,
-            img_width=84,
+            # max_episode_steps=27000,
+            # img_height=84,
+            # img_width=84,
             stack_num=1,
             gray_scale=True,
             frame_skip=4,
             noop_max=30,
             episodic_life=True,
             zero_discount_on_life_loss=False,
-            reward_clip=False,
+            reward_clip=True,
             repeat_action_probability=0,
             use_inter_area_resize=True,
             use_fire_reset=True,
-            full_action_space=True
+            full_action_space=True,
         )
     else:
         make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
@@ -144,19 +144,19 @@ class RecordEpisodeStatistics(gym.Wrapper):
 
 
 class StoreObs(gym.Wrapper):
-    def __init__(self, env, n_envs=25, buf_size=1000):
+    def __init__(self, env, n_envs=4, buf_size=450):
         super().__init__(env)
         self.n_envs, self.buf_size = n_envs, buf_size
         self.past_obs = []
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        self.past_obs.append(obs[: self.n_envs, -1])
+        self.past_obs.append(obs[: self.n_envs])
         return obs, info
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        self.past_obs.append(obs[: self.n_envs, -1])
+        self.past_obs.append(obs[: self.n_envs])
         self.past_obs = self.past_obs[-self.buf_size :]
         info["past_obs"] = self.past_obs
         return obs, rew, term, trunc, info

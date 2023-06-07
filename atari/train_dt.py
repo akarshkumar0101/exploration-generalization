@@ -137,7 +137,7 @@ def main(args):
     print(sum(p.numel() for p in dtgpt.parameters()))
 
     # opt = torch.optim.Adam(dtgpt.parameters(), lr=args.lr)
-    opt = dtgpt.configure_optimizers(0.0, args.lr, (0.9, 0.95), args.device)
+    opt = dtgpt.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
 
     buffer = Buffer(args, env, agent)
 

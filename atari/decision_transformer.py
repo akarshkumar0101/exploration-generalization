@@ -164,7 +164,7 @@ class DecisionTransformer(nn.Module):
             if pn.endswith("c_proj.weight"):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layers))
 
-    def forward(self, obs, rtg, act, done=None):
+    def forward_temp(self, obs, rtg, act, done=None):
         # obs: (b, t, c, 84, 84)
         # rtg: (b, t)
         # act: (b, t)
@@ -206,18 +206,19 @@ class DecisionTransformer(nn.Module):
         logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
         return logits, values[..., 0]
 
-    def act(self, obs, act=None, done=None):
+    def forward(self, obs, act=None, done=None):
         # obs.shape: b, t, c, h, w
         # act.shape: b, t (or b, t-1)
         # done.shape: b, t
 
         # logits.shape: b, t, n_acts
         # values.shape: b, t
+        # print the obs, act, done shape and device, and dtype
         if act.shape[1] == obs.shape[1] - 1:  # pad action
             noaction = act[:, [-1]].clone()
             act = torch.cat([act, noaction], dim=-1)
         # mask = self.create_mask(done, toks=3)
-        logits, values = self.forward(rtg=None, obs=obs, act=act)
+        logits, values = self.forward_temp(rtg=None, obs=obs, act=act)
         return torch.distributions.Categorical(logits=logits), values
 
     def create_mask(self, done, toks=1):
@@ -228,7 +229,7 @@ class DecisionTransformer(nn.Module):
             mask[done[i], i * toks :, : i * toks] = False
         return mask
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def create_optimizer(self, weight_decay, lr, betas=(0.9, 0.95), device=None):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
@@ -244,9 +245,9 @@ class DecisionTransformer(nn.Module):
         print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and device_type == "cuda"
+        use_fused = fused_available and device == "cuda"
         extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        optimizer = torch.optim.AdamW(optim_groups, lr=lr, betas=betas, **extra_args)
         print(f"using fused AdamW: {use_fused}")
         return optimizer
 
