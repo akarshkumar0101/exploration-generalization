@@ -238,6 +238,7 @@ def main(args):
                 vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
+        print(f'dt_const: {mbuffer.buffers[0].dt_const}, dt_inf: {mbuffer.buffers[0].dt_inf}, dt_env: {mbuffer.buffers[0].dt_env}, dt_learn: {dt_learn}')
         if i_collect in viz_fast:  # fast logging, ex: scalars
             data["meta/dt_const"] = mbuffer.buffers[0].dt_const
             data["meta/dt_inf"] = mbuffer.buffers[0].dt_inf
