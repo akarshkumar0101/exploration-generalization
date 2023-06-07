@@ -87,8 +87,8 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
         )
         env.single_observation_space = env.observation_space
         env.single_action_space = env.action_space
-        env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
-        env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
+        # env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
+        # env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
     else:
         make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
         make_fns = [make_fn for _ in range(n_envs)]
