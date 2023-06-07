@@ -128,7 +128,7 @@ def main(args):
         agent = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
     elif args.arch == "gpt":
         agent = DecisionTransformer(args.ctx_len, 18, 4, 4, 4 * 64, 0.0, True).to(args.device)
-    elif args.arch=='rand':
+    elif args.arch == "rand":
         agent = RandomAgent(18).to(args.device)
     print("Agent Summary: ")
     torchinfo.summary(
@@ -147,9 +147,6 @@ def main(args):
         opt = agent.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
 
     start_time = time.time()
-    dtime_env = 0.0
-    dtime_inference = 0.0
-    dtime_learning = 0.0
 
     viz_slow = set(np.linspace(1, args.n_collects - 1, 10).astype(int))
     viz_midd = set(np.linspace(1, args.n_collects - 1, 100).astype(int)).union(viz_slow)
@@ -157,8 +154,13 @@ def main(args):
 
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
+        dt_collect, dt_gae, dt_gen_batch, dt_forward, dt_loss, dt_backward = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+        time0 = time.time()
         mbuffer.collect(agent, args.ctx_len)
+        time1 = time.time()
         mbuffer.calc_gae(args.gamma, args.gae_lambda)
+        time2 = time.time()
         # mbuffer_test.collect(agent, args.ctx_len)
 
         lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
@@ -166,12 +168,14 @@ def main(args):
             param_group["lr"] = lr
         agent.train()
 
-        time1 = time.time()
         for _ in range(args.n_updates):
+            time3 = time.time()
             batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
+            time4 = time.time()
             obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
             dist_old, val_old = batch["dist"], batch["val"]
             dist, val = agent(obs=obs, act=act, done=done)
+            time5 = time.time()
 
             if args.last_token_only:
                 dist = torch.distributions.Categorical(logits=dist.logits[:, -1])
@@ -200,6 +204,7 @@ def main(args):
             loss_entropy = entropy.mean()
 
             loss = loss_pg + loss_v * args.vf_coef - args.ent_coef * loss_entropy
+            time6 = time.time()
 
             # obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
             # loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
@@ -209,6 +214,7 @@ def main(args):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
             opt.step()
+            time7 = time.time()
 
             y_pred, y_true = val_old.flatten().cpu().numpy(), ret.flatten().cpu().numpy()
             var_y = np.var(y_true)
@@ -218,19 +224,23 @@ def main(args):
             if args.max_kl_div is not None and kl_div > args.max_kl_div:
                 break
 
-        time2 = time.time()
-        dt_learn = time2 - time1
+            dt_gen_batch += time4 - time3
+            dt_forward += time5 - time4
+            dt_loss += time6 - time5
+            dt_backward += time7 - time6
+
+        dt_collect += time1 - time0
+        dt_gae += time2 - time1
+
         # ------------------- Logging ------------------- #
         data = {}
         for env_id, env in zip([args.env_id], mbuffer.envs):
             for key, val in env.key2past_rets.items():  # log returns
-                rets = torch.cat(val)
-                if len(rets) ==0:
-                    continue
-                if i_collect in viz_fast:  # log scalar
-                    data[f"charts/{env_id}_{key}"] = torch.cat(val).mean().item()
-                if i_collect in viz_midd:  # log histogram
-                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
+                rets = torch.cat(val).tolist()
+                if len(rets) > 0 and i_collect in viz_fast:  # log scalar
+                    data[f"charts/{env_id}_{key}"] = np.mean(rets)
+                if len(rets) > 0 and i_collect in viz_midd:  # log histogram
+                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(rets)
             if args.log_video and i_collect in viz_slow:  # log video
                 vid = np.stack(env.past_obs).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
@@ -238,12 +248,18 @@ def main(args):
                 vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
-        print(f'dt_const: {mbuffer.buffers[0].dt_const}, dt_inf: {mbuffer.buffers[0].dt_inf}, dt_env: {mbuffer.buffers[0].dt_env}, dt_learn: {dt_learn}')
+        # print(f"dt_const: {mbuffer.buffers[0].dt_const}, dt_inf: {mbuffer.buffers[0].dt_inf}, dt_env: {mbuffer.buffers[0].dt_env}, dt_learn: {dt_learn}")
         if i_collect in viz_fast:  # fast logging, ex: scalars
             data["meta/dt_const"] = mbuffer.buffers[0].dt_const
             data["meta/dt_inf"] = mbuffer.buffers[0].dt_inf
             data["meta/dt_env"] = mbuffer.buffers[0].dt_env
-            data["meta/dt_learn"] = dt_learn
+            data["meta/dt_collect"] = dt_collect
+            data["meta/dt_gae"] = dt_gae
+            data["meta/dt_gen_batch"] = dt_gen_batch
+            data["meta/dt_forward"] = dt_forward
+            data["meta/dt_loss"] = dt_loss
+            data["meta/dt_backward"] = dt_backward
+
             data["details/lr"] = opt.param_groups[0]["lr"]
             data["details/loss_value"] = loss_v.item()
             data["details/loss_policy"] = loss_pg.item()

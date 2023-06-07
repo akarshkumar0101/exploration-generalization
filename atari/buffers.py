@@ -28,10 +28,14 @@ class Buffer:
 
     def _construct_agent_input(self, i_step, ctx_len):
         # only for use during inference bc that's the only time buffer rolls over (for first observation)
-        assert i_step <= self.n_steps
-        if i_step < self.n_steps:
+        assert i_step >= 0 and i_step <= self.n_steps
+        if i_step < ctx_len - 1:
             idx = list(range(i_step + 1 - ctx_len, i_step + 1))
-            obs, act, done = self.obss[idx], self.acts[idx[:-1]], self.dones[idx] # this is what takes time...
+            obs, act, done = self.obss[idx], self.acts[idx[:-1]], self.dones[idx]  # this is what takes time...
+        elif i_step < self.n_steps:
+            obs = self.obss[i_step + 1 - ctx_len : i_step + 1]  # indexing with slices is *much* faster than indexing with lists
+            act = self.acts[i_step + 1 - ctx_len : i_step]
+            done = self.dones[i_step + 1 - ctx_len : i_step + 1]
         else:
             obs = torch.cat([self.obss[-ctx_len + 1 :], self.obs[None]], dim=0)
             act = self.acts[-ctx_len + 1 :]
@@ -39,7 +43,7 @@ class Buffer:
         obs = rearrange(obs, "t n ... -> n t ...")
         act = rearrange(act, "t n ... -> n t ...")
         done = rearrange(done, "t n ... -> n t ...")
-        # return dict(obs=torch.zeros(8, 4, 1, 84, 84, device='mps'), act=torch.zeros(8, 3, dtype=torch.int64, device='mps'), done=torch.zeros(8, 4, dtype=bool, device='mps'))
+        # return dict(obs=torch.zeros(8, 4, 1, 84, 84, device="mps"), act=torch.zeros(8, 3, dtype=torch.int64, device="mps"), done=torch.zeros(8, 4, dtype=bool, device="mps"))
         return dict(obs=obs, act=act, done=done)
 
     @torch.no_grad()
@@ -93,22 +97,80 @@ class Buffer:
             self.advs[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
         self.rets = self.advs + self.vals
 
-    def generate_batch(self, batch_size, ctx_len):
-        i_env = torch.randint(0, self.n_envs, (batch_size,), device=self.device)
-        i_step = torch.randint(0, self.n_steps + 1 - ctx_len, (batch_size,), device=self.device)
+    def generate_batch_naive1(self, batch_size, ctx_len):
+        # naive because for loop over batch
+        i_env = torch.randint(0, self.n_envs, (batch_size,), device="cpu").tolist()
+        i_step = torch.randint(0, self.n_steps + 1 - ctx_len, (batch_size,), device="cpu").tolist()
 
         batch = {}
-        batch["obs"] = torch.stack([self.obss[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["done"] = torch.stack([self.dones[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["logits"] = torch.stack([self.logits[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
+        batch["obs"] = torch.stack([self.obss[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["done"] = torch.stack([self.dones[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["logits"] = torch.stack([self.logits[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
         batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
-        batch["logprob"] = torch.stack([self.logprobs[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["act"] = torch.stack([self.acts[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["val"] = torch.stack([self.vals[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["rew"] = torch.stack([self.rews[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["adv"] = torch.stack([self.advs[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        batch["ret"] = torch.stack([self.rets[i : i + ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
+        batch["logprob"] = torch.stack([self.logprobs[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["act"] = torch.stack([self.acts[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["val"] = torch.stack([self.vals[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["rew"] = torch.stack([self.rews[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["adv"] = torch.stack([self.advs[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
+        batch["ret"] = torch.stack([self.rets[i : i + ctx_len, j] for i, j in zip(i_step, i_env)])
         return batch
+
+    def generate_batch_naive2(self, batch_size, ctx_len):
+        # this flattens the 2d space into a 1d space and indexes into it and then unflattens it
+        # naive because indexing with arrays instead of slices
+        i_flat = self.generate_batch_i_flat(batch_size, ctx_len)
+        batch = {}
+        batch["obs"] = self.index_into_flat(self.obss, i_flat, batch_size)
+        batch["done"] = self.index_into_flat(self.dones, i_flat, batch_size)
+        batch["logits"] = self.index_into_flat(self.logits, i_flat, batch_size)
+        batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
+        batch["logprob"] = self.index_into_flat(self.logprobs, i_flat, batch_size)
+        batch["act"] = self.index_into_flat(self.acts, i_flat, batch_size)
+        batch["val"] = self.index_into_flat(self.vals, i_flat, batch_size)
+        batch["rew"] = self.index_into_flat(self.rews, i_flat, batch_size)
+        batch["adv"] = self.index_into_flat(self.advs, i_flat, batch_size)
+        batch["ret"] = self.index_into_flat(self.rets, i_flat, batch_size)
+        return batch
+
+    def generate_batch_i_flat(self, batch_size, ctx_len):
+        i_env = torch.randint(0, self.n_envs, (batch_size,), device=self.device)
+        i_step = torch.randint(0, self.n_steps + 1 - ctx_len, (batch_size,), device=self.device)
+        i_env = i_env[:, None] + torch.zeros(ctx_len, dtype=i_env.dtype, device=self.device)
+        i_step = i_step[:, None] + torch.arange(ctx_len, device=self.device)
+        i_env, i_step = i_env.flatten(), i_step.flatten()
+        # i_flat = i_env * self.n_steps + i_step
+        i_flat = i_step * self.n_envs + i_env
+        return i_flat
+
+    def index_into_flat(self, a, i_flat, batch_size):
+        a = rearrange(a, "t b ... -> (t b) ...")
+        a = a[i_flat]
+        a = rearrange(a, "(b t) ... -> b t ...", b=batch_size)
+        return a
+
+    def generate_batch(self, batch_size, ctx_len):
+        # optimal because it maximizes slicing
+        assert batch_size % self.n_envs == 0
+
+        i_step = torch.randint(0, self.n_steps + 1 - ctx_len, (batch_size // self.n_envs,), device="cpu").tolist()
+
+        batch = {}
+        batch["obs"] = self.index_into_temp(self.obss, i_step, ctx_len)
+        batch["done"] = self.index_into_temp(self.dones, i_step, ctx_len)
+        batch["logits"] = self.index_into_temp(self.logits, i_step, ctx_len)
+        batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
+        batch["logprob"] = self.index_into_temp(self.logprobs, i_step, ctx_len)
+        batch["act"] = self.index_into_temp(self.acts, i_step, ctx_len)
+        batch["val"] = self.index_into_temp(self.vals, i_step, ctx_len)
+        batch["rew"] = self.index_into_temp(self.rews, i_step, ctx_len)
+        batch["adv"] = self.index_into_temp(self.advs, i_step, ctx_len)
+        batch["ret"] = self.index_into_temp(self.rets, i_step, ctx_len)
+        return batch
+
+    def index_into_temp(self, a, i_step, ctx_len):
+        a = torch.cat([a[i : i + ctx_len, :] for i in i_step], dim=1)
+        a = rearrange(a, "t b ... -> b t ...")
+        return a
 
 
 class MultiBuffer:

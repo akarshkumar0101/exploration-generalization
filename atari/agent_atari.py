@@ -64,7 +64,7 @@ class CNNAgent(nn.Module):
         # logits.shape: b, t, n_acts
         # values.shape: b, t
         b, t, c, h, w = obs.shape
-        obs = self.calc_masked_obs(obs, done)
+        # obs = self.calc_masked_obs(obs, done) # TODO: check if this is really needed
         logits, values = self.forward_temp(obs)
         logits, values = repeat(logits, "b a -> b t a", t=t), repeat(values, "b -> b t", t=t)
         return torch.distributions.Categorical(logits=logits), values

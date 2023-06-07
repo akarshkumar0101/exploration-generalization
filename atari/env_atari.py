@@ -6,6 +6,7 @@ import torch
 
 try:
     import envpool
+
     has_envpool = True
     print("envpool found!")
 except ModuleNotFoundError:
@@ -47,7 +48,6 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
     env = StoreReturns(env, buf_size=buf_size)
 
     env = RewardSelector(env, obj=obj)
-
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
@@ -60,14 +60,16 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
 
     return env
 
+
 class NoArgsReset(gym.Wrapper):
     def reset(self, *args, **kwargs):
         return self.env.reset()
-        
+
+
 def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
     if has_envpool:
         env = envpool.make_gymnasium(
-            task_id=f'{env_id}-v5',
+            task_id=f"{env_id}-v5",
             num_envs=n_envs,
             # batch_size=None,
             # num_threads=None,
@@ -104,14 +106,14 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
 
-    # env = StoreObs(env, n_envs=25, buf_size=1000)
-    # env = ToTensor(env, device=device)
-    # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
-    # env = StoreReturns(env, buf_size=buf_size)
-    # env = RewardSelector(env, obj=obj)
+    env = StoreObs(env, n_envs=25, buf_size=1000)
+    env = ToTensor(env, device=device)
+    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+    env = StoreReturns(env, buf_size=buf_size)
+    env = RewardSelector(env, obj=obj)
 
-    # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-    # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
     return env
 
@@ -234,10 +236,9 @@ class StoreReturns(gym.Wrapper):
                 self.key2past_rets[keyr] = []
             self.key2running_ret[keyr] += info[key]
 
-            self.key2past_rets[keyr].append(self.key2running_ret[keyr][info["done"]])
+            self.key2past_rets[keyr].append(self.key2running_ret[keyr][info["done"]].clone())
             self.key2past_rets[keyr] = self.key2past_rets[keyr][-self.buf_size :]
             self.key2running_ret[keyr][info["done"]] = 0.0
-
         return obs, rew, term, trunc, info
 
 
