@@ -85,10 +85,20 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
             use_fire_reset=True,
             full_action_space=True,
         )
+        env.single_observation_space = env.observation_space
+        env.single_action_space = env.action_space
+        env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
+        env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
     else:
         make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
         make_fns = [make_fn for _ in range(n_envs)]
         env = gym.vector.SyncVectorEnv(make_fns)
+        for i, envi in enumerate(env.envs):
+            envi.seed(seed + i * 1000)
+            envi.action_space.seed(seed + i * 1000)
+            envi.observation_space.seed(seed + i * 1000)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
 
     env = StoreObs(env, n_envs=25, buf_size=1000)
     env = ToTensor(env, device=device)
@@ -98,13 +108,6 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
 
     env = gym.wrappers.NormalizeReward(env, gamma=gamma)
     env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-
-    for i, envi in enumerate(env.envs):
-        envi.seed(seed + i * 1000)
-        envi.action_space.seed(seed + i * 1000)
-        envi.observation_space.seed(seed + i * 1000)
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
 
     return env
 
