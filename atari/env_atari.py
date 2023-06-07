@@ -153,7 +153,7 @@ class StoreObs(gym.Wrapper):
         self.past_obs = []
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset()
+        obs, info = self.env.reset(*args, **kwargs)
         self.past_obs.append(obs[: self.n_envs])
         return obs, info
 

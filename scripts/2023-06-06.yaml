@@ -1,0 +1,26 @@
+python_file: ppo_atari2.py
+
+# --track: True
+--project: egb-atari-2
+--name: "{arch}-{env_id}-{obj}-{ctx_len}-{seed}"
+
+# --device: cuda
+--device: mps
+--seed: [0, 1, 2]
+
+# --log-video: True
+
+--env-id: [Pong, Breakout, Boxing, BeamRider]
+--obj: ext
+--ctx-len: 4
+--total-steps: 10e6
+--n-envs: 8
+--n-steps: 128
+--batch-size: 256
+--n-updates: 16
+--lr: 6e-4
+--ent-coef: 0.01
+
+# --arch: [cnn, gpt]
+--arch: [cnn]
+# --save-agent: ../data/{project}/{name}/agent.pt

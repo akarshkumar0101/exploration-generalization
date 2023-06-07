@@ -75,11 +75,23 @@ if __name__ == "__main__":
         datai = datai.copy()
         file = datai["python_file"]
         del datai["python_file"]
-        commands.append(["python"] + [file] + [f"{key}={val}" for key, val in datai.items()])
+
+        command = ["python"] + [file]
+        for key, val in datai.items():
+            assert isinstance(val, (list, str, bool, int, float))
+            if isinstance(val, list):
+                command.append(f'{key} {" ".join(val)}')
+            else:
+                if isinstance(val, str) and " " in val:
+                    command.append(f'{key}="{val}"')
+                else:
+                    command.append(f'{key}={val}')
+        commands.append(command)
     n, l = len(commands), len(commands[0])
     str_lens = [max([len(command[i]) for command in commands]) for i in range(l)]
     commands = [" ".join([command[i].ljust(str_lens[i]) for i in range(l)]) for command in commands]
     commands = "\n".join(commands)
+    print(commands)
 
     with open(args.file.replace(".yaml", ".sh"), "w") as f:
         f.write(commands)
