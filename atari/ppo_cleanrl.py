@@ -271,6 +271,7 @@ if __name__ == "__main__":
     idm = IDM(envs.single_action_space.n).to(device)
 
     if args.obj == "int":
+        print('USING INTRINSIC REWARD')
         envs = EpisodicBonus(envs, idm, device)
 
     envs = RecordEpisodeStatistics(envs)
@@ -331,7 +332,7 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/avg_episodic_return", np.average(avg_returns), global_step)
                     writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
                     writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
-        print(rewards.shape, rewards.mean(), rewards.std(), rewards.min(), rewards.max())
+        print(rewards.shape, rewards.mean().item(), rewards.std().item(), rewards.min().item(), rewards.max().item())
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
