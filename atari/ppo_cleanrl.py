@@ -89,6 +89,7 @@ class EpisodicBonus(gym.Wrapper):
         self.encode_fn = encode_fn
         self.device = device
         self.rew_norm = normalize.RunningMeanStd(shape=())
+        self.dist_norm = normalize.RunningMeanStd(shape=10)
 
     def reset(self, *args, **kwargs):
         obs = self.env.reset(*args, **kwargs)
@@ -113,12 +114,16 @@ class EpisodicBonus(gym.Wrapper):
                 continue
             memory = torch.stack(memory)  # m, d
             d = (latent - memory).norm(dim=-1)  # m
-            d = d.topk(k=10, largest=False).values  # k
+            d = d.topk(k=10, largest=False).values.cpu().numpy()  # k
+            # rew[i] = d.mean().item()
+
+            self.dist_norm.update(d[None, :])
+            d = d/self.dist_norm.mean
             rew[i] = d.mean().item()
 
-        self.rew_norm.update(rew)
-        if self.rew_norm.mean > 0:
-            rew = rew / self.rew_norm.mean
+        # self.rew_norm.update(rew)
+        # if self.rew_norm.mean > 0:
+        #     rew = rew / self.rew_norm.mean
         return obs, rew, done, info
 
 
@@ -140,7 +145,8 @@ class RecordEpisodeStatistics(gym.Wrapper):
 
     def step(self, action):
         observations, rewards, dones, infos = super().step(action)
-        self.episode_returns += infos["reward"]
+        # self.episode_returns += infos["reward"]
+        self.episode_returns += rewards
         self.episode_lengths += 1
         self.returned_episode_returns[:] = self.episode_returns
         self.returned_episode_lengths[:] = self.episode_lengths
@@ -325,7 +331,7 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/avg_episodic_return", np.average(avg_returns), global_step)
                     writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
                     writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
-
+        print(rewards.shape, rewards.mean(), rewards.std(), rewards.min(), rewards.max())
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
