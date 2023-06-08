@@ -119,7 +119,8 @@ class EpisodicBonus(gym.Wrapper):
             rew[i] = d.mean().item()
 
         self.rew_norm.update(rew)
-        rew = rew / self.rew_norm.mean
+        if self.rew_norm.mean > 0:
+            rew = rew / self.rew_norm.mean
         return obs, rew, done, info
 
 
