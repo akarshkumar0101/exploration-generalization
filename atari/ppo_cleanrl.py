@@ -92,7 +92,7 @@ class EpisodicBonus(gym.Wrapper):
 
     def reset(self, *args, **kwargs):
         obs = self.env.reset(*args, **kwargs)
-        self.memories = [collections.deque(maxlen=30000) for _ in range(self.n_envs)]
+        self.memories = [collections.deque(maxlen=30000) for _ in range(self.num_envs)]
         return obs, info
 
     @torch.no_grad()
