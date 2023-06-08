@@ -106,6 +106,9 @@ class EpisodicBonus(gym.Wrapper):
         x = torch.from_numpy(obs[:, [-1]]).to(self.device)
         latents = self.encode_fn(x)  # n, d
         for i, (latent, memory) in enumerate(zip(latents, self.memories)):
+            if len(memory) == 0:
+                rew[i] = 0.0
+                continue
             memory = torch.stack(list(memory))  # m, d
             self.memories[i].append(latent)
             if len(memory) < 10:
