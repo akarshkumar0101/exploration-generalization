@@ -71,11 +71,53 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    parser.add_argument("--obj", type=str, default="ext")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     # fmt: on
     return args
+
+
+import gymnasium.wrappers.normalize as normalize
+import collections
+
+
+class EpisodicBonus(gym.Wrapper):
+    def __init__(self, env, encode_fn, device="cpu"):
+        super().__init__(env)
+        self.encode_fn = encode_fn
+        self.device = device
+        self.rew_norm = normalize.RunningMeanStd(shape=())
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        self.memories = [collections.deque(maxlen=30000) for _ in range(self.n_envs)]
+        return obs, info
+
+    @torch.no_grad()
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+
+        for i, d in enumerate(term | trunc):
+            if d:
+                self.memories[i].clear()
+
+        x = torch.from_numpy(obs).to(self.device)
+        latents = self.encode_fn(x)  # n, d
+        for i, (latent, memory) in enumerate(zip(latents, self.memories)):
+            memory = torch.stack(list(memory))  # m, d
+            self.memories[i].append(latent)
+            if len(memory) < 10:
+                rew[i] = 0.0
+                continue
+            d = (latent - memory).norm(dim=-1)  # m
+            d = d.topk(k=10, largest=False).values  # k
+            rew[i] = d.mean().item()
+
+        self.rew_norm.update(rew)
+        rew = (rew - self.rew_norm.mean) / (np.sqrt(self.rew_norm.var) + self.rew_norm.epsilon)
+        return obs, rew, term, trunc, info
 
 
 class RecordEpisodeStatistics(gym.Wrapper):
@@ -216,11 +258,16 @@ if __name__ == "__main__":
     envs.num_envs = args.num_envs
     envs.single_action_space = envs.action_space
     envs.single_observation_space = envs.observation_space
-    envs = RecordEpisodeStatistics(envs)
-    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
     idm = IDM(envs.single_action_space.n).to(device)
+
+    if args.obj == "int":
+        envs = EpisodicBonus(envs, idm, device)
+
+    envs = RecordEpisodeStatistics(envs)
+    assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
+
     # optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     optimizer = optim.Adam(
         [
