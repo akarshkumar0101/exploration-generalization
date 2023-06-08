@@ -346,8 +346,8 @@ if __name__ == "__main__":
 
                 # obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
                 i_step = torch.randint(low=0, high=args.num_steps - 1, size=(args.minibatch_size // args.num_envs,)).tolist()
-                idm_obs_now = torch.cat([obs[i] for i in i_step], dim=0)
-                idm_obs_nxt = torch.cat([obs[i + 1] for i in i_step], dim=0)
+                idm_obs_now = torch.cat([obs[i, :, [-1]] for i in i_step], dim=0)
+                idm_obs_nxt = torch.cat([obs[i + 1, :, [-1]] for i in i_step], dim=0)
                 idm_act_now = torch.cat([actions[i] for i in i_step], dim=0)
                 logits_idm = idm.inverse_pred(idm_obs_now, idm_obs_nxt)
                 loss_idm = torch.nn.functional.cross_entropy(logits_idm, idm_act_now.long(), reduction="none").mean()
