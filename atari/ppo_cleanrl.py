@@ -119,7 +119,7 @@ class EpisodicBonus(gym.Wrapper):
             rew[i] = d.mean().item()
 
         self.rew_norm.update(rew)
-        rew = (rew - self.rew_norm.mean) / (np.sqrt(self.rew_norm.var) + 1e-5)
+        rew = rew / self.rew_norm.mean
         return obs, rew, done, info
 
 
@@ -327,6 +327,7 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
                     writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
 
+        print(rewards.mean(), rewards.std(), rewards.shape)
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
