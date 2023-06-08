@@ -147,6 +147,34 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
+class IDM(nn.Module):
+    def __init__(self, n_acts):
+        super().__init__()
+        self.network = nn.Sequential(
+            layer_init(nn.Conv2d(1, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 32)),
+            nn.ReLU(),
+        )
+        self.inverse_head = nn.Sequential(
+            nn.Linear(32 * 2, 128),
+            nn.ReLU(),
+            nn.Linear(128, n_acts),
+        )
+
+    def forward(self, obs):
+        return self.network(obs / 255.0)
+
+    def inverse_pred(self, obs, next_obs):
+        latent1, latent2 = self(obs), self(next_obs)
+        return self.inverse_head(torch.cat([latent1, latent2], dim=-1))
+
+
 if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -192,7 +220,14 @@ if __name__ == "__main__":
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    idm = IDM(envs.single_action_space.n).to(device)
+    # optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    optimizer = optim.Adam(
+        [
+            {"params": agent.parameters(), "lr": args.learning_rate, "eps": 1e-5},
+            {"params": idm.parameters(), "lr": args.learning_rate, "eps": 1e-5},
+        ]
+    )
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
@@ -309,12 +344,21 @@ if __name__ == "__main__":
                 else:
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
+                # obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
+                i_step = torch.randint(low=0, high=args.num_steps - 1, size=(args.minibatch_size // args.num_envs,)).tolist()
+                idm_obs_now = torch.cat([obs[i] for i in i_step], dim=0)
+                idm_obs_nxt = torch.cat([obs[i + 1] for i in i_step], dim=0)
+                idm_act_now = torch.cat([actions[i] for i in i_step], dim=0)
+                logits_idm = idm.inverse_pred(idm_obs_now, idm_obs_nxt)
+                loss_idm = torch.nn.functional.cross_entropy(logits_idm, idm_act_now.long(), reduction="none").mean()
+
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_idm
 
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                nn.utils.clip_grad_norm_(idm.parameters(), args.max_grad_norm)
                 optimizer.step()
 
             if args.target_kl is not None:
@@ -329,6 +373,7 @@ if __name__ == "__main__":
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        writer.add_scalar("losses/idm_loss", loss_idm.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
