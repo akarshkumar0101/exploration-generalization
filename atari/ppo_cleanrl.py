@@ -91,15 +91,15 @@ class EpisodicBonus(gym.Wrapper):
         self.rew_norm = normalize.RunningMeanStd(shape=())
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
+        obs = self.env.reset(*args, **kwargs)
         self.memories = [collections.deque(maxlen=30000) for _ in range(self.n_envs)]
         return obs, info
 
     @torch.no_grad()
     def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
+        obs, rew, done, info = self.env.step(action)
 
-        for i, d in enumerate(term | trunc):
+        for i, d in enumerate(done):
             if d:
                 self.memories[i].clear()
 
@@ -117,7 +117,7 @@ class EpisodicBonus(gym.Wrapper):
 
         self.rew_norm.update(rew)
         rew = (rew - self.rew_norm.mean) / (np.sqrt(self.rew_norm.var) + self.rew_norm.epsilon)
-        return obs, rew, term, trunc, info
+        return obs, rew, done, info
 
 
 class RecordEpisodeStatistics(gym.Wrapper):
