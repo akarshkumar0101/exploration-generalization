@@ -119,7 +119,7 @@ class EpisodicBonus(gym.Wrapper):
             rew[i] = d.mean().item()
 
         self.rew_norm.update(rew)
-        rew = (rew - self.rew_norm.mean) / (np.sqrt(self.rew_norm.var) + self.rew_norm.epsilon)
+        rew = (rew - self.rew_norm.mean) / (np.sqrt(self.rew_norm.var) + 1e-5)
         return obs, rew, done, info
 
 
