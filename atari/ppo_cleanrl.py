@@ -15,6 +15,7 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from einops import rearrange
+import wandb
 
 
 def parse_args():
