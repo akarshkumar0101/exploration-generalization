@@ -478,8 +478,8 @@ if __name__ == "__main__":
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
         if (update - 10) % (num_updates // 10):
-            vid = np.stack(envs.past_obs)  # 4, 2000, 1, 84, 84
-            vid = rearrange(vid, '(H W) t c h w -> t c (H h) (W w)', H=2, W=2)
+            vid = np.stack(envs.past_obs)  # 2000, 4, 1, 84, 84
+            vid = rearrange(vid, 't (H W) c h w -> t c (H h) (W w)', H=2, W=2)
             vid = vid[::4]
             print('saving vid! ', vid.shape)
             
