@@ -309,6 +309,7 @@ if __name__ == "__main__":
     envs = RewardSelector(envs, args.obj)
 
     envs = RecordEpisodeStatistics(envs)
+    envs = StoreObs(envs)
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
