@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
+from einops import rearrange
 
 
 def parse_args():
@@ -99,6 +100,7 @@ class EpisodicBonus(gym.Wrapper):
     @torch.no_grad()
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
+        rew_int = np.zeros_like(rew)
 
         for i, d in enumerate(done):
             if d:
@@ -110,7 +112,7 @@ class EpisodicBonus(gym.Wrapper):
             memory = list(memory_)
             memory_.append(latent)
             if len(memory) < 10:
-                rew[i] = 0.0
+                rew_int[i] = 0.0
                 continue
             memory = torch.stack(memory)  # m, d
             d = (latent - memory).norm(dim=-1)  # m
@@ -118,12 +120,13 @@ class EpisodicBonus(gym.Wrapper):
             # rew[i] = d.mean().item()
 
             self.dist_norm.update(d[None, :])
-            d = d/self.dist_norm.mean
-            rew[i] = d.mean().item()
+            d = d / self.dist_norm.mean
+            rew_int[i] = d.mean().item()
+        info["rew_int"] = rew_int
 
         # self.rew_norm.update(rew)
         # if self.rew_norm.mean > 0:
-        #     rew = rew / self.rew_norm.mean
+        #     rew_int = rew_int / self.rew_norm.mean
         return obs, rew, done, info
 
 
@@ -132,27 +135,32 @@ class RecordEpisodeStatistics(gym.Wrapper):
         super().__init__(env)
         self.num_envs = getattr(env, "num_envs", 1)
         self.episode_returns = None
+        self.episode_returns_int = None
         self.episode_lengths = None
 
     def reset(self, **kwargs):
         observations = super().reset(**kwargs)
         self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.episode_returns_int = np.zeros(self.num_envs, dtype=np.float32)
         self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
         self.lives = np.zeros(self.num_envs, dtype=np.int32)
         self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.returned_episode_returns_int = np.zeros(self.num_envs, dtype=np.float32)
         self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
         return observations
 
     def step(self, action):
         observations, rewards, dones, infos = super().step(action)
-        # self.episode_returns += infos["reward"]
-        self.episode_returns += rewards
+        self.episode_returns += infos["reward"]
+        self.episode_returns_int += infos["rew_int"]
         self.episode_lengths += 1
         self.returned_episode_returns[:] = self.episode_returns
+        self.returned_episode_returns_int[:] = self.episode_returns_int
         self.returned_episode_lengths[:] = self.episode_lengths
         self.episode_returns *= 1 - infos["terminated"]
         self.episode_lengths *= 1 - infos["terminated"]
         infos["r"] = self.returned_episode_returns
+        infos["ri"] = self.returned_episode_returns_int
         infos["l"] = self.returned_episode_lengths
         return (
             observations,
@@ -160,6 +168,33 @@ class RecordEpisodeStatistics(gym.Wrapper):
             dones,
             infos,
         )
+
+
+class StoreObs(gym.Wrapper):
+    def __init__(self, env, store_n_envs=4, store_n_steps=2000):
+        super().__init__(env)
+        self.store_n_envs, self.store_n_steps = store_n_envs, store_n_steps
+        self.past_obs = collections.deque(maxlen=store_n_steps)
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        self.past_obs.append(obs[: self.n_envs, [-1]])
+        info["past_obs"] = self.past_obs
+        return obs, rew, done, info
+
+
+class RewardSelector(gym.Wrapper):
+    def __init__(self, env, obj="ext"):
+        super().__init__(env)
+        self.obj = obj
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        if self.obj == "ext":
+            rew = info["reward"]
+        else:
+            rew = info["rew_int"]
+        return obs, rew, done, info
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -270,9 +305,8 @@ if __name__ == "__main__":
     agent = Agent(envs).to(device)
     idm = IDM(envs.single_action_space.n).to(device)
 
-    if args.obj == "int":
-        print('USING INTRINSIC REWARD')
-        envs = EpisodicBonus(envs, idm, device)
+    envs = EpisodicBonus(envs, idm, device)
+    envs = RewardSelector(envs, args.obj)
 
     envs = RecordEpisodeStatistics(envs)
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
@@ -293,6 +327,7 @@ if __name__ == "__main__":
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
     avg_returns = deque(maxlen=20)
+    avg_returns_int = deque(maxlen=20)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -327,10 +362,13 @@ if __name__ == "__main__":
 
             for idx, d in enumerate(done):
                 if d and info["lives"][idx] == 0:
-                    print(f"global_step={global_step}, episodic_return={info['r'][idx]}")
+                    print(f"global_step={global_step}, ext={info['r'][idx]}, int={info['ri'][idx]}")
                     avg_returns.append(info["r"][idx])
+                    avg_returns_int.append(info["ri"][idx])
                     writer.add_scalar("charts/avg_episodic_return", np.average(avg_returns), global_step)
+                    writer.add_scalar("charts/avg_episodic_return_int", np.average(avg_returns_int), global_step)
                     writer.add_scalar("charts/episodic_return", info["r"][idx], global_step)
+                    writer.add_scalar("charts/episodic_return_int", info["ri"][idx], global_step)
                     writer.add_scalar("charts/episodic_length", info["l"][idx], global_step)
         print(rewards.shape, rewards.mean().item(), rewards.std().item(), rewards.min().item(), rewards.max().item())
         # bootstrap value if not done
@@ -437,6 +475,15 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+        if (update - 10) % (num_updates // 10):
+            vid = np.stack(envs.past_obs)  # 4, 2000, 1, 84, 84
+            vid = rearrange(vid, '(H W) t c h w -> t c (H h) (W w)', H=2, W=2)
+            vid = vid[::4]
+            print('saving vid! ', vid.shape)
+            
+            vid = wandb.Video(vid, fps=15)
+            # wandb.log({"media/vid": vid})
 
     envs.close()
     writer.close()
