@@ -178,7 +178,7 @@ class StoreObs(gym.Wrapper):
 
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
-        self.past_obs.append(obs[: self.n_envs, [-1]])
+        self.past_obs.append(obs[: self.store_n_envs, [-1]])
         info["past_obs"] = self.past_obs
         return obs, rew, done, info
 
