@@ -484,8 +484,9 @@ if __name__ == "__main__":
             vid = vid[::4]
             print("saving vid! ", vid.shape)
 
-            vid = wandb.Video(vid, fps=15)
-            # wandb.log({"media/vid": vid})
+            if args.track:
+                vid = wandb.Video(vid, fps=15)
+                wandb.log({"media/vid": vid})
 
     envs.close()
     writer.close()
