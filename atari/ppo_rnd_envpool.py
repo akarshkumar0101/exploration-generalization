@@ -18,6 +18,7 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from einops import rearrange
 
+
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
@@ -38,9 +39,9 @@ def parse_args():
     parser.add_argument("--name", type=str, default="specialist_{env_id}_{obj}_{seed}")
 
     # Algorithm specific arguments
-    parser.add_argument("--env-id", type=str, default="MontezumaRevenge-v5",
+    parser.add_argument("--env-id", type=str, default="MontezumaRevenge",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=2000000000,
+    parser.add_argument("--total-timesteps", type=int, default=int(10e6),
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
@@ -212,12 +213,12 @@ class Agent(nn.Module):
 
     def forward(self, done, obs, act, rew):
         b, t, c, h, w = obs.shape
-        obs = rearrange(obs, 'b t c h w -> b (t c) h w')
+        obs = rearrange(obs, "b t c h w -> b (t c) h w")
         hidden = self.network(obs / 255.0)
-        logits = self.actor(hidden) # b, d
+        logits = self.actor(hidden)  # b, d
         features = self.extra_layer(hidden)
-        values = self.critic_ext(features + hidden) # b 1
-        logits, values = rearrange(logits, 'b d -> b 1 d'), rearrange(values, 'b 1 -> b 1')
+        values = self.critic_ext(features + hidden)  # b 1
+        logits, values = rearrange(logits, "b d -> b 1 d"), rearrange(values, "b 1 -> b 1")
         return logits, values
 
     def get_action_and_value(self, x, action=None):
@@ -334,7 +335,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = envpool.make(
-        args.env_id,
+        f"{args.env_id}-v5",
         env_type="gym",
         stack_num=1,
         num_envs=args.num_envs,
@@ -594,11 +595,11 @@ if __name__ == "__main__":
             vid[:, :, :, -1, :] = 128
             vid[:, :, :, :, -1] = 128
             vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
-            print("creating video of shape: ", vid.shape)
+            print("Creating video of shape: ", vid.shape)
             data[f"media/vid"] = wandb.Video(vid, fps=15)
 
             i_save = update // (num_updates // 10)
-            print("saving agent...")
+            print("Saving agent...")
             torch.save(agent, f"{args.save_agent}/agent_{i_save}.pt")
 
         if args.track:
