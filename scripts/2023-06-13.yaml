@@ -11,12 +11,12 @@ python_file: ppo_rnd_envpool.py
 
 # --env-id: [Pong, Breakout]
 --env-id: [Amidar, Assault, Asterix, Atlantis, BankHeist, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, TimePilot, UpNDown, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
---total-timesteps: 10e6
---learning-rate: 1e-4
+--total-timesteps: 20e6
+--learning-rate: 2e-4
 --num-envs: 128
 --num-steps: 128
 --anneal-lr: False
---gamma: 0.999
+--gamma: 0.99
 --gae-lambda: 0.95
 --num-minibatches: 4
 --update-epochs: 4
