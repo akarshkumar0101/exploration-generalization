@@ -592,7 +592,7 @@ if __name__ == "__main__":
         data["charts/ret_ext"] = np.mean(avg_returns)
         data["charts/traj_len"] = np.mean(avg_ep_lens)
 
-        if update % (num_updates // 10) == 0:
+        if (update-1) % (num_updates // 10) == 0:
             vid = np.stack(envs.past_obs)  # 450, 4, 1, 84, 84
             vid[:, :, :, -1, :] = 128
             vid[:, :, :, :, -1] = 128
@@ -602,6 +602,7 @@ if __name__ == "__main__":
 
             i_save = update // (num_updates // 10)
             print("Saving agent...")
+            os.makedirs(os.path.dirname(f"{args.save_agent}/agent_{i_save}.pt"), exist_ok=True)
             torch.save(agent, f"{args.save_agent}/agent_{i_save}.pt")
 
         if args.track:
