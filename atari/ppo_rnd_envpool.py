@@ -115,17 +115,17 @@ class FrameStack(gym.Wrapper):
         self.obs_stacked = deque(maxlen=n_stack)
 
     def reset(self):
-        obs, info = self.env.reset()  # b 1 84 84
+        obs = self.env.reset()  # b 1 84 84
         for _ in range(self.n_stack):
             self.obs_stacked.append(obs)
         obs = np.concatenate(self.obs_stacked, axis=1)  # b 4 84 84
-        return obs, info
+        return obs
 
     def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
+        obs, rew, done, info = self.env.step(action)
         self.obs_stacked.append(obs)
         obs = np.concatenate(self.obs_stacked, axis=1)
-        return obs, rew, term, trunc, info
+        return obs, rew, done, info
 
 
 class StoreObs(gym.Wrapper):
@@ -135,14 +135,14 @@ class StoreObs(gym.Wrapper):
         self.past_obs = deque(maxlen=buf_size)
 
     def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
+        obs = self.env.reset(*args, **kwargs)
         self.past_obs.append(obs[: self.n_envs_store])
-        return obs, info
+        return obs
 
     def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
+        obs, rew, done, info = self.env.step(action)
         self.past_obs.append(obs[: self.n_envs_store])
-        return obs, rew, term, trunc, info
+        return obs, rew, done, info
 
 
 class RecordEpisodeStatistics(gym.Wrapper):
