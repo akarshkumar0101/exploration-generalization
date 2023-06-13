@@ -3,6 +3,7 @@ from functools import partial
 import gymnasium as gym
 import numpy as np
 import torch
+import collections
 
 try:
     import envpool
@@ -59,6 +60,26 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
     env.observation_space.seed(seed)
 
     return env
+
+
+class FrameStack(gym.Wrapper):
+    def __init__(self, env, n_stack=4):
+        super().__init__(env)
+        self.n_stack = n_stack
+        self.obs_stacked = collections.deque(maxlen=n_stack)
+
+    def reset(self):
+        obs, info = self.env.reset()  # b 1 84 84
+        for _ in range(self.n_stack):
+            self.obs_stacked.append(obs)
+        obs = np.concatenate(self.obs_stacked, axis=1)  # b 4 84 84
+        return obs, info
+
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        self.obs_stacked.append(obs)
+        obs = np.concatenate(self.obs_stacked, axis=1)
+        return obs, rew, term, trunc, info
 
 
 class NoArgsReset(gym.Wrapper):
@@ -247,6 +268,52 @@ class E3BReward(gym.Wrapper):
         super().__init__(env)
         self.encode_fn = encode_fn
         self.lmbda = lmbda
+
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        # if self.latent_key in info:
+        # latent, done = info[self.latent_key], info["done"]
+        if self.encode_fn is not None:
+            latent, done = self.encode_fn(info["obs"]), info["done"]
+
+            self.Il = torch.eye(latent.shape[-1]) / self.lmbda  # d, d
+            self.Cinv = torch.zeros(self.num_envs, latent.shape[-1], latent.shape[-1])  # b, d, d
+
+            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
+            self.step_e3b(latent, done)
+        return obs, info
+
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        # if self.latent_key in info:
+        # latent, done = info[self.latent_key], info["done"]
+        if self.encode_fn is not None:
+            latent, done = self.encode_fn(info["obs"]), info["done"]
+
+            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
+            info[f"rew_e3b"] = self.step_e3b(latent, done)
+
+        return obs, rew, term, trunc, info
+
+    @torch.no_grad()  # this is required
+    def step_e3b(self, latent, done):
+        self.Il, self.Cinv = self.Il.to(self.device), self.Cinv.to(self.device)
+        assert done.dtype == torch.bool
+        self.Cinv[done] = self.Il
+        v = latent[..., :, None]  # b, d, 1
+        u = self.Cinv @ v  # b, d, 1
+        b = v.mT @ u  # b, 1, 1
+        rew_e3b = b[..., 0, 0].clone()  # cloning is important, otherwise b will be written to
+        rew_e3b[done] = 0.0
+        self.u, self.v, self.b = u, v, b
+        self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
+        return rew_e3b
+
+
+class RNDReward(gym.Wrapper):
+    def __init__(self, env, rnd_model):
+        super().__init__(env)
+        self.rnd_model = rnd_model
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)

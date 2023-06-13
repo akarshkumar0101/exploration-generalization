@@ -8,11 +8,11 @@ class Timer:
         self.key2time = defaultdict(float)
 
     @contextmanager
-    def time(self, key):
+    def add_time(self, key):
         before = time.time()
         yield None
-        time.time()
-        self.key2time[key] += time.time() - before
+        after = time.time()
+        self.key2time[key] += after - before
 
     def clear(self):
         self.key2time.clear()
