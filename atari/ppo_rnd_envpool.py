@@ -92,6 +92,8 @@ def parse_args():
     parser.add_argument("--obj", type=str, default='ext')
     parser.add_argument("--save-agent", type=str, default="./data/{project}/{name}/")
 
+    parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
+
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -345,7 +347,7 @@ if __name__ == "__main__":
         reward_clip=True,
         seed=args.seed,
         repeat_action_probability=0.25,
-        full_action_space=True,
+        full_action_space=args.full_action_space,
     )
     envs = StoreObs(envs, n_envs_store=4, buf_size=450)
     envs = FrameStack(envs, 4)
