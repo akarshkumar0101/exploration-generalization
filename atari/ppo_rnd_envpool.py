@@ -29,8 +29,7 @@ def parse_args():
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, cuda will be enabled by default")
+    parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
     parser.add_argument("--project", type=str, default="egb-atari",
@@ -38,11 +37,12 @@ def parse_args():
     parser.add_argument("--entity", type=str, default=None,
         help="the entity (team) of wandb's project")
     parser.add_argument("--name", type=str, default="specialist_{env_id}_{obj}_{seed}")
+    parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="MontezumaRevenge",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=int(10e6),
+    parser.add_argument("--total-timesteps", type=lambda x: int(float(x)), default=int(10e6),
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=1e-4,
         help="the learning rate of the optimizer")
@@ -332,7 +332,8 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device(args.device)
 
     # env setup
     envs = envpool.make(
@@ -344,6 +345,7 @@ if __name__ == "__main__":
         reward_clip=True,
         seed=args.seed,
         repeat_action_probability=0.25,
+        use_full_action_space=True,
     )
     envs = StoreObs(envs, n_envs_store=4, buf_size=450)
     envs = FrameStack(envs, 4)
@@ -588,17 +590,20 @@ if __name__ == "__main__":
         data["losses/fwd_loss"] = forward_loss.item()
         data["losses/approx_kl"] = approx_kl.item()
         data["charts/SPS"] = int(global_step / (time.time() - start_time))
+        data['rewards_mean'] = rewards.mean().item()
+        data['curiosity_rewards_mean'] = curiosity_rewards.mean().item()
 
         data["charts/ret_ext"] = np.mean(avg_returns)
         data["charts/traj_len"] = np.mean(avg_ep_lens)
 
         if (update-1) % (num_updates // 10) == 0:
-            vid = np.stack(envs.past_obs)  # 450, 4, 1, 84, 84
-            vid[:, :, :, -1, :] = 128
-            vid[:, :, :, :, -1] = 128
-            vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
-            print("Creating video of shape: ", vid.shape)
-            data[f"media/vid"] = wandb.Video(vid, fps=15)
+            if args.log_video:
+                vid = np.stack(envs.past_obs)  # 450, 4, 1, 84, 84
+                vid[:, :, :, -1, :] = 128
+                vid[:, :, :, :, -1] = 128
+                vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
+                print("Creating video of shape: ", vid.shape)
+                data[f"media/vid"] = wandb.Video(vid, fps=15)
 
             i_save = update // (num_updates // 10)
             print("Saving agent...")

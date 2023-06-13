@@ -1,0 +1,31 @@
+python_file: ppo_rnd_envpool.py
+
+--track: True
+--project: egb-atari-2
+--name: "specialist_{env_id}_{obj}_{seed}"
+
+--device: cuda
+--seed: [0]
+
+--log-video: True
+
+# --env-id: [Pong, Breakout]
+--env-id: [Amidar, Assault, Asterix, Atlantis, BankHeist, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, TimePilot, UpNDown, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
+--total-timesteps: 10e6
+--learning-rate: 1e-4
+--num-envs: 128
+--num-steps: 128
+--anneal-lr: False
+--gamma: 0.999
+--gae-lambda: 0.95
+--num-minibatches: 4
+--update-epochs: 4
+--ent-coef: 0.001
+
+--int-gamma: 0.99
+--num-iterations-obs-norm-init: 50
+
+--obj: ext
+--save-agent: ./data/{project}/{name}/
+
+
