@@ -345,7 +345,7 @@ if __name__ == "__main__":
         reward_clip=True,
         seed=args.seed,
         repeat_action_probability=0.25,
-        use_full_action_space=True,
+        full_action_space=True,
     )
     envs = StoreObs(envs, n_envs_store=4, buf_size=450)
     envs = FrameStack(envs, 4)
