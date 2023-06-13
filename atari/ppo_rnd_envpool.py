@@ -17,6 +17,7 @@ from gym.wrappers.normalize import RunningMeanStd
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from einops import rearrange
+from tqdm.auto import tqdm
 
 
 def parse_args():
@@ -386,7 +387,7 @@ if __name__ == "__main__":
 
     print("Start to initialize observation normalization parameter.....")
     next_ob = []
-    for step in range(args.num_steps * args.num_iterations_obs_norm_init):
+    for step in tqdm(range(args.num_steps * args.num_iterations_obs_norm_init)):
         acs = np.random.randint(0, envs.single_action_space.n, size=(args.num_envs,))
         s, r, d, _ = envs.step(acs)
         next_ob += s[:, 3, :, :].reshape([-1, 1, 84, 84]).tolist()
@@ -397,7 +398,7 @@ if __name__ == "__main__":
             next_ob = []
     print("End to initialize...")
 
-    for update in range(1, num_updates + 1):
+    for update in tqdm(range(1, num_updates + 1)):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
