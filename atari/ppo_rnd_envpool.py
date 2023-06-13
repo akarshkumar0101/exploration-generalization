@@ -349,7 +349,8 @@ if __name__ == "__main__":
     envs = FrameStack(envs, 4)
     envs.num_envs = args.num_envs
     envs.single_action_space = envs.action_space
-    envs.single_observation_space = envs.observation_space
+    envs.observation_space = gym.spaces.Box(low=0, high=255, shape=(args.num_envs, 4, 84, 84), dtype=np.uint8)
+    envs.single_observation_space = gym.spaces.Box(low=0, high=255, shape=(4, 84, 84), dtype=np.uint8)
     envs = RecordEpisodeStatistics(envs)
     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -367,7 +368,7 @@ if __name__ == "__main__":
     discounted_reward = RewardForwardFilter(args.int_gamma)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs, 4, 84, 84)).to(device)
+    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
