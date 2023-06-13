@@ -1,20 +1,16 @@
-import torch
-import time
-
-from einops import rearrange
-
 import timers
+import torch
 
 
 class Buffer:
-    def __init__(self, n_envs, n_steps, env, device=None):
+    def __init__(self, n_envs, n_steps, env, device="cpu"):
         self.n_envs, self.n_steps = n_envs, n_steps
         self.env, self.device = env, device
 
         self.obss = torch.zeros((n_envs, n_steps) + env.single_observation_space.shape, dtype=torch.uint8, device=device)
         self.dones = torch.zeros((n_envs, n_steps), dtype=torch.bool, device=device)
 
-        self.logits = torch.zeros((n_envs, n_steps), device=device)
+        self.logits = torch.zeros((n_envs, n_steps, env.single_action_space.n), device=device)
         self.acts = torch.zeros((n_envs, n_steps) + env.single_action_space.shape, dtype=torch.long, device=device)
         self.vals = torch.zeros((n_envs, n_steps), device=device)
         self.rews = torch.zeros((n_envs, n_steps), device=device)
@@ -47,40 +43,40 @@ class Buffer:
         return dict(done=done, obs=obs, act=act, rew=rew)
 
     @torch.no_grad()
-    def collect(self, agent, ctx_len):
-        self.timer = timers.Timer()
+    def collect(self, agent, ctx_len, timer):
         agent.eval()
         for i_step in range(self.n_steps):
             self.obss[:, i_step] = self.obs
             self.dones[:, i_step] = self.done
 
-            with self.timer.add_time("construct_agent_input"):
+            with timer.add_time("construct_agent_input"):
                 agent_input = self._construct_agent_input(i_step, ctx_len)
-            with self.timer.add_time("agent_inference"):
+            with timer.add_time("agent_inference"):
                 logits, value = agent(**agent_input)  # b t ...
             # only get output from last token
-            dist, value = torch.distributions.Categorical(logits=logits[:, -1]), self.value[:, -1]
+            logits, value = logits[:, -1, :], value[:, -1]
+            dist = torch.distributions.Categorical(logits=logits)
             act = dist.sample()
 
-            with self.timer.add_time("env_step"):
+            with timer.add_time("env_step"):
                 _, rew, _, _, info = self.env.step(act)
             self.obs, self.done = info["obs"], info["done"]
 
             self.logits[:, i_step] = logits
             self.acts[:, i_step] = act
             self.vals[:, i_step] = value
-            self.rews[:, i_step] = torch.as_tensor(rew).to(self.device)
+            self.rews[:, i_step] = info["rew"]
 
         i_step += 1
-        with self.timer.add_time("construct_agent_input"):
+        with timer.add_time("construct_agent_input"):
             agent_input = self._construct_agent_input(i_step, ctx_len)
-        with self.timer.add_time("agent_inference"):
+        with timer.add_time("agent_inference"):
             logits, value = agent(**agent_input)  # b t ...
         self.value = value[:, -1]
 
         print("Collection time breakdown:")
-        for key, t in self.timer.key2time.items():
-            print(f"{key}: {t:.3f}")
+        for key, t in timer.key2time.items():
+            print(f"{key:30s}: {t:.3f}")
 
     @torch.no_grad()
     def calc_gae(self, gamma, gae_lambda):

@@ -2,7 +2,7 @@ import os
 import re
 from functools import partial
 
-import cv2
+# import cv2
 
 # import gym # as gym_old
 import gymnasium as gym

@@ -40,7 +40,7 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
     make_fns = [make_fn for _ in range(n_envs)]
     env = gym.vector.SyncVectorEnv(make_fns)
 
-    env = StoreObs(env, n_envs=25, buf_size=1000)
+    env = StoreObs(env, n_envs_store=25, buf_size=1000)
 
     env = ToTensor(env, device=device)
 
@@ -60,26 +60,6 @@ def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_f
     env.observation_space.seed(seed)
 
     return env
-
-
-class FrameStack(gym.Wrapper):
-    def __init__(self, env, n_stack=4):
-        super().__init__(env)
-        self.n_stack = n_stack
-        self.obs_stacked = collections.deque(maxlen=n_stack)
-
-    def reset(self):
-        obs, info = self.env.reset()  # b 1 84 84
-        for _ in range(self.n_stack):
-            self.obs_stacked.append(obs)
-        obs = np.concatenate(self.obs_stacked, axis=1)  # b 4 84 84
-        return obs, info
-
-    def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
-        self.obs_stacked.append(obs)
-        obs = np.concatenate(self.obs_stacked, axis=1)
-        return obs, rew, term, trunc, info
 
 
 class NoArgsReset(gym.Wrapper):
@@ -127,9 +107,9 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
 
-    env = StoreObs(env, n_envs=25, buf_size=1000)
+    env = StoreObs(env, n_envs_store=25, buf_size=1000)
     env = ToTensor(env, device=device)
-    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+    # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
     env = StoreReturns(env, buf_size=buf_size)
     env = RewardSelector(env, obj=obj)
 
@@ -139,55 +119,20 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
     return env
 
 
-class RecordEpisodeStatistics(gym.Wrapper):
-    def __init__(self, env, deque_size=100):
-        super().__init__(env)
-        self.num_envs = getattr(env, "num_envs", 1)
-        self.episode_returns = None
-        self.episode_lengths = None
-
-    def reset(self, **kwargs):
-        observations = super().reset(**kwargs)
-        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        self.lives = np.zeros(self.num_envs, dtype=np.int32)
-        self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
-        return observations
-
-    def step(self, action):
-        observations, rewards, dones, infos = super().step(action)
-        self.episode_returns += infos["reward"]
-        self.episode_lengths += 1
-        self.returned_episode_returns[:] = self.episode_returns
-        self.returned_episode_lengths[:] = self.episode_lengths
-        self.episode_returns *= 1 - infos["terminated"]
-        self.episode_lengths *= 1 - infos["terminated"]
-        infos["r"] = self.returned_episode_returns
-        infos["l"] = self.returned_episode_lengths
-        return (
-            observations,
-            rewards,
-            dones,
-            infos,
-        )
-
-
 class StoreObs(gym.Wrapper):
-    def __init__(self, env, n_envs=4, buf_size=450):
+    def __init__(self, env, n_envs_store=4, buf_size=450):
         super().__init__(env)
-        self.n_envs, self.buf_size = n_envs, buf_size
-        self.past_obs = []
+        self.n_envs_store = n_envs_store
+        self.past_obs = collections.deque(maxlen=buf_size)
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
-        self.past_obs.append(obs[: self.n_envs])
+        self.past_obs.append(obs[: self.n_envs_store])
         return obs, info
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        self.past_obs.append(obs[: self.n_envs])
-        self.past_obs = self.past_obs[-self.buf_size :]
+        self.past_obs.append(obs[: self.n_envs_store])
         info["past_obs"] = self.past_obs
         return obs, rew, term, trunc, info
 
@@ -212,10 +157,12 @@ class ToTensor(gym.Wrapper):
         return obs, info
 
     def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
+        obs, rew, term, trunc, info = self.env.step(action.cpu().numpy().astype(np.int32))
         rew = rew.astype(np.float32)
         info["obs"] = torch.from_numpy(obs).to(self.device)
         info["rew_ext"] = torch.from_numpy(rew).to(self.device)
+        info["rew_score"] = torch.from_numpy(info["reward"]).to(self.device)
+        del info["reward"]
         info["rew_traj"] = torch.ones_like(info["rew_ext"])
         info["term"] = torch.from_numpy(term).to(self.device)
         info["trunc"] = torch.from_numpy(trunc).to(self.device)
@@ -235,6 +182,7 @@ class RewardSelector(gym.Wrapper):
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
         rew = info[f"rew_{self.obj}"].detach().cpu().numpy()
+        info["rew"] = info[f"rew_{self.obj}"]
         return obs, rew, term, trunc, info
 
 

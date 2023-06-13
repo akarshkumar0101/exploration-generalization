@@ -1,18 +1,19 @@
-FROM python:3.8
+FROM --platform=linux/amd64 python:3.10
 
 # set a directory for the app
 WORKDIR /usr/src/app
 
-# copy all the files to the container
-COPY . .
+# copy requirements.txt
+COPY requirements.txt .
 
 # install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# copy all the files to the container
+COPY . exploration-generalization
+
 # define the port number the container should expose
-EXPOSE 5000
+# EXPOSE 5000
 
 # run the command
-# CMD ["python", "./app.py"]
-CMD echo "hello"; pwd; ls; which python pip jupyter; lscpu
-
+CMD echo pwd; ls; which python pip jupyter; lscpu
