@@ -29,6 +29,6 @@ python_file: train_dt2.py
 --arch: gpt
 --expert-agent: ./data/egb-atari/specialist_{env_id}_{obj}_{seed}/agent_9.pt
 --load-agent: None
---save-agent: ./data/egb-atari/generalist_32_{obj}_{seed}/agent.pt
+--save-agent: ./data/{project}/{name}/agent.pt
 
 

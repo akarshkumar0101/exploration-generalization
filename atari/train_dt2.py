@@ -65,7 +65,7 @@ def parse_args(*args, **kwargs):
     if args.name is not None:
         args.name = args.name.format(**vars(args))
     if args.expert_agent is not None:
-        args.expert_agent = args.expert_agent.format(**vars(args))
+        args.expert_agent = args.expert_agent.format(**dict(env_id="{env_id}", **vars(args)))
     if args.load_agent is not None:
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
