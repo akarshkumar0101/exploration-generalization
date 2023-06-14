@@ -10,10 +10,11 @@ import numpy as np
 import torch
 import torchinfo
 from agent_atari import CNNAgent, RandomAgent
-from buffers import Buffer, MultiBuffer
+from buffers2 import Buffer, MultiBuffer
 from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
+from timers import Timer
 
 # from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
 from tqdm.auto import tqdm
@@ -152,15 +153,15 @@ def main(args):
     viz_midd = set(np.linspace(1, args.n_collects - 1, 100).astype(int)).union(viz_slow)
     viz_fast = set(np.linspace(1, args.n_collects - 1, 1000).astype(int)).union(viz_midd)
 
+    timer = Timer()
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
-        dt_collect, dt_gae, dt_gen_batch, dt_forward, dt_loss, dt_backward = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        timer.clear()
 
-        time0 = time.time()
-        mbuffer.collect(agent, args.ctx_len)
-        time1 = time.time()
-        mbuffer.calc_gae(args.gamma, args.gae_lambda)
-        time2 = time.time()
+        with timer.add_time("collect"):
+            mbuffer.collect(agent, args.ctx_len, timer)
+        with timer.add_time("calc_gae"):
+            mbuffer.calc_gae(args.gamma, args.gae_lambda)
         # mbuffer_test.collect(agent, args.ctx_len)
 
         lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
@@ -169,52 +170,53 @@ def main(args):
         agent.train()
 
         for _ in range(args.n_updates):
-            time3 = time.time()
-            batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-            time4 = time.time()
+            with timer.add_time("generate_batch"):
+                batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
             obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
             dist_old, val_old = batch["dist"], batch["val"]
-            dist, val = agent(obs=obs, act=act, done=done)
-            time5 = time.time()
+            with timer.add_time("forward_pass"):
+                dist, val = agent(obs=obs, act=act, done=done)
 
-            if args.last_token_only:
-                dist = torch.distributions.Categorical(logits=dist.logits[:, -1])
-                dist_old = torch.distributions.Categorical(logits=dist_old.logits[:, -1])
-                val, val_old = val[:, -1], val_old[:, -1]
-                obs, act, done, ret, adv = obs[:, -1], act[:, -1], done[:, -1], ret[:, -1], adv[:, -1]
+            with timer.add_time("calc_loss"):
+                if args.last_token_only:
+                    dist = torch.distributions.Categorical(logits=dist.logits[:, -1])
+                    dist_old = torch.distributions.Categorical(logits=dist_old.logits[:, -1])
+                    val, val_old = val[:, -1], val_old[:, -1]
+                    obs, act, done, ret, adv = obs[:, -1], act[:, -1], done[:, -1], ret[:, -1], adv[:, -1]
 
-            if args.norm_adv:
-                adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+                if args.norm_adv:
+                    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
-            ratio = (dist.log_prob(act) - dist_old.log_prob(act)).exp()
-            loss_pg1 = -adv * ratio
-            loss_pg2 = -adv * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
-            loss_pg = torch.max(loss_pg1, loss_pg2).mean()
+                ratio = (dist.log_prob(act) - dist_old.log_prob(act)).exp()
+                loss_pg1 = -adv * ratio
+                loss_pg2 = -adv * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
+                loss_pg = torch.max(loss_pg1, loss_pg2).mean()
 
-            if args.clip_vloss:
-                loss_v_unclipped = (val - ret) ** 2
-                v_clipped = val_old + (val - val_old).clamp(-args.clip_coef, args.clip_coef)
-                loss_v_clipped = (v_clipped - ret) ** 2
-                loss_v_max = torch.max(loss_v_unclipped, loss_v_clipped)
-                loss_v = 0.5 * loss_v_max.mean()
-            else:
-                loss_v = 0.5 * ((val - ret) ** 2).mean()
+                if args.clip_vloss:
+                    loss_v_unclipped = (val - ret) ** 2
+                    v_clipped = val_old + (val - val_old).clamp(-args.clip_coef, args.clip_coef)
+                    loss_v_clipped = (v_clipped - ret) ** 2
+                    loss_v_max = torch.max(loss_v_unclipped, loss_v_clipped)
+                    loss_v = 0.5 * loss_v_max.mean()
+                else:
+                    loss_v = 0.5 * ((val - ret) ** 2).mean()
 
-            entropy = dist.entropy()
-            loss_entropy = entropy.mean()
+                entropy = dist.entropy()
+                loss_entropy = entropy.mean()
 
-            loss = loss_pg + loss_v * args.vf_coef - args.ent_coef * loss_entropy
-            time6 = time.time()
+                loss = loss_pg + loss_v * args.vf_coef - args.ent_coef * loss_entropy
 
-            # obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
-            # loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
-            # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
+                # obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
+                # loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
+                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
 
-            opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-            opt.step()
-            time7 = time.time()
+            with timer.add_time("opt_step"):
+                opt.zero_grad()
+            with timer.add_time("backward_pass"):
+                loss.backward()
+            with timer.add_time("opt_step"):
+                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                opt.step()
 
             y_pred, y_true = val_old.flatten().cpu().numpy(), ret.flatten().cpu().numpy()
             var_y = np.var(y_true)
@@ -223,14 +225,6 @@ def main(args):
             kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
             if args.max_kl_div is not None and kl_div > args.max_kl_div:
                 break
-
-            dt_gen_batch += time4 - time3
-            dt_forward += time5 - time4
-            dt_loss += time6 - time5
-            dt_backward += time7 - time6
-
-        dt_collect += time1 - time0
-        dt_gae += time2 - time1
 
         # ------------------- Logging ------------------- #
         data = {}
@@ -246,20 +240,13 @@ def main(args):
                 vid[:, :, :, -1, :] = 128
                 vid[:, :, :, :, -1] = 128
                 vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
-                print('creating video of shape: ', vid.shape)
+                print("creating video of shape: ", vid.shape)
                 # data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         # print(f"dt_const: {mbuffer.buffers[0].dt_const}, dt_inf: {mbuffer.buffers[0].dt_inf}, dt_env: {mbuffer.buffers[0].dt_env}, dt_learn: {dt_learn}")
         if i_collect in viz_fast:  # fast logging, ex: scalars
-            data["meta/dt_const"] = mbuffer.buffers[0].dt_const
-            data["meta/dt_inf"] = mbuffer.buffers[0].dt_inf
-            data["meta/dt_env"] = mbuffer.buffers[0].dt_env
-            data["meta/dt_collect"] = dt_collect
-            data["meta/dt_gae"] = dt_gae
-            data["meta/dt_gen_batch"] = dt_gen_batch
-            data["meta/dt_forward"] = dt_forward
-            data["meta/dt_loss"] = dt_loss
-            data["meta/dt_backward"] = dt_backward
+            for key, time in timer.key2time:
+                data[f"time/{key}"] = time
 
             data["details/lr"] = opt.param_groups[0]["lr"]
             data["details/loss_value"] = loss_v.item()

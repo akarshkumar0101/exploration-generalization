@@ -21,11 +21,12 @@ python_file: ppo_rnd_envpool.py
 --num-minibatches: 4
 --update-epochs: 4
 --ent-coef: 0.001
+--full-action-space: True
 
 --int-gamma: 0.99
---num-iterations-obs-norm-init: 50
+--num-iterations-obs-norm-init: 20
 
---obj: ext
+--obj: [ext, rnd]
 --save-agent: ./data/{project}/{name}/
 
 

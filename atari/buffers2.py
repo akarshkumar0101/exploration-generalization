@@ -136,11 +136,11 @@ class MultiBuffer:
     def envs(self):
         return [buffer.env for buffer in self.buffers]
 
-    def collect(self, agents, ctx_len):
+    def collect(self, agents, ctx_len, timer):
         if isinstance(agents, torch.nn.Module):
             agents = [agents for _ in self.buffers]
         for buffer, agent in zip(self.buffers, agents):
-            buffer.collect(agent, ctx_len)
+            buffer.collect(agent, ctx_len, timer)
 
     def calc_gae(self, gamma, gae_lambda):
         for buffer in self.buffers:

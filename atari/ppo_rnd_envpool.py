@@ -346,7 +346,7 @@ if __name__ == "__main__":
         episodic_life=True,
         reward_clip=True,
         seed=args.seed,
-        repeat_action_probability=0.25,
+        # repeat_action_probability=0.25,
         full_action_space=args.full_action_space,
     )
     envs = StoreObs(envs, n_envs_store=4, buf_size=450)

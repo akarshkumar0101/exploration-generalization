@@ -169,6 +169,10 @@ def main(args):
             opt.step()
 
         # ------------------- Logging ------------------- #
+        viz_slow = i_collect % (args.n_collects // 10) == 0
+        viz_midd = i_collect % (args.n_collects // 100) == 0 or viz_slow
+        viz_fast = i_collect % (args.n_collects // 1000) == 0 or viz_midd
+
         data = {}
         for env_id, env in zip(args.env_ids, mbuffer.envs):
             for key, val in env.key2past_rets.items():  # log returns
