@@ -1,7 +1,7 @@
 python_file: ppo_rnd_envpool.py
 
 --track: True
---project: egb-atari-2
+--project: egb-atari
 --name: "specialist_{env_id}_{obj}_{seed}"
 
 --device: cuda
