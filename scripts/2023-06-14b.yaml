@@ -12,7 +12,7 @@ python_file: train_dt2.py
 --env-ids: [[Amidar, Assault, Asterix, Atlantis, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner]]
 --env-ids-test: [[Amidar, Assault, Asterix, Atlantis, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner]]
 
---obj: ext
+--obj: [ext, rnd]
 --ctx-len: 4
 
 --total-steps: 100e6
