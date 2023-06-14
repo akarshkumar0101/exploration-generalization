@@ -210,7 +210,7 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:
-            for key, time in timer.key2time:
+            for key, time in timer.key2time.items():
                 data[f"time/{key}"] = time
             data["charts/loss_kl"] = loss_kl.item()
             data["details/loss_kl_0"] = kl_div[:, 0].mean().item()
