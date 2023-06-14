@@ -1,0 +1,32 @@
+python_file: ppo_rnd_envpool.py
+
+--track: True
+--project: egb-atari
+--name: "specialist_{env_id}_{obj}_{seed}"
+
+--device: cuda
+--seed: [0]
+
+--log-video: True
+
+# --env-id: [Pong, Breakout]
+--env-id: [Alien, MsPacman, Pong, SpaceInvaders, StarGunner]
+--total-timesteps: 20e6
+--learning-rate: 2e-4
+--num-envs: 128
+--num-steps: 128
+--anneal-lr: False
+--gamma: 0.99
+--gae-lambda: 0.95
+--num-minibatches: 4
+--update-epochs: 4
+--ent-coef: 0.001
+--full-action-space: True
+
+--int-gamma: 0.99
+--num-iterations-obs-norm-init: 20
+
+--obj: [ext, rnd]
+--save-agent: ./data/{project}/{name}/
+
+
