@@ -131,7 +131,7 @@ def main(args):
     mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()
     for env_id in args.env_ids:
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
+        mbuffer.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
         print("Loading expert from: ", {args.expert_agent.format(env_id=env_id)})
         # expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
         # expert.load_state_dict(torch.load(args.expert_agent.format(env_id=env_id)))
@@ -139,7 +139,7 @@ def main(args):
         experts.append(expert)
     for env_id in args.env_ids_test:
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        mbuffer_test.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
+        mbuffer_test.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
     timer = Timer()
     pbar = tqdm(range(args.n_collects))
