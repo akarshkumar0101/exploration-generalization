@@ -145,10 +145,10 @@ def main(args):
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer.key2time.clear()
-        print("Collecting expert data...")
+        # print("Collecting expert data...")
         mbuffer.collect(experts, args.ctx_len, Timer())
 
-        print("Collecting student data...")
+        # print("Collecting student data...")
         mbuffer_test.collect(agent, args.ctx_len, timer)
 
         lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
