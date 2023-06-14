@@ -17,6 +17,8 @@ from timers import Timer
 
 import wandb
 
+from ppo_rnd_envpool import layer_init, Agent
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
 parser.add_argument("--entity", type=str, default=None, help="the entity (team) of wandb's project")
