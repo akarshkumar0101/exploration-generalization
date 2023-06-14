@@ -8,11 +8,12 @@ import numpy as np
 import torch
 import torchinfo
 from agent_atari import CNNAgent
-from buffers import Buffer, MultiBuffer
+from buffers2 import Buffer, MultiBuffer
 from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
 from tqdm.auto import tqdm
+from timers import Timer
 
 import wandb
 
@@ -129,25 +130,24 @@ def main(args):
     for env_id in args.env_ids:
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
-        expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
         print("Loading expert from: ", {args.expert_agent.format(env_id=env_id)})
-        expert.load_state_dict(torch.load(args.expert_agent.format(env_id=env_id)))
+        # expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
+        # expert.load_state_dict(torch.load(args.expert_agent.format(env_id=env_id)))
+        expert = torch.load(args.expert_agent.format(env_id=env_id)).to(args.device)
         experts.append(expert)
     for env_id in args.env_ids_test:
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         mbuffer_test.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
 
-    viz_slow = set(np.linspace(1, args.n_collects - 1, 10).astype(int))
-    viz_midd = set(np.linspace(1, args.n_collects - 1, 100).astype(int)).union(viz_slow)
-    viz_fast = set(np.linspace(1, args.n_collects - 1, 1000).astype(int)).union(viz_midd)
-
+    timer = Timer()
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
+        timer.key2time.clear()
         print("Collecting expert data...")
-        mbuffer.collect(experts, args.ctx_len)
+        mbuffer.collect(experts, args.ctx_len, Timer())
 
         print("Collecting student data...")
-        mbuffer_test.collect(agent, args.ctx_len)
+        mbuffer_test.collect(agent, args.ctx_len, timer)
 
         lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
         for param_group in opt.param_groups:
@@ -155,18 +155,32 @@ def main(args):
         agent.train()
         for _ in range(args.n_updates):
             batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-            obs, dist_teacher, act, done = batch["obs"], batch["dist"], batch["act"], batch["done"]
-            dist_student, values = agent(obs=obs, act=act, done=done)
+            obs, dist_expert, act, done = batch["obs"], batch["dist"], batch["act"], batch["done"]
+            with timer.add_time("forward_pass"):
+                logits, values = agent(obs=obs, act=act, done=done)  # b t ...
+            dist_student = torch.distributions.Categorical(logits=logits)
+            # TODO add option for last token training only
 
-            kl_div = torch.distributions.kl.kl_divergence(dist_student, dist_teacher)
-            entropy = dist_student.entropy()
-            loss_kl, loss_entropy = kl_div.mean(), entropy.mean()
-            loss = loss_kl - args.ent_coef * loss_entropy
+            with timer.add_time("calc_loss"):
+                kl_div = torch.nn.functional.kl_div(dist_student.logits, dist_expert.logits, log_target=True, reduction="none")
+                # kl_div = torch.distributions.kl.kl_divergence(dist_student, dist_teacher)
 
-            opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-            opt.step()
+                entropy = dist_student.entropy()
+                loss_kl, loss_entropy = kl_div.mean(), entropy.mean()
+                loss = loss_kl - args.ent_coef * loss_entropy
+
+            with timer.add_time("opt_step"):
+                opt.zero_grad()
+            with timer.add_time("backward_pass"):
+                loss.backward()
+            with timer.add_time("opt_step"):
+                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                opt.step()
+
+        lgts = dist_student.logits
+        kld_oh_student = torch.nn.functional.kl_div((lgts).log_softmax(dim=-1), (lgts * 1e6).log_softmax(dim=-1), log_target=True, reduction="none").mean().item()
+        lgts = dist_expert.logits
+        kld_oh_expert = torch.nn.functional.kl_div((lgts).log_softmax(dim=-1), (lgts * 1e6).log_softmax(dim=-1), log_target=True, reduction="none").mean().item()
 
         # ------------------- Logging ------------------- #
         viz_slow = i_collect % (args.n_collects // 10) == 0
@@ -176,40 +190,42 @@ def main(args):
         data = {}
         for env_id, env in zip(args.env_ids, mbuffer.envs):
             for key, val in env.key2past_rets.items():  # log returns
-                if i_collect in viz_fast:  # log scalar
+                if viz_fast:  # log scalar
                     data[f"charts_expert/{env_id}_{key}"] = torch.cat(val).mean().item()
-                if i_collect in viz_midd:  # log histogram
+                if viz_midd:  # log histogram
                     data[f"charts_expert_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
         for env_id, env in zip(args.env_ids_test, mbuffer_test.envs):
             for key, val in env.key2past_rets.items():  # log returns
-                if i_collect in viz_fast:  # log scalar
+                if viz_fast:  # log scalar
                     data[f"charts_student/{env_id}_{key}"] = torch.cat(val).mean().item()
-                if i_collect in viz_midd:  # log histogram
+                if viz_midd:  # log histogram
                     data[f"charts_student_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
-            if args.log_video and i_collect in viz_slow:  # log video
+            if args.log_video and viz_slow:  # log video
                 vid = np.stack(env.past_obs).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
                 vid[:, :, :, :, -1] = 128
                 vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
-        if i_collect in viz_fast:
+        if viz_fast:
             data["charts/loss_kl"] = loss_kl.item()
             data["details/loss_kl_0"] = kl_div[:, 0].mean().item()
             data["details/loss_kl_-1"] = kl_div[:, -1].mean().item()
             data["details/entropy"] = loss_entropy.item()
             data["details/perplexity"] = np.e ** loss_entropy.item()
             data["details/lr"] = lr
-        if i_collect in viz_midd:
+            data["details/kld_oh_student"] = kld_oh_student
+            data["details/kld_oh_expert"] = kld_oh_expert
+        if viz_midd:
             data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy().flatten())
             data["details_hist/action"] = wandb.Histogram(act.detach().cpu().numpy().flatten())
-        if i_collect in viz_slow:
+        if viz_slow:
             if args.save_agent is not None:  # save agent
                 print("Saving agent...")
                 os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
                 torch.save(agent.state_dict(), args.save_agent)
 
-        if args.track and i_collect in viz_fast:
+        if args.track and viz_fast:
             wandb.log(data, step=i_collect * args.collect_size)
 
         keys_tqdm = ["loss_kl", "loss_entropy", "Breakout_student_ret_ext", "Breakout_student_dtgpt_ext"]

@@ -206,10 +206,26 @@ class DecisionTransformer(nn.Module):
         logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
         return logits, values[..., 0]
 
-    def forward(self, obs, act=None, done=None):
+    # def forward(self, obs, act=None, done=None):
+    #     # obs.shape: b, t, c, h, w
+    #     # act.shape: b, t (or b, t-1)
+    #     # done.shape: b, t
+
+    #     # logits.shape: b, t, n_acts
+    #     # values.shape: b, t
+    #     # print the obs, act, done shape and device, and dtype
+    #     if act.shape[1] == obs.shape[1] - 1:  # pad action
+    #         noaction = act[:, [-1]].clone()
+    #         act = torch.cat([act, noaction], dim=-1)
+    #     # mask = self.create_mask(done, toks=3)
+    #     logits, values = self.forward_temp(rtg=None, obs=obs, act=act)
+    #     return torch.distributions.Categorical(logits=logits), values
+
+    def forward(self, done, obs, act, rew):
+        # done.shape: b, t
         # obs.shape: b, t, c, h, w
         # act.shape: b, t (or b, t-1)
-        # done.shape: b, t
+        # rew.shape: b, t
 
         # logits.shape: b, t, n_acts
         # values.shape: b, t
@@ -219,7 +235,7 @@ class DecisionTransformer(nn.Module):
             act = torch.cat([act, noaction], dim=-1)
         # mask = self.create_mask(done, toks=3)
         logits, values = self.forward_temp(rtg=None, obs=obs, act=act)
-        return torch.distributions.Categorical(logits=logits), values
+        return logits, values
 
     def create_mask(self, done, toks=1):
         t, b = done.shape

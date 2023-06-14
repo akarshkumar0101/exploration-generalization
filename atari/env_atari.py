@@ -107,7 +107,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
 
-    env = StoreObs(env, n_envs_store=25, buf_size=1000)
+    env = StoreObs(env, n_envs_store=4, buf_size=450)
     env = ToTensor(env, device=device)
     # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
     env = StoreReturns(env, buf_size=buf_size)
