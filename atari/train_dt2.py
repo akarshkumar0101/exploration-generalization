@@ -159,7 +159,7 @@ def main(args):
             batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
             obs, dist_expert, act, done = batch["obs"], batch["dist"], batch["act"], batch["done"]
             with timer.add_time("forward_pass"):
-                logits, values = agent(obs=obs, act=act, done=done)  # b t ...
+                logits, values = agent(done=done, obs=obs, act=act, rew=None)  # b t ...
             dist_student = torch.distributions.Categorical(logits=logits)
             # TODO add option for last token training only
 

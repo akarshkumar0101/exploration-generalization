@@ -74,9 +74,9 @@ class Buffer:
             logits, value = agent(**agent_input)  # b t ...
         self.value = value[:, -1]
 
-        print("Collection time breakdown:")
-        for key, t in timer.key2time.items():
-            print(f"{key:30s}: {t:.3f}")
+        # print("Collection time breakdown:")
+        # for key, t in timer.key2time.items():
+            # print(f"{key:30s}: {t:.3f}")
 
     @torch.no_grad()
     def calc_gae(self, gamma, gae_lambda):
