@@ -112,8 +112,8 @@ def main(args):
     print("Agent Summary: ")
     torchinfo.summary(
         agent,
-        input_size=[(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
-        dtypes=[torch.float, torch.long, torch.bool],
+        input_size=[(args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        dtypes=[torch.bool, torch.float, torch.long, torch.float],
         device=args.device,
     )
     if args.load_agent is not None:
