@@ -15,7 +15,7 @@ python_file: train_dt2.py
 --obj: ext
 --ctx-len: 4
 
---total-steps: 1000e6
+--total-steps: 100e6
 --n-envs: 256
 --n-steps: 256
 --batch-size: 1024
