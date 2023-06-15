@@ -1,0 +1,34 @@
+python_file: train_dt2.py
+
+--track: True
+--project: egb-atari
+--name: "generalist_finetune_{env_ids}_pre{obj}_{seed}"
+
+--device: cuda
+--seed: [0, 1, 2]
+
+--log-video: True
+
+--env-ids: [[Alien], [MsPacman], [Pong], [SpaceInvaders], [StarGunner]]
+--env-ids-test: [[None]]
+
+--obj: [ext, rnd]
+--ctx-len: 4
+
+--total-steps: 10e6
+--n-envs: 16
+--n-steps: 128
+--batch-size: 256
+--n-updates: 8
+--lr: 2e-4
+--lr-schedule: False
+--gamma: 0.99
+--ent-coef: 0.0
+--max-grad-norm: 1.0
+
+--arch: gpt
+--expert-agent: ./data/egb-atari/specialist_{env_id}_ext_{seed}/agent_9.pt
+--load-agent: ./data/{project}/generalist_32_{obj}_{seed}/agent.pt
+--save-agent: ./data/{project}/{name}/agent.pt
+
+
