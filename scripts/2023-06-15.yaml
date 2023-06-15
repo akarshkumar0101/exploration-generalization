@@ -27,8 +27,8 @@ python_file: train_dt2.py
 --max-grad-norm: 1.0
 
 --arch: gpt
---expert-agent: ./data/egb-atari/specialist_{env_id}_ext_{seed}/agent_9.pt
---load-agent: ./data/{project}/generalist_32_{obj}_{seed}/agent.pt
+--expert-agent: ./data/egb-atari/specialist_{env_id}_ext_0/agent_9.pt
+--load-agent: ./data/{project}/generalist_32_{obj}_0/agent.pt
 --save-agent: ./data/{project}/{name}/agent.pt
 
 
