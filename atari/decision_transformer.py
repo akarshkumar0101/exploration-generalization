@@ -229,7 +229,7 @@ class DecisionTransformer(nn.Module):
             mask[done[i], i * toks :, : i * toks] = False
         return mask
 
-    def create_optimizer(self, weight_decay, lr, betas=(0.9, 0.95), device=None):
+    def create_optimizer(self, lr, weight_decay=0, betas=(0.9, 0.95), device=None, **kwargs):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad

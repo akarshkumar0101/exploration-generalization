@@ -7,9 +7,8 @@ from distutils.util import strtobool
 import numpy as np
 import torch
 import torchinfo
-from agent_atari import CNNAgent, RandomAgent
+from agent_atari import NatureCNNAgent, DecisionTransformer
 from buffers import Buffer, MultiBuffer
-from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
 import timers
@@ -100,191 +99,6 @@ def get_lr(lr, i_collect, n_collects, lr_schedule=True):
     return lr_min + coeff * (lr - lr_min)
 
 
-def main(args):
-    print("Running PPO with args: ", args)
-    if args.track:
-        wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
-
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-
-    # encoder = Encoder((1, 84, 84), 64).to(args.device)
-    # e3b_encode_fn = lambda obs: encoder.encode(obs[:, [-1]])  # encode only the latest frame
-    # env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=e3b_encode_fn, gamma=args.gamma, device=args.device, seed=args.seed)
-
-    mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()
-    for env_id in [args.env_id]:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
-    # for env_id in args.env_ids_test:
-    # env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-    # mbuffer_test.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
-
-    if args.arch == "cnn":
-        agent = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
-    elif args.arch == "gpt":
-        agent = DecisionTransformer(args.ctx_len, 18, 4, 4, 4 * 64, 0.0, True).to(args.device)
-    elif args.arch == "rand":
-        agent = RandomAgent(18).to(args.device)
-    print("Agent Summary: ")
-    torchinfo.summary(
-        agent,
-        input_size=[(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
-        dtypes=[torch.float, torch.long, torch.bool],
-        device=args.device,
-    )
-    if args.load_agent is not None:
-        agent.load_state_dict(torch.load(args.load_agent))
-
-    if args.arch == "cnn" or args.arch == "rand":
-        # opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
-        opt = torch.optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}])
-    elif args.arch == "gpt":
-        opt = agent.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
-
-    start_time = time.time()
-
-    viz_slow = set(np.linspace(1, args.n_collects - 1, 10).astype(int))
-    viz_midd = set(np.linspace(1, args.n_collects - 1, 100).astype(int)).union(viz_slow)
-    viz_fast = set(np.linspace(1, args.n_collects - 1, 1000).astype(int)).union(viz_midd)
-
-    timer = timers.Timer()
-    pbar = tqdm(range(args.n_collects))
-    for i_collect in pbar:
-        timer.clear()
-
-        with timer.add_time("collect"):
-            mbuffer.collect(agent, args.ctx_len, timer)
-        with timer.add_time("calc_gae"):
-            mbuffer.calc_gae(args.gamma, args.gae_lambda)
-        # mbuffer_test.collect(agent, args.ctx_len)
-
-        lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
-        for param_group in opt.param_groups:
-            param_group["lr"] = lr
-        agent.train()
-
-        for _ in range(args.n_updates):
-            with timer.add_time("generate_batch"):
-                batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-            obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
-            dist_old, val_old = batch["dist"], batch["val"]
-            with timer.add_time("forward_pass"):
-                dist, val = agent(obs=obs, act=act, done=done)
-
-
-            # ------------ NEW CODE ------------
-
-            with timer.add_time("calc_loss"):
-                loss_p = calc_ppo_policy_loss(dist, dist_old, act, adv, norm_adv=args.norm_adv, clip_coef=args.clip_coef)
-                loss_v = calc_ppo_value_loss(val, val_old, ret, clip_coef=args.clip_coef if args.clip_vloss else None)
-
-            # ------------ NEW CODE ------------
-
-            with timer.add_time("calc_loss"):
-                if args.last_token_only:
-                    dist = torch.distributions.Categorical(logits=dist.logits[:, -1])
-                    dist_old = torch.distributions.Categorical(logits=dist_old.logits[:, -1])
-                    val, val_old = val[:, -1], val_old[:, -1]
-                    obs, act, done, ret, adv = obs[:, -1], act[:, -1], done[:, -1], ret[:, -1], adv[:, -1]
-
-                if args.norm_adv:
-                    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
-
-                ratio = (dist.log_prob(act) - dist_old.log_prob(act)).exp()
-                loss_pg1 = -adv * ratio
-                loss_pg2 = -adv * ratio.clamp(1 - args.clip_coef, 1 + args.clip_coef)
-                loss_pg = torch.max(loss_pg1, loss_pg2).mean()
-
-                if args.clip_vloss:
-                    loss_v_unclipped = (val - ret) ** 2
-                    v_clipped = val_old + (val - val_old).clamp(-args.clip_coef, args.clip_coef)
-                    loss_v_clipped = (v_clipped - ret) ** 2
-                    loss_v_max = torch.max(loss_v_unclipped, loss_v_clipped)
-                    loss_v = 0.5 * loss_v_max.mean()
-                else:
-                    loss_v = 0.5 * ((val - ret) ** 2).mean()
-
-                entropy = dist.entropy()
-                loss_entropy = entropy.mean()
-
-                loss = loss_pg + loss_v * args.vf_coef - args.ent_coef * loss_entropy
-
-                # obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
-                # loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
-                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
-
-            with timer.add_time("opt_step"):
-                opt.zero_grad()
-            with timer.add_time("backward_pass"):
-                loss.backward()
-            with timer.add_time("opt_step"):
-                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
-                opt.step()
-
-            y_pred, y_true = val_old.flatten().cpu().numpy(), ret.flatten().cpu().numpy()
-            var_y = np.var(y_true)
-            explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
-
-            kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
-            if args.max_kl_div is not None and kl_div > args.max_kl_div:
-                break
-
-        # ------------------- Logging ------------------- #
-        data = {}
-        for env_id, env in zip([args.env_id], mbuffer.envs):
-            for key, val in env.key2past_rets.items():  # log returns
-                rets = torch.cat(val).tolist()
-                if len(rets) > 0 and i_collect in viz_fast:  # log scalar
-                    data[f"charts/{env_id}_{key}"] = np.mean(rets)
-                if len(rets) > 0 and i_collect in viz_midd:  # log histogram
-                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(rets)
-            if args.log_video and i_collect in viz_slow:  # log video
-                vid = np.stack(env.past_obs).copy()[-450:, :4]  # t, b, c, h, w
-                vid[:, :, :, -1, :] = 128
-                vid[:, :, :, :, -1] = 128
-                vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
-                print("creating video of shape: ", vid.shape)
-                # data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
-
-        # print(f"dt_const: {mbuffer.buffers[0].dt_const}, dt_inf: {mbuffer.buffers[0].dt_inf}, dt_env: {mbuffer.buffers[0].dt_env}, dt_learn: {dt_learn}")
-        if i_collect in viz_fast:  # fast logging, ex: scalars
-            for key, time in timer.key2time:
-                data[f"time/{key}"] = time
-
-            data["details/lr"] = opt.param_groups[0]["lr"]
-            data["details/loss_value"] = loss_v.item()
-            data["details/loss_policy"] = loss_pg.item()
-            data["details/entropy"] = loss_entropy.item()
-            data["details/perplexity"] = np.e ** loss_entropy.item()
-            data["details/kl_div"] = kl_div
-            # data["details/clipfrac"] = np.mean(clipfracs)
-            data["details/explained_variance"] = explained_var
-            data["meta/SPS"] = i_collect * args.collect_size / (time.time() - start_time)
-            data["meta/global_step"] = i_collect * args.collect_size
-            # data["details/loss_tc"] = loss_tc.item()
-        if i_collect in viz_midd:  # midd loggin, ex: histograms
-            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy().flatten())
-            data["details_hist/action"] = wandb.Histogram(act.detach().cpu().numpy().flatten())
-        if i_collect in viz_slow:  # slow logging, ex: videos
-            if args.save_agent is not None:  # save agent
-                print("Saving agent...")
-                os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
-                torch.save(agent.state_dict(), args.save_agent)
-        if args.track and i_collect in viz_fast:  # tracking
-            wandb.log(data, step=i_collect * args.collect_size)
-            # plt.close("all")
-
-        keys_tqdm = ["charts/ret_ext", "meta/SPS"]
-        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
-
-
-if __name__ == "__main__":
-    main(parse_args())
-
-
 def calc_ppo_policy_loss(dist, dist_old, act, adv, norm_adv=True, clip_coef=0.1):
     if norm_adv:
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
@@ -305,3 +119,155 @@ def calc_ppo_value_loss(val, val_old, ret, clip_coef=0.1):
     else:
         loss_v = 0.5 * ((val - ret) ** 2)
     return loss_v
+
+
+def main(args):
+    print("Running PPO with args: ", args)
+    if args.track:
+        wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = args.torch_deterministic
+
+    # encoder = Encoder((1, 84, 84), 64).to(args.device)
+    # e3b_encode_fn = lambda obs: encoder.encode(obs[:, [-1]])  # encode only the latest frame
+    # env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=e3b_encode_fn, gamma=args.gamma, device=args.device, seed=args.seed)
+
+    mbuffer = MultiBuffer()
+    for env_id in [args.env_id]:
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
+
+    if args.arch == "cnn":
+        agent = NatureCNNAgent(18, args.ctx_len).to(args.device)
+    elif args.arch == "gpt":
+        agent = DecisionTransformer(18, args.ctx_len).to(args.device)
+    # elif args.arch == "rand":
+    # agent = RandomAgent(18).to(args.device)
+    print("Agent Summary: ")
+    torchinfo.summary(
+        agent,
+        input_size=[(args.batch_size, args.ctx_len)(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        dtypes=[torch.bool, torch.uint8, torch.long, torch.float],
+        device=args.device,
+    )
+    if args.load_agent is not None:
+        agent.load_state_dict(torch.load(args.load_agent))
+    opt = agent.create_optimizer(lr=args.lr, device=args.device)
+
+    start_time = time.time()
+    timer = timers.Timer()
+
+    pbar = tqdm(range(args.n_collects))
+    for i_collect in pbar:
+        timer.clear()
+
+        with timer.add_time("collect"):
+            mbuffer.collect(agent, args.ctx_len, timer)
+        with timer.add_time("calc_gae"):
+            mbuffer.calc_gae(args.gamma, args.gae_lambda)
+        # mbuffer_test.collect(agent, args.ctx_len)
+
+        lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
+        for param_group in opt.param_groups:
+            param_group["lr"] = lr
+        agent.train()
+
+        for _ in range(args.n_updates):
+            with timer.add_time("generate_batch"):
+                batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
+                obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
+                dist_old, val_old = batch["dist"], batch["val"]
+
+            with timer.add_time("forward_pass"):
+                dist, val = agent(obs=obs, act=act, done=done)
+
+            if args.last_token_only:
+                dist = torch.distributions.Categorical(logits=dist.logits[:, [-1]])
+                dist_old = torch.distributions.Categorical(logits=dist_old.logits[:, [-1]])
+                val, val_old = val[:, [-1]], val_old[:, [-1]]
+                obs, act, done, ret, adv = obs[:, [-1]], act[:, [-1]], done[:, [-1]], ret[:, [-1]], adv[:, [-1]]
+
+            with timer.add_time("calc_loss"):
+                loss_p = calc_ppo_policy_loss(dist, dist_old, act, adv, norm_adv=args.norm_adv, clip_coef=args.clip_coef)
+                loss_v = calc_ppo_value_loss(val, val_old, ret, clip_coef=args.clip_coef if args.clip_vloss else None)
+                loss_e = dist.entropy()
+
+                # obs_anc, obs_pos, obs_neg = sample_contrastive_batch(obs[:, :, -1, :, :], p=0.1, batch_size=args.batch_size)
+                # loss_tc = calc_contrastive_loss(encoder, obs_anc, obs_pos, obs_neg)
+                # loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + loss_tc
+
+                loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
+
+            with timer.add_time("opt_step"):
+                opt.zero_grad()
+            with timer.add_time("backward_pass"):
+                loss.backward()
+            with timer.add_time("opt_step"):
+                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                opt.step()
+
+            kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
+            if args.max_kl_div is not None and kl_div > args.max_kl_div:
+                break
+
+        # ------------------- Logging ------------------- #
+        data = {}
+        viz_slow = i_collect % (args.n_collects // 10) == 0
+        viz_midd = i_collect % (args.n_collects // 100) == 0 or viz_slow
+        viz_fast = i_collect % (args.n_collects // 1000) == 0 or viz_midd
+        to_np = lambda x: x.detach().cpu().numpy()
+
+        # Explained Variance
+        y_pred = to_np(mbuffer.buffers[0].vals).flatten()
+        y_true = to_np(mbuffer.buffers[0].rets).flatten()
+        explained_var = np.nan if np.var(y_true) == 0 else 1.0 - np.var(y_true - y_pred) / np.var(y_true)
+
+        for env_id, env in zip([args.env_id], mbuffer.envs):
+            for key, rets in env.get_past_returns().items():  # log returns
+                if len(rets) > 0 and viz_fast:  # log scalar
+                    data[f"charts/{env_id}_{key}"] = rets.mean().item()
+                if len(rets) > 0 and viz_midd:  # log histogram
+                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
+            if args.log_video and viz_slow:  # log video
+                vid = np.stack(env.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
+                vid[:, :, :, -1, :] = 128
+                vid[:, :, :, :, -1] = 128
+                vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
+                print("creating video of shape: ", vid.shape)
+                data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
+
+        if viz_fast:  # fast logging, ex: scalars
+            for key, time in timer.key2time:
+                data[f"time/{key}"] = time
+
+            data["details/lr"] = opt.param_groups[0]["lr"]
+            data["losses/loss_value"] = loss_v.mean().item()
+            data["losses/loss_policy"] = loss_p.mean().item()
+            data["details/entropy"] = loss_e.mean().item()
+            data["details/perplexity"] = np.e ** loss_e.mean().item()
+            data["details/kl_div"] = kl_div
+            # data["details/clipfrac"] = np.mean(clipfracs)
+            data["details/explained_variance"] = explained_var
+            data["meta/SPS"] = i_collect * args.collect_size / (time.time() - start_time)
+            data["meta/global_step"] = i_collect * args.collect_size
+        if viz_midd:  # midd loggin, ex: histograms
+            data["details_hist/entropy"] = wandb.Histogram(to_np(loss_e).flatten())
+            data["details_hist/perplexity"] = wandb.Histogram(np.e ** to_np(loss_e).flatten())
+            data["details_hist/action"] = wandb.Histogram(to_np(act).flatten())
+        if viz_slow:  # slow logging, ex: videos
+            if args.save_agent is not None:  # save agent
+                print("Saving agent...")
+                os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
+                torch.save(agent.state_dict(), args.save_agent)
+        if args.track and viz_fast:  # tracking
+            wandb.log(data, step=i_collect * args.collect_size)
+
+        keys_tqdm = ["charts/ret_score", "meta/SPS"]
+        pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
+
+
+if __name__ == "__main__":
+    main(parse_args())

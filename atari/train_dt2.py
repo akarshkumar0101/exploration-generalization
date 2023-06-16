@@ -121,11 +121,7 @@ def main(args):
     if args.load_agent is not None:
         agent.load_state_dict(torch.load(args.load_agent))
 
-    if args.arch == "cnn":
-        # opt = optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}, {"params": encoder.parameters(), "lr": args.lr_tc, "eps": 1e-8}])
-        opt = torch.optim.Adam([{"params": agent.parameters(), "lr": args.lr, "eps": 1e-5}])
-    elif args.arch == "gpt":
-        opt = agent.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
+    opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     experts = []
     mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()

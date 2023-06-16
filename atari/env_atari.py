@@ -135,6 +135,9 @@ class StoreObs(gym.Wrapper):
         info["past_obs"] = self.past_obs
         return obs, rew, term, trunc, info
 
+    def get_past_obs(self):
+        return self.past_obs
+
 
 class ToTensor(gym.Wrapper):
     def __init__(self, env, device=None):

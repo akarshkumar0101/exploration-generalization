@@ -62,6 +62,9 @@ class NatureCNNAgent(nn.Module):
         logits, values = rearrange(logits, "b a -> b 1 a"), rearrange(values, "b 1 -> b 1")
         return logits, values
 
+    def create_optimizer(self, lr, weight_decay=0, betas=(0.9, 0.999), eps=1e-5, **kwargs):
+        return torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay, betas=betas, eps=eps)
+
     # def init_weights(self):
     #     def _init_weights(m):
     #         if isinstance(m, (nn.Linear, nn.Conv2d)):
@@ -82,7 +85,8 @@ class NatureCNNAgent(nn.Module):
     #             obs[i_env, :i_step] = obs[i_env, [i_step]]
     #     return obs
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     agent1 = NatureCNNAgent(18, 4)
     agent2 = DecisionTransformer(18, 4)
 
