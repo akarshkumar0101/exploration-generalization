@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from einops import rearrange
 
+from agent_atari import NatureCNN
 
 class LayerNorm(nn.LayerNorm):
     """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
@@ -38,7 +39,7 @@ class CausalSelfAttention(nn.Module):
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.n_steps * 3, config.n_steps * 3)).view(1, 1, config.n_steps * 3, config.n_steps * 3))
+            self.register_buffer("bias", torch.tril(torch.ones(config.ctx_len * 3, config.ctx_len * 3)).view(1, 1, config.ctx_len * 3, config.ctx_len * 3))
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
@@ -108,8 +109,8 @@ class Block(nn.Module):
 
 @dataclass
 class Config:
-    n_steps: int = 50
-    n_acts: int = 15
+    n_acts: int
+    ctx_len: int
     n_layers: int = 4
     n_heads: int = 4
     n_embd: int = 4 * 64
@@ -118,22 +119,12 @@ class Config:
 
 
 class DecisionTransformer(nn.Module):
-    def __init__(self, n_steps=50, n_acts=18, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True):
+    def __init__(self, n_acts, ctx_len, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True):
         super().__init__()
-        self.config = Config(n_steps=n_steps, n_acts=n_acts, n_layers=n_layers, n_heads=n_heads, n_embd=n_embd, dropout=dropout, bias=bias)
+        self.config = Config(n_acts=n_acts, ctx_len=ctx_len, n_layers=n_layers, n_heads=n_heads, n_embd=n_embd, dropout=dropout, bias=bias)
 
-        self.encode_step = nn.Embedding(self.config.n_steps, self.config.n_embd)
-        self.encode_obs = nn.Sequential(
-            nn.Conv2d(1, 32, 8, stride=4, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(3136, self.config.n_embd),
-            nn.Tanh(),
-        )
+        self.encode_step = nn.Embedding(self.config.ctx_len, self.config.n_embd)
+        self.encode_obs = NatureCNN(1, self.config.n_embd)
         self.encode_rtg = nn.Sequential(nn.Linear(1, self.config.n_embd), nn.Tanh())
         # self.encode_act = nn.Sequential(nn.Embedding(config.n_acts, config.n_embd), nn.Tanh())
         self.encode_act = nn.Embedding(self.config.n_acts, self.config.n_embd)
@@ -168,22 +159,27 @@ class DecisionTransformer(nn.Module):
         # obs: (b, t, c, 84, 84)
         # rtg: (b, t)
         # act: (b, t)
+        import timers
+        timer = timers.Timer()
 
-        batch_size, n_steps, _, _, _ = obs.shape
-        assert n_steps <= self.config.n_steps, f"Sequence too long"
+        batch_size, ctx_len, _, _, _ = obs.shape
+        assert ctx_len <= self.config.ctx_len, f"Sequence too long"
         if rtg is None:
-            rtg = torch.zeros(batch_size, n_steps, dtype=torch.float32, device=obs.device)  # (batch_size, n_steps)
+            rtg = torch.zeros(batch_size, ctx_len, dtype=torch.float32, device=obs.device)  # (batch_size, ctx_len)
 
-        i_step = torch.arange(0, n_steps, dtype=torch.long, device=obs.device)  # (n_steps, )
-        x_step = self.encode_step(i_step)  # (n_steps, n_embd)
+        i_step = torch.arange(0, ctx_len, dtype=torch.long, device=obs.device)  # (ctx_len, )
+        x_step = self.encode_step(i_step)  # (ctx_len, n_embd)
 
         rtg = rearrange(rtg, "b t -> (b t) 1")
         obs = rearrange(obs, "b t c h w -> (b t) c h w")
         act = rearrange(act, "b t -> (b t)")
 
-        x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
-        x_obs = self.encode_obs(obs / 255.0)  # (batch_size * n_steps, n_embd)
-        x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
+        with timer.add_time('embed_rtg'):
+            x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
+        with timer.add_time('embed_obs'):
+            x_obs = self.encode_obs(obs)  # (batch_size * n_steps, n_embd)
+        with timer.add_time('embed_act'):
+            x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
 
         x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
         x_obs = x_step + rearrange(x_obs, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
@@ -197,29 +193,17 @@ class DecisionTransformer(nn.Module):
         assert torch.allclose(x[:, 2::3, :], x_act)  # sanity check, TODO: remove
 
         x = self.drop(x)
-        x = self.blocks(x)
+        with timer.add_time('blocks'):
+            x = self.blocks(x)
         x = self.ln_f(x)
 
-        x = rearrange(x, "b (t c) d -> b t c d", t=n_steps)  # (batch_size, n_steps, 3, n_embd)
+        x = rearrange(x, "b (t c) d -> b t c d", t=ctx_len)  # (batch_size, n_steps, 3, n_embd)
         x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
-        logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
+        with timer.add_time('out_heads'):
+            logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
+        # print(dict(timer.key2time))
         return logits, values[..., 0]
-
-    # def forward(self, obs, act=None, done=None):
-    #     # obs.shape: b, t, c, h, w
-    #     # act.shape: b, t (or b, t-1)
-    #     # done.shape: b, t
-
-    #     # logits.shape: b, t, n_acts
-    #     # values.shape: b, t
-    #     # print the obs, act, done shape and device, and dtype
-    #     if act.shape[1] == obs.shape[1] - 1:  # pad action
-    #         noaction = act[:, [-1]].clone()
-    #         act = torch.cat([act, noaction], dim=-1)
-    #     # mask = self.create_mask(done, toks=3)
-    #     logits, values = self.forward_temp(rtg=None, obs=obs, act=act)
-    #     return torch.distributions.Categorical(logits=logits), values
 
     def forward(self, done, obs, act, rew):
         # done.shape: b, t

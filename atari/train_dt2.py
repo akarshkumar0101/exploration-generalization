@@ -13,7 +13,7 @@ from decision_transformer import DecisionTransformer
 from einops import rearrange
 from env_atari import make_env
 from tqdm.auto import tqdm
-from timers import Timer
+import timers
 
 import wandb
 
@@ -72,7 +72,7 @@ def parse_args(*args, **kwargs):
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
-
+    
     args.n_envs_per_id = args.n_envs // len(args.env_ids)
 
     args.collect_size = args.n_envs * args.n_steps
@@ -141,15 +141,15 @@ def main(args):
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj='ext', e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         mbuffer_test.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
-    timer = Timer()
+    timer = timers.Timer()
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer.key2time.clear()
         # print("Collecting expert data...")
-        mbuffer.collect(experts, args.ctx_len, Timer())
+        mbuffer.collect(experts, args.ctx_len, timer=None)
 
         # print("Collecting student data...")
-        mbuffer_test.collect(agent, args.ctx_len, timer)
+        mbuffer_test.collect(agent, args.ctx_len, timer=timer)
 
         lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
         for param_group in opt.param_groups:

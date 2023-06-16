@@ -9,7 +9,6 @@ try:
     import envpool
 
     has_envpool = True
-    print("envpool found!")
 except ModuleNotFoundError:
     has_envpool = False
     print("WARNING: envpool not found.")
@@ -67,28 +66,28 @@ class NoArgsReset(gym.Wrapper):
         return self.env.reset()
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
+def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.99, full_action_space=True, device=None, seed=0):
     if has_envpool:
         env = envpool.make_gymnasium(
             task_id=f"{env_id}-v5",
             num_envs=n_envs,
             # batch_size=None,
             # num_threads=None,
-            seed=seed,
-            max_episode_steps=27000,
-            img_height=84,
-            img_width=84,
-            stack_num=1,
-            gray_scale=True,
-            frame_skip=4,
-            noop_max=30,
-            episodic_life=True,
-            zero_discount_on_life_loss=False,
-            reward_clip=True,
-            repeat_action_probability=0,
-            use_inter_area_resize=True,
-            use_fire_reset=True,
-            full_action_space=True,
+            seed=seed,  # default: 42
+            # max_episode_steps=27000,  # default: 27000
+            # img_height=84,  # default: 84
+            # img_width=84,  # default: 84
+            stack_num=1,  # default: 4
+            # gray_scale=True,  # default: True
+            # frame_skip=4,  # default: 4
+            # noop_max=30,  # default: 30
+            episodic_life=True,  # default: False
+            # zero_discount_on_life_loss=False,  # default: False
+            reward_clip=True,  # default: False
+            # repeat_action_probability=0,  # default: 0
+            # use_inter_area_resize=True,  # default: True
+            # use_fire_reset=True,  # default: True
+            full_action_space=full_action_space,  # default: False
         )
         env = NoArgsReset(env)
         env.num_envs = n_envs
@@ -110,7 +109,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
     env = StoreObs(env, n_envs_store=4, buf_size=450)
     env = ToTensor(env, device=device)
     # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
-    env = StoreReturns(env, buf_size=buf_size)
+    env = StoreReturns(env)
     env = RewardSelector(env, obj=obj)
 
     # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
@@ -120,7 +119,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
 
 
 class StoreObs(gym.Wrapper):
-    def __init__(self, env, n_envs_store=4, buf_size=450):
+    def __init__(self, env, n_envs_store=4, buf_size=1000):
         super().__init__(env)
         self.n_envs_store = n_envs_store
         self.past_obs = collections.deque(maxlen=buf_size)
@@ -157,15 +156,20 @@ class ToTensor(gym.Wrapper):
         return obs, info
 
     def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action.cpu().numpy().astype(np.int32))
+        if isinstance(action, torch.Tensor):
+            action = action.cpu().numpy()
+        elif isinstance(action, list):
+            action = np.array(action)
+        obs, rew, term, trunc, info = self.env.step(action)
         rew = rew.astype(np.float32)
         info["obs"] = torch.from_numpy(obs).to(self.device)
         info["rew_ext"] = torch.from_numpy(rew).to(self.device)
         info["rew_score"] = torch.from_numpy(info["reward"]).to(self.device)
         del info["reward"]
         info["rew_traj"] = torch.ones_like(info["rew_ext"])
-        info["term"] = torch.from_numpy(term).to(self.device)
-        info["trunc"] = torch.from_numpy(trunc).to(self.device)
+        info["term"] = torch.from_numpy(term).to(self.device, torch.bool)
+        info["trunc"] = torch.from_numpy(trunc).to(self.device, torch.bool)
+        info["term_atari"] = torch.from_numpy(info["terminated"]).to(self.device, torch.bool)
         info["done"] = info["term"] | info["trunc"]
 
         self.timestep += 1
@@ -187,28 +191,29 @@ class RewardSelector(gym.Wrapper):
 
 
 class StoreReturns(gym.Wrapper):
-    def __init__(self, env, buf_size=128):
+    def __init__(self, env, key_ret="ret_", key_term="term_atari", buf_size=512):
         super().__init__(env)
-        self.buf_size = buf_size
+        self.key_ret, self.key_term, self.buf_size = key_ret, key_term, buf_size
         self.key2running_ret = {}  # key -> running return
         self.key2past_rets = {}  # key -> list of arrays of past returns
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-
-        for key in info:
-            if not key.startswith("rew_"):
-                continue
-            keyr = key.replace("rew_", "ret_")
+        term = info[self.key_term]
+        for key in [key for key in info if key.startswith("rew_")]:
+            keyr = key.replace("rew_", self.key_ret)
             if keyr not in self.key2running_ret:
                 self.key2running_ret[keyr] = torch.zeros_like(info[key])
-                self.key2past_rets[keyr] = []
-            self.key2running_ret[keyr] += info[key]
+                self.key2past_rets[keyr] = collections.deque(maxlen=self.buf_size)
 
-            self.key2past_rets[keyr].append(self.key2running_ret[keyr][info["done"]].clone())
-            self.key2past_rets[keyr] = self.key2past_rets[keyr][-self.buf_size :]
-            self.key2running_ret[keyr][info["done"]] = 0.0
+            self.key2running_ret[keyr] += info[key]
+            self.key2past_rets[keyr].append(self.key2running_ret[keyr][term].clone())
+            # info[keyr] = self.key2running_ret[keyr].clone()
+            self.key2running_ret[keyr][term] = 0.0
         return obs, rew, term, trunc, info
+
+    def get_past_returns(self):
+        return {key: torch.cat(list(val), dim=0) for key, val in self.key2past_rets.items()}
 
 
 class E3BReward(gym.Wrapper):
@@ -216,52 +221,6 @@ class E3BReward(gym.Wrapper):
         super().__init__(env)
         self.encode_fn = encode_fn
         self.lmbda = lmbda
-
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        # if self.latent_key in info:
-        # latent, done = info[self.latent_key], info["done"]
-        if self.encode_fn is not None:
-            latent, done = self.encode_fn(info["obs"]), info["done"]
-
-            self.Il = torch.eye(latent.shape[-1]) / self.lmbda  # d, d
-            self.Cinv = torch.zeros(self.num_envs, latent.shape[-1], latent.shape[-1])  # b, d, d
-
-            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
-            self.step_e3b(latent, done)
-        return obs, info
-
-    def step(self, action):
-        obs, rew, term, trunc, info = self.env.step(action)
-        # if self.latent_key in info:
-        # latent, done = info[self.latent_key], info["done"]
-        if self.encode_fn is not None:
-            latent, done = self.encode_fn(info["obs"]), info["done"]
-
-            # info[f"rew_e3b_{self.latent_key}"] = self.step_e3b(latent, done)
-            info[f"rew_e3b"] = self.step_e3b(latent, done)
-
-        return obs, rew, term, trunc, info
-
-    @torch.no_grad()  # this is required
-    def step_e3b(self, latent, done):
-        self.Il, self.Cinv = self.Il.to(self.device), self.Cinv.to(self.device)
-        assert done.dtype == torch.bool
-        self.Cinv[done] = self.Il
-        v = latent[..., :, None]  # b, d, 1
-        u = self.Cinv @ v  # b, d, 1
-        b = v.mT @ u  # b, 1, 1
-        rew_e3b = b[..., 0, 0].clone()  # cloning is important, otherwise b will be written to
-        rew_e3b[done] = 0.0
-        self.u, self.v, self.b = u, v, b
-        self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
-        return rew_e3b
-
-
-class RNDReward(gym.Wrapper):
-    def __init__(self, env, rnd_model):
-        super().__init__(env)
-        self.rnd_model = rnd_model
 
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
