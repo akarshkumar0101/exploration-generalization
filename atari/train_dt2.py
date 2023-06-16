@@ -1,23 +1,19 @@
 import argparse
 import os
 import random
-import time
 from distutils.util import strtobool
 
 import numpy as np
 import torch
 import torchinfo
-from agent_atari import CNNAgent
-from buffers2 import Buffer, MultiBuffer
-from decision_transformer import DecisionTransformer
+from agent_atari import NatureCNNAgent, DecisionTransformer
+from buffers import Buffer, MultiBuffer
 from einops import rearrange
 from env_atari import make_env
 from tqdm.auto import tqdm
 import timers
 
 import wandb
-
-from ppo_rnd_envpool import layer_init, Agent
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
@@ -33,7 +29,6 @@ parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=Fa
 
 # Algorithm arguments
 parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
-parser.add_argument("--env-ids-test", type=str, nargs="+", default=[], help="the id of the environment")
 parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
 parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
 parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
@@ -72,7 +67,7 @@ def parse_args(*args, **kwargs):
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
-    
+
     args.n_envs_per_id = args.n_envs // len(args.env_ids)
 
     args.collect_size = args.n_envs * args.n_steps
@@ -108,25 +103,26 @@ def main(args):
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     if args.arch == "cnn":
-        agent = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
+        agent = NatureCNNAgent(18, args.ctx_len).to(args.device)
     elif args.arch == "gpt":
-        agent = DecisionTransformer(args.ctx_len, 18, 4, 4, 4 * 64, 0.0, True).to(args.device)
+        agent = DecisionTransformer(18, args.ctx_len).to(args.device)
+    # elif args.arch == "rand":
+    # agent = RandomAgent(18).to(args.device)
     print("Agent Summary: ")
     torchinfo.summary(
         agent,
-        input_size=[(args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
-        dtypes=[torch.bool, torch.float, torch.long, torch.float],
+        input_size=[(args.batch_size, args.ctx_len)(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        dtypes=[torch.bool, torch.uint8, torch.long, torch.float],
         device=args.device,
     )
     if args.load_agent is not None:
         agent.load_state_dict(torch.load(args.load_agent))
-
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     experts = []
     mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()
     for env_id in args.env_ids:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj='ext', e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj="ext", e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         mbuffer.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
         print("Loading expert from: ", {args.expert_agent.format(env_id=env_id)})
         # expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
@@ -134,7 +130,7 @@ def main(args):
         expert = torch.load(args.expert_agent.format(env_id=env_id)).to(args.device)
         experts.append(expert)
     for env_id in args.env_ids_test:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj='ext', e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj="ext", e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
         mbuffer_test.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
     timer = timers.Timer()

@@ -80,10 +80,6 @@ def parse_args(*args, **kwargs):
     return args
 
 
-# steps, updates, iterations
-# timesteps in env, updates to policy, iterations of training
-
-
 def get_lr(lr, i_collect, n_collects, lr_schedule=True):
     assert i_collect <= n_collects
     if not lr_schedule:

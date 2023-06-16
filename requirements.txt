@@ -1,9 +1,10 @@
 numpy==1.24.3
 torch==2.0.1
 
-envpool==0.8.2
 gym==0.23.1
 gymnasium==0.28.1
+procgen==0.10.7
+envpool==0.8.2
 
 einops==0.6.1
 tqdm==4.65.0
