@@ -2,16 +2,17 @@
 import argparse
 import os
 import random
+import time
 from distutils.util import strtobool
 
 import numpy as np
+import timers
 import torch
 import torchinfo
-from agent_atari import NatureCNNAgent, DecisionTransformer
+from agent_atari import DecisionTransformer, NatureCNNAgent
 from buffers import Buffer, MultiBuffer
 from einops import rearrange
 from env_atari import make_env
-import timers
 
 # from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
 from tqdm.auto import tqdm
@@ -55,6 +56,7 @@ parser.add_argument("--max-kl-div", type=float, default=None, help="the target K
 parser.add_argument("--arch", type=str, default="cnn", help="either cnn or gpt")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
+parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
 
 # parser.add_argument("--lr-tc", type=float, default=3e-4, help="learning rate for time contrastive encoder")
 
@@ -133,8 +135,8 @@ def main(args):
 
     mbuffer = MultiBuffer()
     for env_id in [args.env_id]:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
-        mbuffer.buffers.append(Buffer(args.n_steps, args.n_envs_per_id, env, device=args.device))
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
+        mbuffer.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
     if args.arch == "cnn":
         agent = NatureCNNAgent(18, args.ctx_len).to(args.device)
@@ -145,7 +147,7 @@ def main(args):
     print("Agent Summary: ")
     torchinfo.summary(
         agent,
-        input_size=[(args.batch_size, args.ctx_len)(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        input_size=[(args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
         dtypes=[torch.bool, torch.uint8, torch.long, torch.float],
         device=args.device,
     )
@@ -174,11 +176,12 @@ def main(args):
         for _ in range(args.n_updates):
             with timer.add_time("generate_batch"):
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-                obs, act, done, ret, adv = batch["obs"], batch["act"], batch["done"], batch["ret"], batch["adv"]
+                obs, act, done, rew, ret, adv = batch["obs"], batch["act"], batch["done"], batch["rew"], batch["ret"], batch["adv"]
                 dist_old, val_old = batch["dist"], batch["val"]
 
             with timer.add_time("forward_pass"):
-                dist, val = agent(obs=obs, act=act, done=done)
+                logits, val = agent(done=done, obs=obs, act=act, rew=rew)
+                dist = torch.distributions.Categorical(logits=logits)
 
             if args.last_token_only:
                 dist = torch.distributions.Categorical(logits=dist.logits[:, [-1]])
@@ -236,8 +239,9 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:  # fast logging, ex: scalars
-            for key, time in timer.key2time:
-                data[f"time/{key}"] = time
+            for key, tim in timer.key2time.items():
+                data[f"time/{key}"] = tim
+                print(f"time/{key}: {tim:.3f}")
 
             data["details/lr"] = opt.param_groups[0]["lr"]
             data["losses/loss_value"] = loss_v.mean().item()

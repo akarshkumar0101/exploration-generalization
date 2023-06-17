@@ -89,10 +89,10 @@ class Buffer:
                 nextnonterminal = ~self.done
                 nextvalues = self.value
             else:
-                nextnonterminal = ~self.dones[t + 1]
-                nextvalues = self.vals[t + 1]
-            delta = self.rews[t] + gamma * nextvalues * nextnonterminal - self.vals[t]
-            self.advs[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+                nextnonterminal = ~self.dones[:, t + 1]
+                nextvalues = self.vals[:, t + 1]
+            delta = self.rews[:, t] + gamma * nextvalues * nextnonterminal - self.vals[:, t]
+            self.advs[:, t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
         self.rets = self.advs + self.vals
 
     """

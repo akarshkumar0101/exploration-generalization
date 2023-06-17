@@ -1,0 +1,36 @@
+python_file: ppo_atari.py
+
+track: True
+# entity: 
+project: test
+name: "{env_id}_{seed}"
+log-video: False
+
+device: cuda
+seed: [0, 1, 2, 3, 4]
+# torch-deterministic: True
+
+env-id: [Breakout, Pong, BeamRider]
+obj: ext
+ctx-len: 4
+total-steps: 10e6
+n-envs: 8
+n-steps: 128
+batch-size: 256
+n-updates: 10
+lr: 2.5e-4
+lr-schedule: False
+gamma: 0.99
+# gae-lambda: 0.95 
+# norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
+# ent-coef: 0.01
+# clip-coef: 0.1
+# clip-vloss: True
+# vf-coef:0.5
+# max-grad-norm: 0.5
+# max-kl-div: 
+
+arch: cnn
+# load-agent: 
+# save-agent:
+full-action-space: False

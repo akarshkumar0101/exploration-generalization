@@ -3,7 +3,6 @@ import torch
 from torch import nn
 from einops import rearrange
 
-from decision_transformer import DecisionTransformer
 
 
 class RandomAgent(nn.Module):
@@ -97,3 +96,5 @@ if __name__ == "__main__":
     print(logits.shape, values.shape)
     logits, values = agent2(done=None, obs=obs, act=act, rew=None)
     print(logits.shape, values.shape)
+
+from decision_transformer import DecisionTransformer
