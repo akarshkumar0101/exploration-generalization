@@ -138,10 +138,11 @@ def main(args):
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
         mbuffer.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
+    
     if args.arch == "cnn":
-        agent = NatureCNNAgent(18, args.ctx_len).to(args.device)
+        agent = NatureCNNAgent(env.single_action_space.n, args.ctx_len).to(args.device)
     elif args.arch == "gpt":
-        agent = DecisionTransformer(18, args.ctx_len).to(args.device)
+        agent = DecisionTransformer(env.single_action_space.n, args.ctx_len).to(args.device)
     # elif args.arch == "rand":
     # agent = RandomAgent(18).to(args.device)
     print("Agent Summary: ")
@@ -241,7 +242,7 @@ def main(args):
         if viz_fast:  # fast logging, ex: scalars
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
-                print(f"time/{key}: {tim:.3f}")
+                # print(f"time/{key}: {tim:.3f}")
 
             data["details/lr"] = opt.param_groups[0]["lr"]
             data["losses/loss_value"] = loss_v.mean().item()
