@@ -17,7 +17,7 @@ python_file: ppo_atari.py
 --n-envs: 8
 --n-steps: 128
 --batch-size: 256
---n-updates: 10
+--n-updates: 16
 --lr: 2.5e-4
 --lr-schedule: False
 --gamma: 0.99
