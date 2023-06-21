@@ -1,22 +1,17 @@
 import argparse
 import os
 import random
-import time
 from distutils.util import strtobool
 
-import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import torchinfo
-from agent_atari import CNNAgent, Encoder
-from decision_transformer import Config, DecisionTransformer
+from agent_atari import NatureCNNAgent, DecisionTransformer
+from buffers import Buffer, MultiBuffer
 from einops import rearrange
 from env_atari import make_env
-from time_contrastive import calc_contrastive_loss, sample_contrastive_batch
 from tqdm.auto import tqdm
+import timers
 
 import wandb
 
@@ -32,27 +27,30 @@ parser.add_argument("--seed", type=int, default=0, help="seed of the experiment"
 parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
 parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
 
-# Algorithm specific arguments
-parser.add_argument("--env-id", type=str, default="Pong", help="the id of the environment")
+# Algorithm arguments
+parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
+parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
+parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
+parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
 parser.add_argument("--n-envs", type=int, default=64, help="the number of parallel game environments")
 parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
-parser.add_argument("--batch-size", type=int, default=1024, help="the number of mini-batches")
-
-parser.add_argument("--ctx-len", type=int, default=10, help="context length of the transformer")
-parser.add_argument("--n-iters", type=int, default=1000, help="the K epochs to update the policy")
-parser.add_argument("--freq-collect", type=int, default=10, help="context length of the transformer")
-
+parser.add_argument("--batch-size", type=int, default=1024, help="the batch size for training")
+parser.add_argument("--n-updates", type=int, default=16, help="gradient updates per collection")
 parser.add_argument("--lr", type=float, default=6e-4, help="the learning rate of the optimizer")
-parser.add_argument("--lr-min", type=float, default=6e-5, help="the learning rate of the optimizer")
-parser.add_argument("--lr-schedule", type=lambda x: bool(strtobool(x)), default=True, help="Toggle learning rate annealing for policy and value networks")
-
+parser.add_argument("--lr-schedule", type=lambda x: bool(strtobool(x)), default=True, help="use lr schedule warmup and cosine decay")
+# parser.add_argument("--anneal-lr", type=lambda x: bool(strtobool(x)), default=False, help="Toggle learning rate annealing for policy and value networks")
 parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
+# parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
+# parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
 parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
+# parser.add_argument("--clip-coef", type=float, default=0.1, help="the surrogate clipping coefficient")
+# parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
+# parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
 parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
+# parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
 
-parser.add_argument("--frame-stack", type=int, default=4, help="the number of frames to stack as input to the model")
-parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
-
+parser.add_argument("--arch", type=str, default="cnn", help="either cnn or gpt")
+parser.add_argument("--expert-agent", type=str, default=None, help="file to load the expert agent from")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
 
@@ -63,49 +61,39 @@ def parse_args(*args, **kwargs):
         args.project = args.project.format(**vars(args))
     if args.name is not None:
         args.name = args.name.format(**vars(args))
+    if args.expert_agent is not None:
+        args.expert_agent = args.expert_agent.format(**dict(env_id="{env_id}", **vars(args)))
     if args.load_agent is not None:
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
-    args.collect_size = int(args.n_envs * args.n_steps)
+
+    args.n_envs_per_id = args.n_envs // len(args.env_ids)
+
+    args.collect_size = args.n_envs * args.n_steps
+    # args.total_steps = args.total_steps // args.collect_size * args.collect_size
+    args.n_collects = args.total_steps // args.collect_size
+
+    args.last_token_only = True if args.arch == "cnn" else False
     return args
 
 
-class Buffer:
-    def __init__(self, args, env, agent):
-        self.args, self.env, self.agent = args, env, agent
-
-        self.obs = torch.zeros((args.n_steps, args.n_envs) + env.single_observation_space.shape, dtype=torch.uint8, device=args.device)
-        self.actions = torch.zeros((args.n_steps, args.n_envs) + env.single_action_space.shape, dtype=torch.long, device=args.device)
-        self.logprobs = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-        self.rewards = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-        self.dones = torch.zeros((args.n_steps, args.n_envs), dtype=torch.bool, device=args.device)
-        self.values = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-
-        # self.adv = torch.zeros((args.n_steps, args.n_envs), device=args.device)
-
-        _, info = env.reset()
-        self.next_obs = info["obs"]
-        self.next_done = torch.zeros(args.n_envs, dtype=torch.bool, device=args.device)
-
-    def collect(self):
-        self.agent.eval()
-        for i_step in range(self.args.n_steps):
-            self.obs[i_step] = self.next_obs
-            self.dones[i_step] = self.next_done
-
-            with torch.no_grad():
-                action, logprob, _, value = self.agent.get_action_and_value(self.next_obs)
-            _, reward, _, _, info = self.env.step(action.cpu().numpy())
-            self.next_obs, self.next_done = info["obs"], info["done"]
-
-            self.values[i_step] = value.flatten()
-            self.actions[i_step] = action
-            self.logprobs[i_step] = logprob
-            self.rewards[i_step] = torch.as_tensor(reward).to(self.args.device)
+def get_lr(lr, i_collect, n_collects, lr_schedule=True):
+    assert i_collect <= n_collects
+    if not lr_schedule:
+        return lr
+    lr_min = lr / 10.0
+    n_warmup = n_collects // 100
+    if i_collect < n_warmup:
+        return lr * i_collect / n_warmup
+    decay_ratio = (i_collect - n_warmup) / (n_collects - n_warmup)
+    coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
+    assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
+    return lr_min + coeff * (lr - lr_min)
 
 
 def main(args):
+    print("Running distillation with args: ", args)
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
@@ -114,90 +102,131 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
-    env_test = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed)
-
-    agent = CNNAgent(env.single_observation_space.shape, env.single_action_space.n).to(args.device)
-    if args.load_agent is not None:
-        agent.load_state_dict(torch.load(args.load_agent))
-    print("Printing Base Agent Summary...")
-    torchinfo.summary(agent, input_size=(args.batch_size,) + env.single_observation_space.shape, device=args.device)
-
-    config = Config(n_steps_max=args.ctx_len, n_actions=env.single_action_space.n, n_layer=4, n_head=4, n_embd=4 * 64, dropout=0.0, bias=False)
-    dtgpt = DecisionTransformer(config).to(args.device)
-    print("Printing DTGPT Summary...")
+    if args.arch == "cnn":
+        agent = NatureCNNAgent(18, args.ctx_len).to(args.device)
+    elif args.arch == "gpt":
+        agent = DecisionTransformer(18, args.ctx_len).to(args.device)
+    # elif args.arch == "rand":
+    # agent = RandomAgent(18).to(args.device)
+    print("Agent Summary: ")
     torchinfo.summary(
-        dtgpt,
-        input_size=[(args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len)],
-        dtypes=[torch.float, torch.float, torch.long],
+        agent,
+        input_size=[(args.batch_size, args.ctx_len)(args.batch_size, args.ctx_len, 1, 84, 84), (args.batch_size, args.ctx_len), (args.batch_size, args.ctx_len)],
+        dtypes=[torch.bool, torch.uint8, torch.long, torch.float],
         device=args.device,
     )
+    if args.load_agent is not None:
+        agent.load_state_dict(torch.load(args.load_agent))
+    opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
-    print(sum(p.numel() for p in agent.parameters()))
-    print(sum(p.numel() for p in dtgpt.parameters()))
+    experts = []
+    mbuffer, mbuffer_test = MultiBuffer(), MultiBuffer()
+    for env_id in args.env_ids:
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj="ext", e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        mbuffer.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
+        print("Loading expert from: ", {args.expert_agent.format(env_id=env_id)})
+        # expert = CNNAgent((args.ctx_len, 1, 84, 84), 18).to(args.device)
+        # expert.load_state_dict(torch.load(args.expert_agent.format(env_id=env_id)))
+        expert = torch.load(args.expert_agent.format(env_id=env_id)).to(args.device)
+        experts.append(expert)
+    for env_id in args.env_ids_test:
+        env = make_env(env_id, n_envs=args.n_envs_per_id, obj="ext", e3b_encode_fn=None, gamma=args.gamma, device=args.device, seed=args.seed, buf_size=args.n_steps)
+        mbuffer_test.buffers.append(Buffer(args.n_envs_per_id, args.n_steps, env, device=args.device))
 
-    # opt = torch.optim.Adam(dtgpt.parameters(), lr=args.lr)
-    opt = dtgpt.create_optimizer(0.0, args.lr, (0.9, 0.95), args.device)
+    timer = timers.Timer()
+    pbar = tqdm(range(args.n_collects))
+    for i_collect in pbar:
+        timer.key2time.clear()
+        # print("Collecting expert data...")
+        mbuffer.collect(experts, args.ctx_len, timer=None)
 
-    buffer = Buffer(args, env, agent)
+        # print("Collecting student data...")
+        mbuffer_test.collect(agent, args.ctx_len, timer=timer)
 
-    def get_lr(i_iter):
-        if not args.lr_schedule:
-            return args.lr
-
-        n_iters_warmup = args.n_iters // 100
-        if i_iter < n_iters_warmup:
-            return args.lr * i_iter / n_iters_warmup
-        if i_iter > args.n_iters:
-            return args.lr_min
-        decay_ratio = (i_iter - n_iters_warmup) / (args.n_iters - n_iters_warmup)
-        coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
-        assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
-        return args.lr_min + coeff * (args.lr - args.lr_min)
-
-    pbar = tqdm(range(args.n_iters))
-    for i_iter in pbar:
-        lr = get_lr(i_iter)
+        lr = get_lr(args.lr, i_collect, args.n_collects, args.lr_schedule)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
+        agent.train()
+        for _ in range(args.n_updates):
+            batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
+            obs, dist_expert, act, done = batch["obs"], batch["dist"], batch["act"], batch["done"]
+            with timer.add_time("forward_pass"):
+                logits, values = agent(done=done, obs=obs, act=act, rew=None)  # b t ...
+            dist_student = torch.distributions.Categorical(logits=logits)
+            # TODO add option for last token training only
 
-        if i_iter % args.freq_collect == 0:
-            buffer.collect()
+            with timer.add_time("calc_loss"):
+                kl_div = torch.nn.functional.kl_div(dist_student.logits, dist_expert.logits, log_target=True, reduction="none")
+                # kl_div = torch.distributions.kl.kl_divergence(dist_student, dist_teacher)
 
-        i_env = torch.randint(0, args.n_envs, (args.batch_size,), device=args.device)
-        i_step = torch.randint(0, args.n_steps + 1 - args.ctx_len, (args.batch_size,), device=args.device)
+                entropy = dist_student.entropy()
+                loss_kl, loss_entropy = kl_div.mean(), entropy.mean()
+                loss = loss_kl - args.ent_coef * loss_entropy
 
-        obs = torch.stack([buffer.obs[i : i + args.ctx_len, j, [-1]] for i, j in zip(i_step.tolist(), i_env.tolist())])
-        act = torch.stack([buffer.actions[i : i + args.ctx_len, j] for i, j in zip(i_step.tolist(), i_env.tolist())])
+            with timer.add_time("opt_step"):
+                opt.zero_grad()
+            with timer.add_time("backward_pass"):
+                loss.backward()
+            with timer.add_time("opt_step"):
+                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                opt.step()
 
-        logits = dtgpt.forward(rtg=None, obs=obs, act=act)
-        entropy = torch.distributions.Categorical(logits=logits).entropy()
-        bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), ignore_index=-100, reduction="none")
-        bc = bc.reshape(args.batch_size, args.ctx_len)
+        lgts = dist_student.logits
+        kld_oh_student = torch.nn.functional.kl_div((lgts).log_softmax(dim=-1), (lgts * 1e6).log_softmax(dim=-1), log_target=True, reduction="none").mean().item()
+        lgts = dist_expert.logits
+        kld_oh_expert = torch.nn.functional.kl_div((lgts).log_softmax(dim=-1), (lgts * 1e6).log_softmax(dim=-1), log_target=True, reduction="none").mean().item()
 
-        # TODO: divide obs by 255. to the transformer
-        loss_bc, loss_entropy = bc.mean(), entropy.mean()
-        loss = loss_bc + args.ent_coef * loss_entropy
-
-        opt.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(dtgpt.parameters(), args.max_grad_norm)
-        opt.step()
+        # ------------------- Logging ------------------- #
+        viz_slow = i_collect % (args.n_collects // 10) == 0
+        viz_midd = i_collect % (args.n_collects // 100) == 0 or viz_slow
+        viz_fast = i_collect % (args.n_collects // 1000) == 0 or viz_midd
 
         data = {}
-        data["loss_bc"] = loss_bc.item()
-        data["loss_entropy"] = loss_entropy.item()
-        data["loss_bc_0"] = bc[:, 0].mean().item()
-        data["loss_bc_-1"] = bc[:, -1].mean().item()
-        data["lr"] = lr
+        for env_id, env in zip(args.env_ids, mbuffer.envs):
+            for key, val in env.key2past_rets.items():  # log returns
+                if viz_fast:  # log scalar
+                    data[f"charts_expert/{env_id}_{key}"] = torch.cat(val).mean().item()
+                if viz_midd:  # log histogram
+                    data[f"charts_expert_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
+        for env_id, env in zip(args.env_ids_test, mbuffer_test.envs):
+            for key, val in env.key2past_rets.items():  # log returns
+                if viz_fast:  # log scalar
+                    data[f"charts_student/{env_id}_{key}"] = torch.cat(val).mean().item()
+                if viz_midd:  # log histogram
+                    data[f"charts_student_hist/{env_id}_{key}"] = wandb.Histogram(torch.cat(val).tolist())
+            if args.log_video and viz_slow:  # log video
+                vid = np.stack(env.past_obs).copy()[-450:, :4]  # t, b, c, h, w
+                vid[:, :, :, -1, :] = 128
+                vid[:, :, :, :, -1] = 128
+                vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
+                data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
-        keys_tqdm = ["loss_bc", "loss_entropy"]
+        if viz_fast:
+            for key, time in timer.key2time.items():
+                data[f"time/{key}"] = time
+            data["charts/loss_kl"] = loss_kl.item()
+            data["details/loss_kl_0"] = kl_div[:, 0].mean().item()
+            data["details/loss_kl_-1"] = kl_div[:, -1].mean().item()
+            data["details/entropy"] = loss_entropy.item()
+            data["details/perplexity"] = np.e ** loss_entropy.item()
+            data["details/lr"] = lr
+            data["details/kld_oh_student"] = kld_oh_student
+            data["details/kld_oh_expert"] = kld_oh_expert
+        if viz_midd:
+            data["details_hist/entropy"] = wandb.Histogram(entropy.detach().cpu().numpy().flatten())
+            data["details_hist/action"] = wandb.Histogram(act.detach().cpu().numpy().flatten())
+        if viz_slow:
+            if args.save_agent is not None:  # save agent
+                print("Saving agent...")
+                os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
+                torch.save(agent.state_dict(), args.save_agent)
+
+        if args.track and viz_fast:
+            wandb.log(data, step=i_collect * args.collect_size)
+
+        keys_tqdm = ["loss_kl", "loss_entropy", "Breakout_student_ret_ext", "Breakout_student_dtgpt_ext"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
-        if args.track:
-            wandb.log(data, step=i_iter)
 
 
 if __name__ == "__main__":
-    args_hehe = parse_args()
-    print(args_hehe)
-    main(args_hehe)
+    main(parse_args())
