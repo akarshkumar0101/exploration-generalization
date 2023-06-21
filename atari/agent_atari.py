@@ -4,7 +4,6 @@ from torch import nn
 from einops import rearrange
 
 
-
 class RandomAgent(nn.Module):
     def __init__(self, n_acts, ctx_len=None):
         super().__init__()
@@ -44,6 +43,24 @@ class NatureCNN(nn.Module):
         if self.normalize:
             x = nn.functional.normalize(x, dim=-1)
         return x
+
+
+class IDM(nn.Module):
+    def __init__(self, n_acts, n_dim=512, normalize=True):
+        super().__init__()
+        self.encoder = NatureCNN(1, n_dim, normalize=normalize)
+        self.idm = nn.Sequential(
+            layer_init(nn.Linear(n_dim * 2, n_dim)),
+            nn.ReLU(),
+            layer_init(nn.Linear(n_dim, n_acts), std=0.01),
+        )
+
+    def forward(self, obs):
+        return self.encoder(obs)
+
+    def predict_action(self, obs, next_obs):
+        l1, l2 = self.encoder(obs), self.encoder(next_obs)
+        return self.idm(torch.cat([l1, l2], dim=-1))
 
 
 class NatureCNNAgent(nn.Module):

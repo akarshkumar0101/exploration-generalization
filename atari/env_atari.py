@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import collections
 
+import normalize
+
 try:
     import envpool
 
@@ -66,7 +68,7 @@ class NoArgsReset(gym.Wrapper):
         return self.env.reset()
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0.99, full_action_space=True, device=None, seed=0):
+def make_env(env_id="Breakout", n_envs=8, obj="ext", gamma=0.99, full_action_space=True, device=None, seed=0):
     if has_envpool:
         env = envpool.make_gymnasium(
             task_id=f"{env_id}-v5",
@@ -108,11 +110,13 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", e3b_encode_fn=None, gamma=0
 
     env = StoreObs(env, n_envs_store=4, buf_size=450)
     env = ToTensor(env, device=device)
+    env = normalize.NormalizeObservation(env, eps=1e-5)
+    env = EpisodicReward(env)
     # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
     env = StoreReturns(env)
-    env = RewardSelector(env, obj=obj)
 
-    # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+    env = RewardSelector(env, obj=obj)
+    env = normalize.NormalizeReward(env, key_rew="rew", gamma=gamma, eps=1e-5)
     # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
 
     return env
@@ -264,3 +268,70 @@ class E3BReward(gym.Wrapper):
         self.u, self.v, self.b = u, v, b
         self.Cinv = self.Cinv - u @ u.mT / (1.0 + b)  # b, d, d
         return rew_e3b
+
+
+class EpisodicReward(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.encode_fn = None
+
+    def configure_eps_reward(self, encode_fn=None, k=10):
+        self.encode_fn = encode_fn
+        self.memory = collections.deque(maxlen=k)  # k b d
+
+    @torch.no_grad()  # this is required
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        if self.encode_fn is not None:
+            latent = self.encode_fn(info["obs"])
+            self.memory.append(latent)
+        return obs, info
+
+    @torch.no_grad()  # this is required
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        if self.encode_fn is not None:
+            latent = self.encode_fn(info["obs"])  # b d
+            memory = torch.stack(list(self.memory), dim=1)  # b k d
+            self.memory.append(latent)
+            info["rew_eps"] = (latent[:, None, :] - memory).norm(dim=-1).min(dim=-1).values  # b
+            assert info["rew_eps"].shape == info["rew_ext"].shape
+        return obs, rew, term, trunc, info
+
+
+class RNDReward(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.rnd_model = None
+
+    def configure_rnd_reward(self, rnd_model=None):
+        self.rnd_model = rnd_model
+
+    @torch.no_grad()  # this is required
+    def reset(self, *args, **kwargs):
+        obs, info = self.env.reset(*args, **kwargs)
+        return obs, info
+
+    @torch.no_grad()  # this is required
+    def step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        if self.rnd_model is not None:
+            predict_feature, target_feature = self.rnd_model(info["obs_norm"])  # b d
+            info["rew_rnd"] = (predict_feature - target_feature).pow(2).mean(dim=-1).detach()  # b
+            assert info["rew_eps"].shape == info["rew_ext"].shape
+        return obs, rew, term, trunc, info
+
+
+"""
+Run the specialist extrinsic agents for all 57 envs
+Run the specialist RND agents for all 57 envs
+Run the specialist Episodic agents for all 57 envs
+Run the specialist random dynamics agents for all 57 envs (form the large scale curiosity paper)
+
+
+Distill these into generalists
+
+
+Fine-tune the generalist with BC on new env
+Fine-tune the generalist with PPO on new env
+"""

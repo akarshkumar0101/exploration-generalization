@@ -49,8 +49,9 @@ class Buffer:
 
         agent.eval()
         for i_step in range(self.n_steps):
-            self.obss[:, i_step] = self.obs
-            self.dones[:, i_step] = self.done
+            with timer.add_time("copy_tensors"):
+                self.obss[:, i_step] = self.obs
+                self.dones[:, i_step] = self.done
 
             with timer.add_time("construct_agent_input"):
                 agent_input = self._construct_agent_input(i_step, ctx_len)
@@ -65,10 +66,11 @@ class Buffer:
                 _, _, _, _, info = self.env.step(act)
             self.obs, self.done = info["obs"], info["done"]
 
-            self.logits[:, i_step] = logits
-            self.acts[:, i_step] = act
-            self.vals[:, i_step] = value
-            self.rews[:, i_step] = info["rew"]
+            with timer.add_time("copy_tensors"):
+                self.logits[:, i_step] = logits
+                self.acts[:, i_step] = act
+                self.vals[:, i_step] = value
+                self.rews[:, i_step] = info["rew"]
 
         i_step += 1
         with timer.add_time("construct_agent_input"):

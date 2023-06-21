@@ -25,6 +25,8 @@ parser.add_argument("--entity", type=str, default=None, help="the entity (team) 
 parser.add_argument("--project", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--name", type=str, default=None, help="the name of this experiment")
 parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
+# parser.add_argument("--viz-slow", type=lambda x: bool(strtobool(x)), default=False)
+# parser.add_argument("--viz_midd", type=lambda x: bool(strtobool(x)), default=False)
 
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0, help="seed of the experiment")

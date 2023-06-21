@@ -1,32 +1,23 @@
-# Adapted from gymnasium.wrappers.normalize
 """Set of wrappers for normalizing actions and observations."""
+import numpy as np
 
 import gymnasium as gym
-import torch
 
 
 class RunningMeanStd:
     """Tracks the mean, variance and count of values."""
 
     # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
-    def __init__(self):
+    def __init__(self, epsilon=1e-4, shape=()):
         """Tracks the mean, variance and count of values."""
-        self.mean, self.var, self.count = None, None, 0
-
-    def normalize(self, x, eps=1e-4):
-        return (x - self.mean) / torch.sqrt(self.var + eps)
-
-    def unnormalize(self, x, eps=1e-4):
-        return x * torch.sqrt(self.var + eps) + self.mean
+        self.mean = np.zeros(shape, "float64")
+        self.var = np.ones(shape, "float64")
+        self.count = epsilon
 
     def update(self, x):
         """Updates the mean, var and count from a batch of samples."""
-        if self.mean is None:
-            self.mean = torch.zeros_like(x.mean(dim=0))
-            self.var = torch.ones_like(x.var(dim=0))
-
-        batch_mean = x.mean(dim=0)
-        batch_var = x.var(dim=0, correction=0)  # correction to match numpy implementation
+        batch_mean = np.mean(x, axis=0)
+        batch_var = np.var(x, axis=0)
         batch_count = x.shape[0]
         self.update_from_moments(batch_mean, batch_var, batch_count)
 
@@ -43,7 +34,7 @@ def update_mean_var_count_from_moments(mean, var, count, batch_mean, batch_var, 
     new_mean = mean + delta * batch_count / tot_count
     m_a = var * count
     m_b = batch_var * batch_count
-    M2 = m_a + m_b + torch.square(delta) * count * batch_count / tot_count
+    M2 = m_a + m_b + np.square(delta) * count * batch_count / tot_count
     new_var = M2 / tot_count
     new_count = tot_count
 
@@ -58,34 +49,46 @@ class NormalizeObservation(gym.Wrapper, gym.utils.RecordConstructorArgs):
         newly instantiated or the policy was changed recently.
     """
 
-    def __init__(self, env: gym.Env, eps: float = 1e-8):
+    def __init__(self, env: gym.Env, epsilon: float = 1e-8):
         """This wrapper will normalize observations s.t. each coordinate is centered with unit variance.
 
         Args:
             env (Env): The environment to apply the wrapper
             epsilon: A stability parameter that is used when scaling the observations.
         """
-        gym.utils.RecordConstructorArgs.__init__(self, eps=eps)
+        gym.utils.RecordConstructorArgs.__init__(self, epsilon=epsilon)
         gym.Wrapper.__init__(self, env)
 
-        self.obs_rms = RunningMeanStd()
-        self.eps = eps
+        self.num_envs = getattr(env, "num_envs", 1)
+        self.is_vector_env = getattr(env, "is_vector_env", False)
+        if self.is_vector_env:
+            self.obs_rms = RunningMeanStd(shape=self.single_observation_space.shape)
+        else:
+            self.obs_rms = RunningMeanStd(shape=self.observation_space.shape)
+        self.epsilon = epsilon
 
     def step(self, action):
         """Steps through the environment and normalizes the observation."""
-        obs, rew, term, trunc, info = self.env.step(action)
-        self.obs_rms.update(info["obs"])
-        """Normalises the observation using the running mean and variance of the observations."""
-        info["obs_norm"] = self.obs_rms.normalize(info["obs"], eps=self.eps)
-        return obs, rew, term, trunc, info
+        obs, rews, terminateds, truncateds, infos = self.env.step(action)
+        if self.is_vector_env:
+            obs = self.normalize(obs)
+        else:
+            obs = self.normalize(np.array([obs]))[0]
+        return obs, rews, terminateds, truncateds, infos
 
     def reset(self, **kwargs):
         """Resets the environment and normalizes the observation."""
         obs, info = self.env.reset(**kwargs)
-        self.obs_rms.update(info["obs"])
+
+        if self.is_vector_env:
+            return self.normalize(obs), info
+        else:
+            return self.normalize(np.array([obs]))[0], info
+
+    def normalize(self, obs):
         """Normalises the observation using the running mean and variance of the observations."""
-        info["obs_norm"] = self.obs_rms.normalize(info["obs"], eps=self.eps)
-        return obs, info
+        self.obs_rms.update(obs)
+        return (obs - self.obs_rms.mean) / np.sqrt(self.obs_rms.var + self.epsilon)
 
 
 class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
@@ -98,7 +101,12 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
         instantiated or the policy was changed recently.
     """
 
-    def __init__(self, env, key_rew="rew", gamma=0.99, eps=1e-8):
+    def __init__(
+        self,
+        env: gym.Env,
+        gamma: float = 0.99,
+        epsilon: float = 1e-8,
+    ):
         """This wrapper will normalize immediate rewards s.t. their exponential moving average has a fixed variance.
 
         Args:
@@ -106,25 +114,28 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
             epsilon (float): A stability parameter
             gamma (float): The discount factor that is used in the exponential moving average.
         """
-        gym.utils.RecordConstructorArgs.__init__(self, gamma=gamma, eps=eps)
+        gym.utils.RecordConstructorArgs.__init__(self, gamma=gamma, epsilon=epsilon)
         gym.Wrapper.__init__(self, env)
 
-        self.return_rms = RunningMeanStd()
-        self.returns = None
-        self.key_rew = key_rew
+        self.num_envs = getattr(env, "num_envs", 1)
+        self.is_vector_env = getattr(env, "is_vector_env", False)
+        self.return_rms = RunningMeanStd(shape=())
+        self.returns = np.zeros(self.num_envs)
         self.gamma = gamma
-        self.eps = eps
+        self.epsilon = epsilon
 
     def step(self, action):
         """Steps through the environment, normalizing the rewards returned."""
-        obs, rew, term, trunc, info = self.env.step(action)
+        obs, rews, terminateds, truncateds, infos = self.env.step(action)
+        if not self.is_vector_env:
+            rews = np.array([rews])
+        self.returns = self.returns * self.gamma * (1 - terminateds) + rews
+        rews = self.normalize(rews)
+        if not self.is_vector_env:
+            rews = rews[0]
+        return obs, rews, terminateds, truncateds, infos
 
-        r, d = info[self.key_rew], info["done"]
-        if self.returns is None:
-            self.returns = torch.zeros_like(r)
-        self.returns = self.returns * self.gamma * (1.0 - d) + r
-        self.return_rms.update(self.returns)
+    def normalize(self, rews):
         """Normalizes the rewards with the running mean rewards and their variance."""
-        r = r / (self.return_rms.var + self.eps).sqrt()
-        info[f"{self.key_rew}_norm"] = r
-        return obs, rew, term, trunc, info
+        self.return_rms.update(self.returns)
+        return rews / np.sqrt(self.return_rms.var + self.epsilon)
