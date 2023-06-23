@@ -5,16 +5,17 @@ import random
 import time
 from distutils.util import strtobool
 
+import agent_atari
 import atari_data
+import buffers
 import numpy as np
 import timers
 import torch
 import torchinfo
 import utils
-from agent_atari import IDM, DecisionTransformer, NatureCNN, NatureCNNAgent, RandomAgent, RNDModel
-from buffers import Buffer, MultiBuffer
 from einops import rearrange
 from env_atari import make_env
+from torch.distributions import Categorical
 from tqdm.auto import tqdm
 
 import wandb
@@ -25,7 +26,6 @@ parser.add_argument("--entity", type=str, default=None, help="the entity (team) 
 parser.add_argument("--project", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--name", type=str, default=None, help="the name of this experiment")
 parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--log-hists", type=lambda x: bool(strtobool(x)), default=False)
 # parser.add_argument("--viz-slow", type=lambda x: bool(strtobool(x)), default=False)
 # parser.add_argument("--viz_midd", type=lambda x: bool(strtobool(x)), default=False)
 
@@ -35,8 +35,7 @@ parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), 
 
 # Algorithm arguments
 parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
-parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, ex. ext")
-parser.add_argument("--preobj", type=str, default="ext", help="the pretraining objective of the agent, ex. ext")
+parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
 parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
 parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
 parser.add_argument("--n-envs", type=int, default=8, help="the number of parallel game environments")
@@ -47,30 +46,24 @@ parser.add_argument("--n-updates", type=int, default=16, help="gradient updates 
 parser.add_argument("--model", type=str, default="cnn", help="either cnn or gpt")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
+parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
 
-parser.add_argument("--lr", type=float, default=6e-4, help="the learning rate of the optimizer")
+parser.add_argument("--lr", type=float, default=2.5e-4, help="the learning rate of the optimizer")
 parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
-parser.add_argument("--lr-decay", type=lambda x: bool(strtobool(x)), default=True, help="use lr schedule warmup and cosine decay")
+parser.add_argument("--lr-decay", type=str, default="none")
 
-parser.add_argument("--ppo", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--episodic-life", type=lambda x: bool(strtobool(x)), default=True)
+parser.add_argument("--norm-rew", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
 parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
 parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
+parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
 parser.add_argument("--clip-coef", type=float, default=0.1, help="the surrogate clipping coefficient")
 parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
 parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
+
+parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
-
-parser.add_argument("--teacher", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--model-teacher", type=str, default="cnn", help="either cnn or gpt")
-parser.add_argument("--load-teacher", type=str, default=None, help="file to load the agent from")
-
-parser.add_argument("--max-grad-norm", type=float, default=0.5, help="the maximum norm for the gradient clipping")
-parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
-
-parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
-
-parser.add_argument("--stage", type=str, default="specialist")
 
 
 def parse_args(*args, **kwargs):
@@ -83,16 +76,14 @@ def parse_args(*args, **kwargs):
         args.load_agent = args.load_agent.format(**vars(args))
     if args.save_agent is not None:
         args.save_agent = args.save_agent.format(**vars(args))
-
-    args.n_envs_per_id = args.n_envs // len(args.env_ids)
+    args.n_envs_per_id = args.n_envs // 1  # len(args.env_ids)
     args.collect_size = args.n_envs * args.n_steps
     args.n_collects = args.total_steps // args.collect_size
-    args.last_token_only = True if args.arch == "cnn" else False
     return args
 
 
 def main(args):
-    print("Running PPO/Distillation with args: ", args)
+    print("Running PPO with args: ", args)
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
@@ -101,26 +92,12 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    # encoder = Encoder((1, 84, 84), 64).to(args.device)
-    # e3b_encode_fn = lambda obs: encoder.encode(obs[:, [-1]])  # encode only the latest frame
-    # env = make_env(args.env_id, n_envs=args.n_envs, frame_stack=args.frame_stack, obj=args.obj, e3b_encode_fn=e3b_encode_fn, gamma=args.gamma, device=args.device, seed=args.seed)
+    mbuffer = buffers.MultiBuffer()
+    for env_id in args.env_ids:
+        env = make_env(env_id, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
+        mbuffer.buffers.append(buffers.Buffer(env, args.n_steps, device=args.device))
 
-    teachers = []
-    mbuffer, mbuffer_teacher = MultiBuffer(), MultiBuffer()
-    for env_id in [args.env_id]:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
-        mbuffer.buffers.append(Buffer(env, args.n_steps, device=args.device))
-        if args.teacher:
-            env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
-            mbuffer_teacher.buffers.append(Buffer(env, args.n_steps, device=args.device))
-
-            print("Loading expert from: ", {args.load_teacher.format(env_id=env_id)})
-            teacher = utils.create_agent(args.model_teacher, args.ctx_len, env.single_action_space.n, load_agent=args.load_teacher.format(env_id=env_id)).to(args.device)
-            teachers.append(teacher)
-
-    rnd_model = RNDModel().to(args.device)
-
-    agent = utils.create_agent(args.model, args.ctx_len, env.single_action_space.n, load_agent=args.load_agent).to(args.device)
+    agent = utils.create_agent(args.model, env.single_action_space.n, args.ctx_len, args.load_agent).to(args.device)
     print("Agent Summary: ")
     torchinfo.summary(
         agent,
@@ -130,78 +107,79 @@ def main(args):
     )
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
-    start_time = time.time()
-    timer = timers.Timer()
+    if args.obj == "eps":
+        idm = agent_atari.IDM(env.single_action_space.n, n_dim=512, normalize=True).to(args.device)
+        opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
+        env.configure_eps_reward(encode_fn=idm, ctx_len=16, k=4)
+    if args.obj == "rnd":
+        rnd_model = agent_atari.RNDModel().to(args.device)
+        opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
+        env.configure_rnd_reward(rnd_model=rnd_model)
 
-    pbar = tqdm(range(args.n_collects), desc="main")
+    start_time = time.time()
+
+    pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
-        timer.clear()
+        timer = timers.Timer()
 
         with timer.add_time("collect"):
             mbuffer.collect(agent, args.ctx_len, timer=timer)
             if args.teacher:
-                mbuffer_teacher.collect(teachers, args.ctx_len, timer=timer)
+                mbuffer_teacher.collect(agent_teacher, args.ctx_len, timer=timer)
         with timer.add_time("calc_gae"):
-            mbuffer.calc_gae(args.gamma, args.gae_lambda, episodic=True)
+            mbuffer.calc_gae(args.gamma, args.gae_lambda)
 
         lr = utils.get_lr(args.lr, args.lr / 10.0, i_collect, args.n_collects, warmup=args.lr_warmup, decay=args.lr_decay)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
 
         agent.train()
+
         for _ in range(args.n_updates):
             with timer.add_time("generate_batch"):
+                batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
                 if args.teacher:
-                    batch = mbuffer_teacher.generate_batch(args.batch_size, args.ctx_len)
-                    done_t, obs_t, act_t, rew_t = batch["done"], batch["obs"], batch["act"], batch["rew"]
-                    dist_t, val_t = batch["dist"], batch["val"]
-                if args.ppo:
-                    batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-                    done_p, obs_p, act_p, rew_p = batch["done"], batch["obs"], batch["act"], batch["rew"]
-                    ret_p, adv_p = batch["ret"], batch["adv"]
-                    dist_p, val_p = batch["dist"], batch["val"]
+                    batch_teacher = mbuffer_teacher.generate_batch(args.batch_size, args.ctx_len)
+                    logits, val = agent(done=batch_teacher["done"], obs=batch_teacher["obs"], act=batch_teacher["act"], rew=batch_teacher["rew"])
 
             with timer.add_time("forward_pass"):
-                if args.teacher:
-                    logits, val = agent(done=done_t, obs=obs_t, act=act_t, rew=rew_t)
-                if args.ppo:
-                    logits, val = agent(done=done_p, obs=obs_p, act=act_p, rew=rew_p)
-                    dist = torch.distributions.Categorical(logits=logits)
+                logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
 
-            if args.last_token_only:
-                dist = torch.distributions.Categorical(logits=dist.logits[:, [-1]])
-                dist_old = torch.distributions.Categorical(logits=dist_old.logits[:, [-1]])
-                val, val_old = val[:, [-1]], val_old[:, [-1]]
-                obs, act, done, ret, adv = obs[:, [-1]], act[:, [-1]], done[:, [-1]], ret[:, [-1]], adv[:, [-1]]
+            if agent.last_token_train:
+                batch = {k: v[:, [-1]] for k, v in batch.items()}
+                logits, val = logits[:, [-1]], val[:, [-1]]
+            dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
 
             with timer.add_time("calc_loss"):
-                loss_p = utils.calc_ppo_policy_loss(dist, dist_old, act, adv, norm_adv=args.norm_adv, clip_coef=args.clip_coef)
-                loss_v = utils.calc_ppo_value_loss(val, val_old, ret, clip_coef=args.clip_coef if args.clip_vloss else None)
+                loss_p = utils.calc_ppo_policy_loss(dist, batch_dist, batch["act"], batch["adv"], norm_adv=args.norm_adv, clip_coef=args.clip_coef)
+                loss_v = utils.calc_ppo_value_loss(val, batch["val"], batch["ret"], clip_coef=args.clip_coef if args.clip_vloss else None)
                 loss_e = dist.entropy()
-
-                rnd_student, rnd_teacher = rnd_model(env.rms_obs.normalize(obs[:, 0]))  # b d
-                loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
-                loss_rnd.mean()
-
                 loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
+
+            if args.obj == "eps":
+                pass
+            if args.obj == "rnd":
+                rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
+                loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
+                loss = loss + 1.0 * loss_rnd.mean()
 
             with timer.add_time("opt_step"):
                 opt.zero_grad()
             with timer.add_time("backward_pass"):
                 loss.backward()
             with timer.add_time("opt_step"):
-                torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                grad_norm = torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 opt.step()
 
-            kl_div = torch.distributions.kl_divergence(dist_old, dist).mean().item()
-            if args.max_kl_div is not None and kl_div > args.max_kl_div:
+            kl_div = torch.distributions.kl_divergence(batch_dist, dist)
+            if args.max_kl_div is not None and kl_div.mean().item() > args.max_kl_div:
                 break
 
         # ------------------- Logging ------------------- #
         data = {}
-        viz_slow = i_collect % (args.n_collects // 10) == 0
-        viz_midd = i_collect % (args.n_collects // 100) == 0 or viz_slow
-        viz_fast = i_collect % (args.n_collects // 1000) == 0 or viz_midd
+        viz_slow = i_collect % np.clip(args.n_collects // 10, 1, None) == 0
+        viz_midd = i_collect % np.clip(args.n_collects // 100, 1, None) == 0 or viz_slow
+        viz_fast = i_collect % np.clip(args.n_collects // 1000, 1, None) == 0 or viz_midd
         to_np = lambda x: x.detach().cpu().numpy()
 
         # Explained Variance
@@ -209,15 +187,18 @@ def main(args):
         y_true = to_np(mbuffer.buffers[0].rets).flatten()
         explained_var = np.nan if np.var(y_true) == 0 else 1.0 - np.var(y_true - y_pred) / np.var(y_true)
 
-        for env_id, env in zip([args.env_id], mbuffer.envs):
-            atari_data.calc_hns(env_id, env.get_past_returns()["ret_score"]).mean().item()
+        hns = []
+        for env_id, env in zip(args.env_ids, mbuffer.envs):
+            hns_env = atari_data.calc_hns(env_id, env.get_past_returns()["ret_score"]).mean().item()
+            if not np.isnan(hns_env):
+                hns.append(hns_env)
 
-        for env_id, env in zip([args.env_id], mbuffer.envs):
+        for env_id, env in zip(args.env_ids, mbuffer.envs):
             for key, rets in env.get_past_returns().items():  # log returns
                 if len(rets) > 0 and viz_fast:  # log scalar
-                    data[f"charts/{env_id}_{key}"] = rets.mean().item()
-                if len(rets) > 0 and viz_midd:  # log histogram
-                    data[f"charts_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
+                    data[f"returns/{env_id}_{key}"] = rets.mean().item()
+                # if len(rets) > 0 and viz_midd:  # log histogram
+                #     data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
             if args.log_video and viz_slow:  # log video
                 vid = np.stack(env.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
@@ -229,30 +210,35 @@ def main(args):
         if viz_fast:  # fast logging, ex: scalars
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
+                # if viz_midd:
+                # print(f"time/{key:30s}: {tim:.3f}")
+            data["meta/SPS"] = (i_collect + 1) * args.collect_size / (time.time() - start_time)
+            data["meta/global_step"] = (i_collect + 1) * args.collect_size
 
+            if len(hns) > 0:
+                data["charts/hns"] = np.mean(hns)
+            data["charts/perplexity"] = np.e ** loss_e.mean().item()
             data["details/lr"] = opt.param_groups[0]["lr"]
-            data["losses/loss_value"] = loss_v.mean().item()
-            data["losses/loss_policy"] = loss_p.mean().item()
+            data["details/loss_value"] = loss_v.mean().item()
+            data["details/loss_policy"] = loss_p.mean().item()
+            data["details/grad_norm"] = grad_norm.item()
             data["details/entropy"] = loss_e.mean().item()
-            data["details/perplexity"] = np.e ** loss_e.mean().item()
-            data["details/kl_div"] = kl_div
+            data["details/kl_div"] = kl_div.mean().item()
             # data["details/clipfrac"] = np.mean(clipfracs)
             data["details/explained_variance"] = explained_var
-            data["meta/SPS"] = i_collect * args.collect_size / (time.time() - start_time)
-            data["meta/global_step"] = i_collect * args.collect_size
         if viz_midd:  # midd loggin, ex: histograms
-            data["details_hist/entropy"] = wandb.Histogram(to_np(loss_e).flatten())
+            # data["details_hist/entropy"] = wandb.Histogram(to_np(loss_e).flatten())
             data["details_hist/perplexity"] = wandb.Histogram(np.e ** to_np(loss_e).flatten())
-            data["details_hist/action"] = wandb.Histogram(to_np(act).flatten())
+            data["details_hist/action"] = wandb.Histogram(to_np(batch["act"]).flatten())
         if viz_slow:  # slow logging, ex: videos
             if args.save_agent is not None:  # save agent
                 print("Saving agent...")
                 os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
                 torch.save(agent.state_dict(), args.save_agent)
+
         if args.track and viz_fast:  # tracking
             wandb.log(data, step=i_collect * args.collect_size)
-
-        keys_tqdm = ["charts/ret_score", "meta/SPS"]
+        keys_tqdm = ["charts/hns", "meta/global_step", "meta/SPS"]
         pbar.set_postfix({k.split("/")[-1]: data[k] for k in keys_tqdm if k in data})
 
 

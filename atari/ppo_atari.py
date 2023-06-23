@@ -52,6 +52,7 @@ parser.add_argument("--lr", type=float, default=2.5e-4, help="the learning rate 
 parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--lr-decay", type=str, default="none")
 
+parser.add_argument("--episodic-life", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--norm-rew", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
 parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
@@ -93,7 +94,7 @@ def main(args):
 
     mbuffer = buffers.MultiBuffer()
     for env_id in args.env_ids:
-        env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, norm_rew=args.norm_rew, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
+        env = make_env(env_id, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
         mbuffer.buffers.append(buffers.Buffer(env, args.n_steps, device=args.device))
 
     agent = utils.create_agent(args.model, env.single_action_space.n, args.ctx_len, args.load_agent).to(args.device)

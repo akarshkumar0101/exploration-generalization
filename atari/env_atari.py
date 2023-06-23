@@ -24,7 +24,7 @@ class NoArgsReset(gym.Wrapper):
         return self.env.reset()
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, full_action_space=True, device=None, seed=0):
+def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, episodic_life=True, full_action_space=True, device=None, seed=0):
     env = envpool.make_gymnasium(
         task_id=f"{env_id}-v5",
         num_envs=n_envs,
@@ -38,7 +38,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
         # gray_scale=True,  # default: True
         # frame_skip=4,  # default: 4
         # noop_max=30,  # default: 30
-        episodic_life=True,  # default: False
+        episodic_life=episodic_life,  # default: False
         # zero_discount_on_life_loss=False,  # default: False
         reward_clip=True,  # default: False
         # repeat_action_probability=0,  # default: 0
