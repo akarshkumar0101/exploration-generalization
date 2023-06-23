@@ -82,10 +82,10 @@ if __name__ == "__main__":
             if isinstance(val, list):
                 command.append(f'{key} {" ".join(val)}')
             else:
-                if isinstance(val, str) and " " in val:
+                if isinstance(val, str) and (" " in val or "=" in val):
                     command.append(f'{key}="{val}"')
                 else:
-                    command.append(f'{key}={val}')
+                    command.append(f"{key}={val}")
         commands.append(command)
     n, l = len(commands), len(commands[0])
     str_lens = [max([len(command[i]) for command in commands]) for i in range(l)]
