@@ -11,6 +11,7 @@ from einops import rearrange
 
 from agent_atari import NatureCNN
 
+
 class LayerNorm(nn.LayerNorm):
     """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
 
@@ -140,6 +141,8 @@ class DecisionTransformer(nn.Module):
 
         self.init_weights()
 
+        self.last_token_train = False
+
     def init_weights(self):
         def _init_weights(m):
             if isinstance(m, nn.Linear):
@@ -160,6 +163,7 @@ class DecisionTransformer(nn.Module):
         # rtg: (b, t)
         # act: (b, t)
         import timers
+
         timer = timers.Timer()
 
         batch_size, ctx_len, _, _, _ = obs.shape
@@ -174,11 +178,11 @@ class DecisionTransformer(nn.Module):
         obs = rearrange(obs, "b t c h w -> (b t) c h w")
         act = rearrange(act, "b t -> (b t)")
 
-        with timer.add_time('embed_rtg'):
+        with timer.add_time("embed_rtg"):
             x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
-        with timer.add_time('embed_obs'):
+        with timer.add_time("embed_obs"):
             x_obs = self.encode_obs(obs)  # (batch_size * n_steps, n_embd)
-        with timer.add_time('embed_act'):
+        with timer.add_time("embed_act"):
             x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
 
         x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
@@ -193,14 +197,14 @@ class DecisionTransformer(nn.Module):
         assert torch.allclose(x[:, 2::3, :], x_act)  # sanity check, TODO: remove
 
         x = self.drop(x)
-        with timer.add_time('blocks'):
+        with timer.add_time("blocks"):
             x = self.blocks(x)
         x = self.ln_f(x)
 
         x = rearrange(x, "b (t c) d -> b t c d", t=ctx_len)  # (batch_size, n_steps, 3, n_embd)
         x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
-        with timer.add_time('out_heads'):
+        with timer.add_time("out_heads"):
             logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)
         # print(dict(timer.key2time))
         return logits, values[..., 0]

@@ -21,10 +21,10 @@ class RunningMeanStd:
 
     def update(self, x):
         """Updates the mean, var and count from a batch of samples."""
+        x = x.float()
         if self.mean is None:
             self.mean = torch.zeros_like(x.mean(dim=0))
             self.var = torch.ones_like(x.var(dim=0))
-
         batch_mean = x.mean(dim=0)
         batch_var = x.var(dim=0, correction=0)  # correction to match numpy implementation
         batch_count = x.shape[0]
@@ -68,23 +68,23 @@ class NormalizeObservation(gym.Wrapper, gym.utils.RecordConstructorArgs):
         gym.utils.RecordConstructorArgs.__init__(self, eps=eps)
         gym.Wrapper.__init__(self, env)
 
-        self.obs_rms = RunningMeanStd()
+        self.rms_obs = RunningMeanStd()
         self.eps = eps
 
     def step(self, action):
         """Steps through the environment and normalizes the observation."""
         obs, rew, term, trunc, info = self.env.step(action)
-        self.obs_rms.update(info["obs"])
+        self.rms_obs.update(info["obs"])
         """Normalises the observation using the running mean and variance of the observations."""
-        info["obs_norm"] = self.obs_rms.normalize(info["obs"], eps=self.eps)
+        info["obs_norm"] = self.rms_obs.normalize(info["obs"], eps=self.eps)
         return obs, rew, term, trunc, info
 
     def reset(self, **kwargs):
         """Resets the environment and normalizes the observation."""
         obs, info = self.env.reset(**kwargs)
-        self.obs_rms.update(info["obs"])
+        self.rms_obs.update(info["obs"])
         """Normalises the observation using the running mean and variance of the observations."""
-        info["obs_norm"] = self.obs_rms.normalize(info["obs"], eps=self.eps)
+        info["obs_norm"] = self.rms_obs.normalize(info["obs"], eps=self.eps)
         return obs, info
 
 
@@ -98,7 +98,7 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
         instantiated or the policy was changed recently.
     """
 
-    def __init__(self, env, key_rew="rew", gamma=0.99, eps=1e-8):
+    def __init__(self, env, key_rew="ext", gamma=0.99, eps=1e-8):
         """This wrapper will normalize immediate rewards s.t. their exponential moving average has a fixed variance.
 
         Args:
@@ -109,7 +109,7 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
         gym.utils.RecordConstructorArgs.__init__(self, gamma=gamma, eps=eps)
         gym.Wrapper.__init__(self, env)
 
-        self.return_rms = RunningMeanStd()
+        self.rms_returns = RunningMeanStd()
         self.returns = None
         self.key_rew = key_rew
         self.gamma = gamma
@@ -119,12 +119,12 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
         """Steps through the environment, normalizing the rewards returned."""
         obs, rew, term, trunc, info = self.env.step(action)
 
-        r, d = info[self.key_rew], info["done"]
+        r, d = info[f"rew_{self.key_rew}"], info["done"]
         if self.returns is None:
             self.returns = torch.zeros_like(r)
-        self.returns = self.returns * self.gamma * (1.0 - d) + r
-        self.return_rms.update(self.returns)
+        self.returns = self.returns * self.gamma * (1.0 - d.float()) + r
+        self.rms_returns.update(self.returns)
         """Normalizes the rewards with the running mean rewards and their variance."""
-        r = r / (self.return_rms.var + self.eps).sqrt()
-        info[f"{self.key_rew}_norm"] = r
+        r = r / (self.rms_returns.var + self.eps).sqrt()
+        info[f"rew_{self.key_rew}_norm"] = r
         return obs, rew, term, trunc, info

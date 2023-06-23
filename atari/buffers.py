@@ -3,23 +3,21 @@ import torch
 
 
 class Buffer:
-    def __init__(self, n_envs, n_steps, env, device=None):
-        self.n_envs, self.n_steps = n_envs, n_steps
+    def __init__(self, env, n_steps, device=None):
+        self.n_envs, self.n_steps = env.num_envs, n_steps
         self.env, self.device = env, device
+        self.first_collect = True
 
-        self.obss = torch.zeros((n_envs, n_steps) + env.single_observation_space.shape, dtype=torch.uint8, device=device)
-        self.dones = torch.zeros((n_envs, n_steps), dtype=torch.bool, device=device)
+        self.obss = torch.zeros((self.n_envs, self.n_steps) + env.single_observation_space.shape, dtype=torch.uint8, device=device)
+        self.dones = torch.zeros((self.n_envs, self.n_steps), dtype=torch.bool, device=device)
 
-        self.logits = torch.zeros((n_envs, n_steps, env.single_action_space.n), device=device)
-        self.acts = torch.zeros((n_envs, n_steps) + env.single_action_space.shape, dtype=torch.long, device=device)
-        self.vals = torch.zeros((n_envs, n_steps), device=device)
-        self.rews = torch.zeros((n_envs, n_steps), device=device)
+        self.logits = torch.zeros((self.n_envs, self.n_steps, env.single_action_space.n), device=device)
+        self.acts = torch.zeros((self.n_envs, self.n_steps) + env.single_action_space.shape, dtype=torch.long, device=device)
+        self.vals = torch.zeros((self.n_envs, self.n_steps), device=device)
+        self.rews = torch.zeros((self.n_envs, self.n_steps), device=device)
 
-        self.advs = torch.zeros((n_envs, n_steps), device=device)
-        self.rets = torch.zeros((n_envs, n_steps), device=device)
-
-        _, info = self.env.reset()
-        self.obs, self.done = info["obs"], info["done"]
+        self.advs = torch.zeros((self.n_envs, self.n_steps), device=device)
+        self.rets = torch.zeros((self.n_envs, self.n_steps), device=device)
 
     def _construct_agent_input(self, i_step, ctx_len):
         # only for use during inference bc that's the only time buffer rolls over (for first observation)
@@ -43,12 +41,20 @@ class Buffer:
         return dict(done=done, obs=obs, act=act, rew=rew)
 
     @torch.no_grad()
-    def collect(self, agent, ctx_len, timer=None):
+    def collect(self, agent, ctx_len, timer=None, pbar=None):
+        if self.first_collect:
+            self.first_collect = False
+            _, info = self.env.reset()
+            self.obs, self.done = info["obs"], info["done"]
+
         if timer is None:
             timer = timers.Timer()
 
         agent.eval()
         for i_step in range(self.n_steps):
+            if pbar is not None:
+                pbar.update(1)
+
             with timer.add_time("copy_tensors"):
                 self.obss[:, i_step] = self.obs
                 self.dones[:, i_step] = self.done
@@ -67,7 +73,7 @@ class Buffer:
             self.obs, self.done = info["obs"], info["done"]
 
             with timer.add_time("copy_tensors"):
-                self.logits[:, i_step] = logits
+                self.logits[:, i_step] = dist.logits
                 self.acts[:, i_step] = act
                 self.vals[:, i_step] = value
                 self.rews[:, i_step] = info["rew"]
@@ -84,14 +90,16 @@ class Buffer:
         # print(f"{key:30s}: {t:.3f}")
 
     @torch.no_grad()
-    def calc_gae(self, gamma, gae_lambda):
+    def calc_gae(self, gamma, gae_lambda, episodic=True):
         lastgaelam = 0
         for t in reversed(range(self.n_steps)):
             if t == self.n_steps - 1:
-                nextnonterminal = ~self.done
+                # nextnonterminal = ~self.done
+                nextnonterminal = 1.0 - self.done.float() if episodic else 1.0
                 nextvalues = self.value
             else:
-                nextnonterminal = ~self.dones[:, t + 1]
+                # nextnonterminal = ~self.dones[:, t + 1]
+                nextnonterminal = 1.0 - self.dones[:, t + 1].float() if episodic else 1.0
                 nextvalues = self.vals[:, t + 1]
             delta = self.rews[:, t] + gamma * nextvalues * nextnonterminal - self.vals[:, t]
             self.advs[:, t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
@@ -125,8 +133,8 @@ class Buffer:
         batch["adv"] = self.generate_batch_tensor(self.advs, i_step, ctx_len)
         batch["ret"] = self.generate_batch_tensor(self.rets, i_step, ctx_len)
 
-        batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
-        batch["logprob"] = batch["dist"].log_prob(batch["act"])
+        # batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
+        # batch["logprob"] = batch["dist"].log_prob(batch["act"])
         return batch
 
     def generate_batch_tensor(self, data, i_step, ctx_len):
@@ -141,15 +149,15 @@ class MultiBuffer:
     def envs(self):
         return [buffer.env for buffer in self.buffers]
 
-    def collect(self, agents, ctx_len, timer):
+    def collect(self, agents, ctx_len, timer=None, pbar=None):
         if isinstance(agents, torch.nn.Module):
             agents = [agents for _ in self.buffers]
         for buffer, agent in zip(self.buffers, agents):
-            buffer.collect(agent, ctx_len, timer)
+            buffer.collect(agent, ctx_len, timer=timer, pbar=pbar)
 
-    def calc_gae(self, gamma, gae_lambda):
+    def calc_gae(self, gamma, gae_lambda, episodic=True):
         for buffer in self.buffers:
-            buffer.calc_gae(gamma, gae_lambda)
+            buffer.calc_gae(gamma, gae_lambda, episodic=episodic)
 
     def generate_batch(self, batch_size, ctx_len):
         data = [buffer.generate_batch(batch_size // len(self.buffers), ctx_len) for buffer in self.buffers]
@@ -158,7 +166,7 @@ class MultiBuffer:
         for key in data:
             if isinstance(data[key][0], torch.Tensor):
                 data[key] = torch.cat(data[key], dim=0)
-        data["dist"] = torch.distributions.Categorical(logits=data["logits"])
+        # data["dist"] = torch.distributions.Categorical(logits=data["logits"])
         return data
 
 

@@ -92,6 +92,24 @@ def get_lr(lr, i_collect, n_collects, lr_schedule=True):
     return lr_min + coeff * (lr - lr_min)
 
 
+def get_lr(lr, lr_min, i_iter, n_iters, warmup=True, decay="none"):
+    assert i_iter <= n_iters
+    n_warmup = n_iters // 100
+    if i_iter <= n_warmup:
+        return lr * i_iter / n_warmup if warmup else lr
+    elif i_iter <= n_iters:
+        decay_ratio = (i_iter - n_warmup) / (n_iters - n_warmup)
+        if decay is None or decay == "none":
+            return lr
+        elif decay == "linear":
+            coeff = 1.0 - decay_ratio
+            return lr_min + coeff * (lr - lr_min)
+        elif decay == "cos":
+            coeff = 0.5 * (1.0 + np.math.cos(np.pi * decay_ratio))  # coeff ranges 0..1
+            assert 0 <= decay_ratio <= 1 and 0 <= coeff <= 1
+            return lr_min + coeff * (lr - lr_min)
+
+
 def main(args):
     print("Running distillation with args: ", args)
     if args.track:

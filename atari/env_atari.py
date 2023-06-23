@@ -7,60 +7,16 @@ import collections
 
 import normalize
 
-try:
-    import envpool
-
-    has_envpool = True
-except ModuleNotFoundError:
-    has_envpool = False
-    print("WARNING: envpool not found.")
-
-# def make_env_envpool(env_id, num_envs, ):
-#     import envpool
-#     seed = 0
-#     envs = envpool.make(env_id, env_type="gym", num_envs=num_envs, episodic_life=True, reward_clip=True, seed=seed)
-#     envs.num_envs = num_envs
-#     envs.single_action_space = envs.action_space
-#     envs.action_space = gym.spaces.Discrete(envs.action_space.nvec.sum())
-#     envs.single_observation_space = envs.observation_space
-#     envs = RecordEpisodeStatistics(envs)
-#     assert isinstance(envs.action_space, gym.spaces.Discrete), "only discrete action space is supported"
+import envpool
 
 
-def make_env_single(env_id="Breakout", frame_stack=4):
-    env = gym.make(f"ALE/{env_id}-v5", frameskip=1, full_action_space=True)
-    # TODO: reduce space of actions
-    env = gym.wrappers.AtariPreprocessing(env, terminal_on_life_loss=True)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.sign(reward))
-    env = gym.wrappers.FrameStack(env, num_stack=frame_stack)
-    return env
-
-
-def make_env(env_id="Breakout", n_envs=8, frame_stack=4, obj="ext", e3b_encode_fn=None, gamma=0.999, device="cpu", seed=0, buf_size=128):
-    make_fn = partial(make_env_single, env_id=env_id, frame_stack=frame_stack)
-    make_fns = [make_fn for _ in range(n_envs)]
-    env = gym.vector.SyncVectorEnv(make_fns)
-
-    env = StoreObs(env, n_envs_store=25, buf_size=1000)
-
-    env = ToTensor(env, device=device)
-
-    env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
-
-    env = StoreReturns(env, buf_size=buf_size)
-
-    env = RewardSelector(env, obj=obj)
-    env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-
-    for i, envi in enumerate(env.envs):
-        envi.seed(seed + i * 1000)
-        envi.action_space.seed(seed + i * 1000)
-        envi.observation_space.seed(seed + i * 1000)
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
-
-    return env
+# def make_env_single(env_id="Breakout", frame_stack=4):
+#     env = gym.make(f"ALE/{env_id}-v5", frameskip=1, full_action_space=True)
+#     # TODO: reduce space of actions
+#     env = gym.wrappers.AtariPreprocessing(env, terminal_on_life_loss=True)
+#     env = gym.wrappers.TransformReward(env, lambda reward: np.sign(reward))
+#     env = gym.wrappers.FrameStack(env, num_stack=frame_stack)
+#     return env
 
 
 class NoArgsReset(gym.Wrapper):
@@ -68,57 +24,42 @@ class NoArgsReset(gym.Wrapper):
         return self.env.reset()
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", gamma=0.99, full_action_space=True, device=None, seed=0):
-    if has_envpool:
-        env = envpool.make_gymnasium(
-            task_id=f"{env_id}-v5",
-            num_envs=n_envs,
-            # batch_size=None,
-            # num_threads=None,
-            seed=seed,  # default: 42
-            # max_episode_steps=27000,  # default: 27000
-            # img_height=84,  # default: 84
-            # img_width=84,  # default: 84
-            stack_num=1,  # default: 4
-            # gray_scale=True,  # default: True
-            # frame_skip=4,  # default: 4
-            # noop_max=30,  # default: 30
-            episodic_life=True,  # default: False
-            # zero_discount_on_life_loss=False,  # default: False
-            reward_clip=True,  # default: False
-            # repeat_action_probability=0,  # default: 0
-            # use_inter_area_resize=True,  # default: True
-            # use_fire_reset=True,  # default: True
-            full_action_space=full_action_space,  # default: False
-        )
-        env = NoArgsReset(env)
-        env.num_envs = n_envs
-        env.single_observation_space = env.observation_space
-        env.single_action_space = env.action_space
-        env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
-        env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
-    else:
-        make_fn = partial(make_env_single, env_id=env_id, frame_stack=1)
-        make_fns = [make_fn for _ in range(n_envs)]
-        env = gym.vector.SyncVectorEnv(make_fns)
-        for i, envi in enumerate(env.envs):
-            envi.seed(seed + i * 1000)
-            envi.action_space.seed(seed + i * 1000)
-            envi.observation_space.seed(seed + i * 1000)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
+def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, full_action_space=True, device=None, seed=0):
+    env = envpool.make_gymnasium(
+        task_id=f"{env_id}-v5",
+        num_envs=n_envs,
+        # batch_size=None,
+        # num_threads=None,
+        seed=seed,  # default: 42
+        # max_episode_steps=27000,  # default: 27000
+        # img_height=84,  # default: 84
+        # img_width=84,  # default: 84
+        stack_num=1,  # default: 4
+        # gray_scale=True,  # default: True
+        # frame_skip=4,  # default: 4
+        # noop_max=30,  # default: 30
+        episodic_life=True,  # default: False
+        # zero_discount_on_life_loss=False,  # default: False
+        reward_clip=True,  # default: False
+        # repeat_action_probability=0,  # default: 0
+        # use_inter_area_resize=True,  # default: True
+        # use_fire_reset=True,  # default: True
+        full_action_space=full_action_space,  # default: False
+    )
+    env = NoArgsReset(env)
+    env.num_envs = n_envs
+    env.single_observation_space = env.observation_space
+    env.single_action_space = env.action_space
+    env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
+    env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
 
     env = StoreObs(env, n_envs_store=4, buf_size=450)
     env = ToTensor(env, device=device)
-    env = normalize.NormalizeObservation(env, eps=1e-5)
     env = EpisodicReward(env)
-    # env = E3BReward(env, encode_fn=e3b_encode_fn, lmbda=0.1)
+    env = RNDReward(env)
     env = StoreReturns(env)
-
-    env = RewardSelector(env, obj=obj)
-    env = normalize.NormalizeReward(env, key_rew="rew", gamma=gamma, eps=1e-5)
-    # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-
+    env = normalize.NormalizeReward(env, key_rew=obj, gamma=gamma, eps=1e-5)
+    env = RewardSelector(env, obj=f"{obj}_norm" if norm_rew else obj)
     return env
 
 
@@ -186,13 +127,15 @@ class ToTensor(gym.Wrapper):
 
 
 class RewardSelector(gym.Wrapper):
-    def __init__(self, env, obj="ext"):
+    def __init__(self, env, obj="ext", clip_min=None, clip_max=None):
         super().__init__(env)
         self.obj = obj
+        self.clip_min, self.clip_max = clip_min, clip_max
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        rew = info[f"rew_{self.obj}"].detach().cpu().numpy()
+        # rew = info[f"rew_{self.obj}"].detach().cpu().numpy()
+        # info["rew"] = info[f"rew_{self.obj}"].clamp(self.clip_min, self.clip_max)
         info["rew"] = info[f"rew_{self.obj}"]
         return obs, rew, term, trunc, info
 
@@ -275,9 +218,11 @@ class EpisodicReward(gym.Wrapper):
         super().__init__(env)
         self.encode_fn = None
 
-    def configure_eps_reward(self, encode_fn=None, k=10):
+    def configure_eps_reward(self, encode_fn=None, ctx_len=10, k=1):
         self.encode_fn = encode_fn
-        self.memory = collections.deque(maxlen=k)  # k b d
+        assert ctx_len >= k
+        self.memory = collections.deque(maxlen=ctx_len)  # m b d
+        self.k = k
 
     @torch.no_grad()  # this is required
     def reset(self, *args, **kwargs):
@@ -292,10 +237,18 @@ class EpisodicReward(gym.Wrapper):
         obs, rew, term, trunc, info = self.env.step(action)
         if self.encode_fn is not None:
             latent = self.encode_fn(info["obs"])  # b d
-            memory = torch.stack(list(self.memory), dim=1)  # b k d
+            memory = torch.stack(list(self.memory), dim=1)  # b m d
             self.memory.append(latent)
-            info["rew_eps"] = (latent[:, None, :] - memory).norm(dim=-1).min(dim=-1).values  # b
-            assert info["rew_eps"].shape == info["rew_ext"].shape
+            if memory.shape[1] >= self.k:
+                latent = self.encode_fn(info["obs"])  # b d
+                memory = torch.stack(list(self.memory), dim=1)  # b m d
+                self.memory.append(latent)
+                d = (latent[:, None, :] - memory).norm(dim=-1)  # b m
+                dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
+                info["rew_eps"] = dk.mean(dim=-1)  # b
+                assert info["rew_eps"].shape == info["rew_ext"].shape
+            else:
+                info["rew_eps"] = torch.zeros_like(info["rew_ext"])
         return obs, rew, term, trunc, info
 
 
@@ -308,30 +261,29 @@ class RNDReward(gym.Wrapper):
         self.rnd_model = rnd_model
 
     @torch.no_grad()  # this is required
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        return obs, info
-
-    @torch.no_grad()  # this is required
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
         if self.rnd_model is not None:
-            predict_feature, target_feature = self.rnd_model(info["obs_norm"])  # b d
-            info["rew_rnd"] = (predict_feature - target_feature).pow(2).mean(dim=-1).detach()  # b
-            assert info["rew_eps"].shape == info["rew_ext"].shape
+            rnd_student, rnd_teacher = self.rnd_model(info["obs"], update_rms_obs=True)  # b d
+            info["rew_rnd"] = (rnd_student - rnd_teacher).pow(2).mean(dim=-1)  # b
+            assert info["rew_rnd"].shape == info["rew_ext"].shape
         return obs, rew, term, trunc, info
 
 
 """
-Run the specialist extrinsic agents for all 57 envs
-Run the specialist RND agents for all 57 envs
-Run the specialist Episodic agents for all 57 envs
-Run the specialist random dynamics agents for all 57 envs (form the large scale curiosity paper)
+specialist_ext_{env_id}
+specialist_eps_{env_id}
+specialist_rnd_{env_id}
 
+generalist_pre_ext
+generalist_pre_eps
+generalist_pre_rnd
 
-Distill these into generalists
+generalist_pre_ext_ft__bc_{env_id}
+generalist_pre_ext_ft_ppo_{env_id}
+generalist_pre_eps_ft__bc_{env_id}
+generalist_pre_eps_ft_ppo_{env_id}
+generalist_pre_rnd_ft__bc_{env_id}
+generalist_pre_rnd_ft_ppo_{env_id}
 
-
-Fine-tune the generalist with BC on new env
-Fine-tune the generalist with PPO on new env
 """

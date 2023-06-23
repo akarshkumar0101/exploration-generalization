@@ -1,13 +1,15 @@
 import numpy as np
 import torch
-from torch import nn
 from einops import rearrange
+from normalize import RunningMeanStd
+from torch import nn
 
 
 class RandomAgent(nn.Module):
     def __init__(self, n_acts, ctx_len=None):
         super().__init__()
         self.n_acts = n_acts
+        self.last_token_train = True
 
     def forward(self, done, obs, act, rew):
         b, t, c, h, w = obs.shape
@@ -69,6 +71,7 @@ class NatureCNNAgent(nn.Module):
         self.encode_obs = NatureCNN(ctx_len, n_dim)
         self.actor = layer_init(nn.Linear(n_dim, n_acts), std=0.01)
         self.critic = layer_init(nn.Linear(n_dim, 1), std=1)
+        self.last_token_train = True
 
     def forward(self, done, obs, act, rew):
         b, t, c, h, w = obs.shape
@@ -100,6 +103,51 @@ class NatureCNNAgent(nn.Module):
     #             i_step = where[-1].item()  # i_step of last done
     #             obs[i_env, :i_step] = obs[i_env, [i_step]]
     #     return obs
+
+
+class RNDModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Prediction network
+        self.predictor = nn.Sequential(
+            layer_init(nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512)),
+            nn.ReLU(),
+            layer_init(nn.Linear(512, 512)),
+        )
+
+        # Target network
+        self.target = nn.Sequential(
+            layer_init(nn.Conv2d(in_channels=1, out_channels=32, kernel_size=8, stride=4)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)),
+            nn.LeakyReLU(),
+            layer_init(nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+        )
+
+        # target network is not trainable
+        for param in self.target.parameters():
+            param.requires_grad = False
+
+        self.rms_obs = RunningMeanStd()
+
+    def forward(self, obs, update_rms_obs=True):
+        # obs: (b, c, h, w) = (b, 1, 84, 84)
+        if update_rms_obs:
+            self.rms_obs.update(obs)
+        obs = self.rms_obs.normalize(obs)
+        return self.predictor(obs), self.target(obs)
 
 
 if __name__ == "__main__":
