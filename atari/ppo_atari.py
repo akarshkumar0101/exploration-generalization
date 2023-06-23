@@ -5,14 +5,14 @@ import random
 import time
 from distutils.util import strtobool
 
+import agent_atari
 import atari_data
+import buffers
 import numpy as np
 import timers
 import torch
 import torchinfo
 import utils
-from agent_atari import RNDModel, IDM
-from buffers import Buffer, MultiBuffer
 from einops import rearrange
 from env_atari import make_env
 from torch.distributions import Categorical
@@ -91,10 +91,10 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    mbuffer = MultiBuffer()
+    mbuffer = buffers.MultiBuffer()
     for env_id in args.env_ids:
         env = make_env(env_id, n_envs=args.n_envs_per_id, obj=args.obj, norm_rew=args.norm_rew, gamma=args.gamma, full_action_space=args.full_action_space, device=args.device, seed=args.seed)
-        mbuffer.buffers.append(Buffer(env, args.n_steps, device=args.device))
+        mbuffer.buffers.append(buffers.Buffer(env, args.n_steps, device=args.device))
 
     agent = utils.create_agent(args.model, env.single_action_space.n, args.ctx_len, args.load_agent).to(args.device)
     print("Agent Summary: ")
@@ -107,11 +107,11 @@ def main(args):
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     if args.obj == "eps":
-        idm = IDM(env.single_action_space.n, n_dim=512, normalize=True).to(args.device)
+        idm = agent_atari.IDM(env.single_action_space.n, n_dim=512, normalize=True).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
         env.configure_eps_reward(encode_fn=idm, ctx_len=16, k=4)
     if args.obj == "rnd":
-        rnd_model = RNDModel().to(args.device)
+        rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
         env.configure_rnd_reward(rnd_model=rnd_model)
 
@@ -204,8 +204,8 @@ def main(args):
         if viz_fast:  # fast logging, ex: scalars
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
-                if viz_midd:
-                    print(f"time/{key}: {tim:.3f}")
+                # if viz_midd:
+                # print(f"time/{key:30s}: {tim:.3f}")
             data["meta/SPS"] = (i_collect + 1) * args.collect_size / (time.time() - start_time)
             data["meta/global_step"] = (i_collect + 1) * args.collect_size
 
