@@ -124,8 +124,6 @@ def main(args):
 
         with timer.add_time("collect"):
             mbuffer.collect(agent, args.ctx_len, timer=timer)
-            if args.teacher:
-                mbuffer_teacher.collect(agent_teacher, args.ctx_len, timer=timer)
         with timer.add_time("calc_gae"):
             mbuffer.calc_gae(args.gamma, args.gae_lambda)
 
@@ -138,9 +136,6 @@ def main(args):
         for _ in range(args.n_updates):
             with timer.add_time("generate_batch"):
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-                if args.teacher:
-                    batch_teacher = mbuffer_teacher.generate_batch(args.batch_size, args.ctx_len)
-                    logits, val = agent(done=batch_teacher["done"], obs=batch_teacher["obs"], act=batch_teacher["act"], rew=batch_teacher["rew"])
 
             with timer.add_time("forward_pass"):
                 logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
