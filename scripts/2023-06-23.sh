@@ -36,3 +36,5 @@ python ppo_atari.py --track=True --project=test --name="{env_ids[0]}_obj={obj}_n
 python ppo_atari.py --track=True --project=test --name="{env_ids[0]}_obj={obj}_normrew={norm_rew}_seed={seed}" --device=cuda --seed=2 --env-ids=BeamRider --obj=eps --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --norm-rew=False --gamma=0.99
 
 python ppo_atari.py --track=False --project=test --name="{env_ids[0]}_obj={obj}_normrew={norm_rew}_seed={seed}" --device=cuda --seed=2 --env-ids=BeamRider --obj=eps --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --norm-rew=False --gamma=0.99
+
+python ppo_atari.py --track=False --project=test --name="{env_ids[0]}_obj={obj}_normrew={norm_rew}_seed={seed}" --device=cuda --seed=2 --env-ids=BeamRider --obj=ext --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --norm-rew=False --gamma=0.99

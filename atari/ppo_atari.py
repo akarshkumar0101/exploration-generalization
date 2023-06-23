@@ -106,7 +106,7 @@ def main(args):
     )
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
-    if args.obj == "eps" or True:
+    if args.obj == "eps":
         idm = IDM(env.single_action_space.n, n_dim=512, normalize=True).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
         env.configure_eps_reward(encode_fn=idm, ctx_len=16, k=4)
@@ -204,6 +204,8 @@ def main(args):
         if viz_fast:  # fast logging, ex: scalars
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
+                if viz_midd:
+                    print(f"time/{key}: {tim:.3f}")
             data["meta/SPS"] = (i_collect + 1) * args.collect_size / (time.time() - start_time)
             data["meta/global_step"] = (i_collect + 1) * args.collect_size
 
