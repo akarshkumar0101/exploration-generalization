@@ -1,13 +1,14 @@
 python_file: ppo_atari.py
 
 --track: True
---project: egb-atari-10
---name: "{env_ids[0]}_obj={obj}_normrew={norm_rew}_seed={seed}"
+--project: egb-atari-11
+--name: "{env_ids[0]}_{obj}_{seed}"
+--log-video: True
 
 --device: cuda
 --seed: [0, 1, 2]
 
---env-ids: [MontezumaRevenge]
+--env-ids: [MontezumaRevenge, Pitfall]
 --obj: [ext, eps]
 --ctx-len: 4
 --total-steps: 10e6
@@ -16,5 +17,6 @@ python_file: ppo_atari.py
 --batch-size: 256
 --n-updates: 16
 
---norm-rew: [True, False]
+--episodic-life: True
+--norm-rew: True
 --gamma: 0.99

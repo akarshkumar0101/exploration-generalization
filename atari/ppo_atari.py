@@ -26,8 +26,7 @@ parser.add_argument("--entity", type=str, default=None, help="the entity (team) 
 parser.add_argument("--project", type=str, default=None, help="the wandb's project name")
 parser.add_argument("--name", type=str, default=None, help="the name of this experiment")
 parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--viz-slow", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--viz_midd", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
 
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0, help="seed of the experiment")
@@ -108,9 +107,9 @@ def main(args):
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     if args.obj == "eps":
-        idm = agent_atari.IDM(env.single_action_space.n, n_dim=512, normalize=True).to(args.device)
+        idm = agent_atari.IDM(env.single_action_space.n, n_dim=512, normalize=False).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
-        env.configure_eps_reward(encode_fn=idm, ctx_len=16, k=4)
+        env.configure_eps_reward(encode_fn=idm, ctx_len=64, k=4)
     if args.obj == "rnd":
         rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
@@ -130,13 +129,10 @@ def main(args):
         lr = utils.get_lr(args.lr, args.lr / 10.0, i_collect, args.n_collects, warmup=args.lr_warmup, decay=args.lr_decay)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
-
         agent.train()
-
         for _ in range(args.n_updates):
             with timer.add_time("generate_batch"):
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-
             with timer.add_time("forward_pass"):
                 logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
 
@@ -151,12 +147,12 @@ def main(args):
                 loss_e = dist.entropy()
                 loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
 
-            if args.obj == "eps":
-                pass
-            if args.obj == "rnd":
-                rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
-                loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
-                loss = loss + 1.0 * loss_rnd.mean()
+                if args.obj == "eps":
+                    pass
+                if args.obj == "rnd":
+                    rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
+                    loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
+                    loss = loss + 1.0 * loss_rnd.mean()
 
             with timer.add_time("opt_step"):
                 opt.zero_grad()

@@ -117,28 +117,28 @@ def main(args):
         env.configure_rnd_reward(rnd_model=rnd_model)
 
     start_time = time.time()
-
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer = timers.Timer()
-
-        with timer.add_time("collect"):
-            mbuffer.collect(agent, args.ctx_len, timer=timer)
-        with timer.add_time("calc_gae"):
-            mbuffer.calc_gae(args.gamma, args.gae_lambda)
 
         lr = utils.get_lr(args.lr, args.lr / 10.0, i_collect, args.n_collects, warmup=args.lr_warmup, decay=args.lr_decay)
         for param_group in opt.param_groups:
             param_group["lr"] = lr
 
+        mbuffer.collect(agent, args.ctx_len, timer=timer)
+        if args.ppo:
+            mbuffer.calc_gae(args.gamma, args.gae_lambda)
+        if args.teacher:
+            mbuffer_teacher.collect(agent_teacher, args.ctx_len, timer=timer)
+
         agent.train()
-
         for _ in range(args.n_updates):
-            with timer.add_time("generate_batch"):
+            if args.ppo:
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
-
-            with timer.add_time("forward_pass"):
-                logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
+            elif args.teacher:
+                batch = mbuffer_teacher.generate_batch(args.batch_size, args.ctx_len)
+            
+            logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
 
             if agent.last_token_train:
                 batch = {k: v[:, [-1]] for k, v in batch.items()}
@@ -146,17 +146,22 @@ def main(args):
             dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
 
             with timer.add_time("calc_loss"):
-                loss_p = utils.calc_ppo_policy_loss(dist, batch_dist, batch["act"], batch["adv"], norm_adv=args.norm_adv, clip_coef=args.clip_coef)
-                loss_v = utils.calc_ppo_value_loss(val, batch["val"], batch["ret"], clip_coef=args.clip_coef if args.clip_vloss else None)
-                loss_e = dist.entropy()
-                loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
+                if args.ppo:
+                    loss_p = utils.calc_ppo_policy_loss(dist, batch_dist, batch["act"], batch["adv"], norm_adv=args.norm_adv, clip_coef=args.clip_coef)
+                    loss_v = utils.calc_ppo_value_loss(val, batch["val"], batch["ret"], clip_coef=args.clip_coef if args.clip_vloss else None)
+                    loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean()
 
-            if args.obj == "eps":
-                pass
-            if args.obj == "rnd":
-                rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
-                loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
-                loss = loss + 1.0 * loss_rnd.mean()
+                    if args.obj == "eps":
+                        pass
+                    if args.obj == "rnd":
+                        rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
+                        loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
+                        loss = loss + 1.0 * loss_rnd.mean()
+                elif args.teacher:
+                    loss_klbc = torch.nn.functional.kl_div(dist.logits, batch_dist.logits, log_target=True, reduction="none").sum(dim=-1)
+                    loss = 1.0 * loss_klbc.mean()
+                loss_e = dist.entropy()
+                loss = loss - args.ent_coef * loss_e.mean()
 
             with timer.add_time("opt_step"):
                 opt.zero_grad()

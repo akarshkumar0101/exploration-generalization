@@ -41,7 +41,7 @@ class NatureCNN(nn.Module):
         self.normalize = normalize
 
     def forward(self, x):
-        x = self.network(x / 255.0)
+        x = self.network(x / 255.0 * 2.0 - 1.0)
         if self.normalize:
             x = nn.functional.normalize(x, dim=-1)
         return x
