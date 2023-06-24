@@ -10,7 +10,3 @@ python ppo_atari.py --track=True --project=egb-atari-11 --name={env_ids[0]}_{obj
 python ppo_atari.py --track=True --project=egb-atari-11 --name={env_ids[0]}_{obj}_{seed} --log-video=True --device=cuda --seed=2 --env-ids=MontezumaRevenge --obj=eps --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --episodic-life=True --norm-rew=True --gamma=0.99
 python ppo_atari.py --track=True --project=egb-atari-11 --name={env_ids[0]}_{obj}_{seed} --log-video=True --device=cuda --seed=2 --env-ids=Pitfall          --obj=ext --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --episodic-life=True --norm-rew=True --gamma=0.99
 python ppo_atari.py --track=True --project=egb-atari-11 --name={env_ids[0]}_{obj}_{seed} --log-video=True --device=cuda --seed=2 --env-ids=Pitfall          --obj=eps --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --episodic-life=True --norm-rew=True --gamma=0.99
-
-
-
-python ppo_atari.py --track=False --project=egb-atari-11 --name={env_ids[0]}_{obj}_{seed} --log-video=True --device=cpu --seed=2 --env-ids=Pitfall          --obj=eps --ctx-len=4 --total-steps=10e6 --n-envs=8 --n-steps=128 --batch-size=256 --n-updates=16 --episodic-life=True --norm-rew=True --gamma=0.99
