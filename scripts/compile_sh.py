@@ -82,7 +82,7 @@ if __name__ == "__main__":
             if isinstance(val, list):
                 command.append(f'{key} {" ".join(val)}')
             else:
-                if isinstance(val, str) and (" " in val or "=" in val):
+                if isinstance(val, str) and (" " in val or "=" in val or "[" in val or "]" in val):
                     command.append(f'{key}="{val}"')
                 else:
                     command.append(f"{key}={val}")
