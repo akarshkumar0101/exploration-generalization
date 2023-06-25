@@ -71,6 +71,10 @@ def calc_rnd_loss(rnd_student, rnd_teacher):
     return (rnd_student - rnd_teacher.detach()).pow(2).mean(dim=-1)
 
 
+def calc_idm_loss(logits, actions):
+    return torch.nn.functional.cross_entropy(logits, actions, reduction="none")
+
+
 def index_dict(data, fn_index):
     def index_v(v):
         if isinstance(v, torch.Tensor):

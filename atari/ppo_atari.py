@@ -107,9 +107,9 @@ def main(args):
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     if args.obj == "eps":
-        idm = agent_atari.IDM(env.single_action_space.n, n_dim=512, normalize=False).to(args.device)
+        idm = agent_atari.IDM(env.single_action_space.n, n_dim=128, normalize=False).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
-        env.configure_eps_reward(encode_fn=idm, ctx_len=64, k=4)
+        env.configure_eps_reward(encode_fn=idm, ctx_len=1024, k=1)
     if args.obj == "rnd":
         rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
@@ -148,6 +148,8 @@ def main(args):
                 loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
 
                 if args.obj == "eps":
+                    # logits = idm.predict_action(batch["obs"][:, 0], batch["obs"][:, 1])
+                    # loss_idm = utils.calc_idm_loss(logits, batch["act"][:, 0])
                     pass
                 if args.obj == "rnd":
                     rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
@@ -235,3 +237,13 @@ def main(args):
 
 if __name__ == "__main__":
     main(parse_args())
+
+"""
+Next thing to do:
+ - Train the IDM to get actual IDM features
+
+Move the Intrinsic reward calculation and the reward normalization away from the env wrappers
+and in the main loop calculation that overrides buffer.
+Why? It is much more efficient (can calculate entire buffer's intrinsic reward in one go)
+And more importantly: the reward normalization will apply the same to ALL rewards in this batch.
+"""

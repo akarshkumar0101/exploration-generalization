@@ -122,8 +122,8 @@ class NormalizeReward(gym.core.Wrapper, gym.utils.RecordConstructorArgs):
         r, d = info[f"rew_{self.key_rew}"], info["done"]
         if self.returns is None:
             self.returns = torch.zeros_like(r)
-        self.returns = self.returns * self.gamma * (1.0 - d.float()) + r
-        # self.returns = self.returns * self.gamma + r
+        # self.returns = self.returns * self.gamma * (1.0 - d.float()) + r
+        self.returns = self.returns * self.gamma + r
         self.rms_returns.update(self.returns)
         """Normalizes the rewards with the running mean rewards and their variance."""
         r = r / (self.rms_returns.var + self.eps).sqrt()

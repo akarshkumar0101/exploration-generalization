@@ -240,12 +240,9 @@ class EpisodicReward(gym.Wrapper):
             memory = torch.stack(list(self.memory), dim=1)  # b m d
             self.memory.append(latent)
             if memory.shape[1] >= self.k:
-                latent = self.encode_fn(info["obs"])  # b d
-                memory = torch.stack(list(self.memory), dim=1)  # b m d
-                self.memory.append(latent)
                 d = (latent[:, None, :] - memory).norm(dim=-1)  # b m
                 dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
-                info["rew_eps"] = dk.mean(dim=-1)  # b
+                info["rew_eps"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
                 assert info["rew_eps"].shape == info["rew_ext"].shape
             else:
                 info["rew_eps"] = torch.zeros_like(info["rew_ext"])
