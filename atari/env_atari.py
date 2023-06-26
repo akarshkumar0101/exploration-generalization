@@ -213,40 +213,107 @@ class E3BReward(gym.Wrapper):
         return rew_e3b
 
 
+# class EpisodicReward(gym.Wrapper):
+#     def __init__(self, env):
+#         super().__init__(env)
+#         self.encode_fn = None
+
+#     def configure_eps_reward(self, encode_fn=None, ctx_len=10, k=1):
+#         self.encode_fn = encode_fn
+#         assert ctx_len >= k
+#         self.memory = collections.deque(maxlen=ctx_len)  # m b d
+#         self.k = k
+
+#     @torch.no_grad()  # this is required
+#     def reset(self, *args, **kwargs):
+#         obs, info = self.env.reset(*args, **kwargs)
+#         if self.encode_fn is not None:
+#             latent = self.encode_fn(info["obs"])
+#             self.memory.append(latent)
+#         return obs, info
+
+#     @torch.no_grad()  # this is required
+#     def step(self, action):
+#         obs, rew, term, trunc, info = self.env.step(action)
+#         if self.encode_fn is not None:
+#             latent = self.encode_fn(info["obs"])  # b d
+#             memory = torch.stack(list(self.memory), dim=1)  # b m d
+#             self.memory.append(latent)
+#             if memory.shape[1] >= self.k:
+#                 d = (latent[:, None, :] - memory).norm(dim=-1)  # b m
+#                 dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
+#                 info["rew_eps"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
+#                 assert info["rew_eps"].shape == info["rew_ext"].shape
+#             else:
+#                 info["rew_eps"] = torch.zeros_like(info["rew_ext"])
+#         return obs, rew, term, trunc, info
+
+
+from einops import repeat
+
+
 class EpisodicReward(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.encode_fn = None
 
     def configure_eps_reward(self, encode_fn=None, ctx_len=10, k=1):
-        self.encode_fn = encode_fn
         assert ctx_len >= k
-        self.memory = collections.deque(maxlen=ctx_len)  # m b d
-        self.k = k
+        self.encode_fn, self.ctx_len, self.k = encode_fn, ctx_len, k
 
     @torch.no_grad()  # this is required
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         if self.encode_fn is not None:
-            latent = self.encode_fn(info["obs"])
-            self.memory.append(latent)
+            latent = self.encode_fn(info["obs"])  # b d
+            self.memory = repeat(latent, "b d -> b m d", m=self.ctx_len).clone()  # clone makes items independent
+            self.i_mem = 1
         return obs, info
 
     @torch.no_grad()  # this is required
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
+        done = info["done"]
         if self.encode_fn is not None:
             latent = self.encode_fn(info["obs"])  # b d
-            memory = torch.stack(list(self.memory), dim=1)  # b m d
-            self.memory.append(latent)
-            if memory.shape[1] >= self.k:
-                d = (latent[:, None, :] - memory).norm(dim=-1)  # b m
-                dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
-                info["rew_eps"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
-                assert info["rew_eps"].shape == info["rew_ext"].shape
-            else:
-                info["rew_eps"] = torch.zeros_like(info["rew_ext"])
+            # whereever done is true, replace the entire memory with the current latent
+            self.memory[done, :, :] = latent[done, None, :]  # bp m d
+
+            d = (latent[:, None, :] - self.memory).norm(dim=-1)  # b m
+            dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
+            info["rew_eps"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
+
+            self.memory[:, self.i_mem, :] = latent
+            self.i_mem = (self.i_mem + 1) % self.ctx_len
+
         return obs, rew, term, trunc, info
+
+
+class BufferEpisodicReward:
+    def __init__(self, encode_fn=None, ctx_len=10, k=1):
+        assert ctx_len >= k
+        self.encode_fn, self.ctx_len, self.k = encode_fn, ctx_len, k
+
+    @torch.no_grad()
+    def calc_rewards(self, obss, dones):
+        n_envs, n_steps = obss.shape[:2]
+        rews = torch.zeros(n_envs, n_steps, device=obss.device)
+        if getattr(self, "memory", None) is None:
+            self.i_mem = 0
+            latent = self.encode_fn(obss[:, 0])
+            self.memory = repeat(latent, "b d -> b m d", m=self.ctx_len)
+
+        for i_step in range(n_steps):
+            latent = self.encode_fn(obss[:, i_step])  # b d
+            # TODO: MEMORY ASSINGMENT SHOULD BE AFER COMPUTING REWARD
+            self.memory[:, self.i_mem, :] = latent
+            self.i_mem = (self.i_mem + 1) % self.ctx_len
+            self.memory[dones[:, i_step], :, :] = latent[dones[:, i_step], None, :]  # bp m d
+
+            d = (latent[:, None, :] - self.memory).norm(dim=-1)  # b m
+            dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
+            rews[:, i_step] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
+        return rews
 
 
 class RNDReward(gym.Wrapper):
@@ -265,6 +332,36 @@ class RNDReward(gym.Wrapper):
             info["rew_rnd"] = (rnd_student - rnd_teacher).pow(2).mean(dim=-1)  # b
             assert info["rew_rnd"].shape == info["rew_ext"].shape
         return obs, rew, term, trunc, info
+
+
+class BufferRNDReward:
+    def __init__(self, rnd_model=None):
+        self.rnd_model = rnd_model
+
+    @torch.no_grad()
+    def calc_rewards(self, obss):
+        n_envs, n_steps = obss.shape[:2]
+        rews = torch.zeros(n_envs, n_steps, device=obss.device)
+        for i_step in range(n_steps):
+            rnd_student, rnd_teacher = self.rnd_model(obss[:, i_step], update_rms_obs=True)  # b d
+            rews[:, i_step] = (rnd_student - rnd_teacher).pow(2).mean(dim=-1)  # b
+        return rews
+
+
+import normalize
+
+
+class BufferNormalizeReward:
+    def __init__(self, gamma, eps=1e-8):
+        self.rms_returns, self.returns = normalize.RunningMeanStd(), None
+        self.gamma, self.eps = gamma, eps
+
+    def normalize_rews(self, rews):
+        n_envs, n_steps = rews.shape
+        for i_step in range(n_steps):
+            self.returns = self.returns * self.gamma + rews[:, i_step]
+            self.rms_returns.update(self.returns)
+        return rews / (self.rms_returns.var + self.eps).sqrt()
 
 
 """

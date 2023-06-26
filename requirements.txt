@@ -18,3 +18,5 @@ imageio==2.26.0  # (specific version) needed for proper processing of wandb vide
 
 jupyterlab==4.0.2
 jupyterlab-vim==0.16.0
+
+lpips==0.1.4

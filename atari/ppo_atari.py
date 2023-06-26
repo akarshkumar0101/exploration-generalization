@@ -107,7 +107,7 @@ def main(args):
     opt = agent.create_optimizer(lr=args.lr, device=args.device)
 
     if args.obj == "eps":
-        idm = agent_atari.IDM(env.single_action_space.n, n_dim=128, normalize=False).to(args.device)
+        idm = agent_atari.IDM(env.single_action_space.n, n_dim=64, normalize=True).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
         env.configure_eps_reward(encode_fn=idm, ctx_len=1024, k=1)
     if args.obj == "rnd":
@@ -135,22 +135,22 @@ def main(args):
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
             with timer.add_time("forward_pass"):
                 logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
-
-            if agent.last_token_train:
-                batch = {k: v[:, [-1]] for k, v in batch.items()}
-                logits, val = logits[:, [-1]], val[:, [-1]]
             dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
 
             with timer.add_time("calc_loss"):
                 loss_p = utils.calc_ppo_policy_loss(dist, batch_dist, batch["act"], batch["adv"], norm_adv=args.norm_adv, clip_coef=args.clip_coef)
                 loss_v = utils.calc_ppo_value_loss(val, batch["val"], batch["ret"], clip_coef=args.clip_coef if args.clip_vloss else None)
                 loss_e = dist.entropy()
+                if agent.last_token_train:
+                    loss_p, loss_v, loss_e = loss_p[:, [-1]], loss_v[:, [-1]], loss_e[:, [-1]]
                 loss = 1.0 * loss_p.mean() + args.vf_coef * loss_v.mean() - args.ent_coef * loss_e.mean()
 
                 if args.obj == "eps":
-                    # logits = idm.predict_action(batch["obs"][:, 0], batch["obs"][:, 1])
-                    # loss_idm = utils.calc_idm_loss(logits, batch["act"][:, 0])
-                    pass
+                    logits_idm = idm.predict_action(batch["obs"][:, 0], batch["obs"][:, 1])
+                    entropy_idm = Categorical(logits=logits_idm).entropy()
+                    loss_idm = utils.calc_idm_loss(logits_idm, batch["act"][:, 0])
+                    loss = loss + 1.0 * loss_idm.mean()
+
                 if args.obj == "rnd":
                     rnd_student, rnd_teacher = rnd_model(batch["obs"][:, 0], update_rms_obs=False)  # only give one frame
                     loss_rnd = utils.calc_rnd_loss(rnd_student, rnd_teacher)
@@ -162,6 +162,11 @@ def main(args):
                 loss.backward()
             with timer.add_time("opt_step"):
                 grad_norm = torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                if args.obj == "eps":
+                    grad_norm_idm = torch.nn.utils.clip_grad_norm_(idm.parameters(), args.max_grad_norm)
+                    print(grad_norm, grad_norm_idm)
+                # for pg in opt.param_groups:
+                # grad_norm = torch.nn.utils.clip_grad_norm_(pg["params"], args.max_grad_norm)
                 opt.step()
 
             kl_div = torch.distributions.kl_divergence(batch_dist, dist)
@@ -214,6 +219,12 @@ def main(args):
             data["details/lr"] = opt.param_groups[0]["lr"]
             data["details/loss_value"] = loss_v.mean().item()
             data["details/loss_policy"] = loss_p.mean().item()
+            if args.obj == "eps":
+                data["details/loss_idm"] = loss_idm.mean().item()
+                data["details/grad_norm_idm"] = grad_norm_idm.item()
+                data["charts/perplexity_idm"] = np.e ** entropy_idm.mean().item()
+            data["details/rms_returns_mean"] = env.rms_returns.mean.item()
+            data["details/rms_returns_var"] = env.rms_returns.var.item()
             data["details/grad_norm"] = grad_norm.item()
             data["details/entropy"] = loss_e.mean().item()
             data["details/kl_div"] = kl_div.mean().item()
@@ -239,9 +250,6 @@ if __name__ == "__main__":
     main(parse_args())
 
 """
-Next thing to do:
- - Train the IDM to get actual IDM features
-
 Move the Intrinsic reward calculation and the reward normalization away from the env wrappers
 and in the main loop calculation that overrides buffer.
 Why? It is much more efficient (can calculate entire buffer's intrinsic reward in one go)
