@@ -11,7 +11,7 @@ python_file: ppo_atari.py
 --env-ids: [MontezumaRevenge, Pitfall]
 --obj: eps
 --ctx-len: 32
---total-steps: 10e6
+--total-steps: 20e6
 --n-envs: 16
 --n-steps: 256
 --batch-size: 1024
