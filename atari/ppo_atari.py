@@ -191,9 +191,11 @@ def main(args):
                 hns.append(hns_env)
 
         for env_id, env in zip(args.env_ids, mbuffer.envs):
-            for key, rets in env.get_past_returns().items():  # log returns
+            pret_data = env.get_past_returns()
+            for key, rets in pret_data.items():  # log returns
                 if len(rets) > 0 and viz_fast:  # log scalar
                     data[f"returns/{env_id}_{key}"] = rets.mean().item()
+                    data[f"returns_perstep/{env_id}_{key}"] = (rets / pret_data["ret_traj"]).mean().item()
                 # if len(rets) > 0 and viz_midd:  # log histogram
                 #     data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
             if args.log_video and viz_slow:  # log video
@@ -253,4 +255,7 @@ Move the Intrinsic reward calculation and the reward normalization away from the
 and in the main loop calculation that overrides buffer.
 Why? It is much more efficient (can calculate entire buffer's intrinsic reward in one go)
 And more importantly: the reward normalization will apply the same to ALL rewards in this batch.
+
+
+Graph average reward per step (ret_*/ret_traj)
 """

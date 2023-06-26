@@ -8,7 +8,7 @@ python_file: ppo_atari.py
 --device: cuda
 --seed: [0, 1, 2]
 
---env-ids: [MontezumaRevenge, Pitfall]
+--env-ids: [MontezumaRevenge, Pitfall, Darkchambers]
 --obj: eps
 --ctx-len: 32
 --total-steps: 20e6
@@ -16,6 +16,7 @@ python_file: ppo_atari.py
 --n-steps: 256
 --batch-size: 1024
 --n-updates: 16
+--ent-coef: [0.01, 0.03, 0.06, 0.10]
 
 --episodic-life: True
 --norm-rew: True

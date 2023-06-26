@@ -31,7 +31,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
         # batch_size=None,
         # num_threads=None,
         seed=seed,  # default: 42
-        # max_episode_steps=27000,  # default: 27000
+        max_episode_steps=2700,  # default: 27000
         # img_height=84,  # default: 84
         # img_width=84,  # default: 84
         stack_num=1,  # default: 4
