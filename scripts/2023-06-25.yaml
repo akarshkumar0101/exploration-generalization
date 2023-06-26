@@ -1,7 +1,7 @@
 python_file: ppo_atari.py
 
 --track: True
---project: egb-atari-12
+--project: egb-atari-13
 --name: "{env_ids[0]}_{obj}_{seed}"
 --log-video: True
 
