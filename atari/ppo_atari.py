@@ -164,7 +164,6 @@ def main(args):
                 grad_norm = torch.nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 if args.obj == "eps":
                     grad_norm_idm = torch.nn.utils.clip_grad_norm_(idm.parameters(), args.max_grad_norm)
-                    print(grad_norm, grad_norm_idm)
                 # for pg in opt.param_groups:
                 # grad_norm = torch.nn.utils.clip_grad_norm_(pg["params"], args.max_grad_norm)
                 opt.step()
