@@ -113,5 +113,8 @@ def calc_hns(env_id, score):
     """Converts game score to human-normalized score."""
     env_id = process_env_id(env_id)
 
-    score_random, score_human = env_id2scores[env_id]
+    if env_id in env_id2scores:
+        score_random, score_human = env_id2scores[env_id]
+    else:
+        score_random, score_human = 0.0, 1.0
     return (score - score_random) / (score_human - score_random)
