@@ -257,9 +257,13 @@ class EpisodicReward(gym.Wrapper):
         super().__init__(env)
         self.encode_fn = None
 
-    def configure_eps_reward(self, encode_fn=None, ctx_len=10, k=1):
+    def state_encoder(self, obs):
+        return torch.nn.functional.avg_pool2d(obs.float(), kernel_size=(3, 3)).to(torch.uint8).reshape(-1, 28 * 28)
+
+    def configure_eps_reward(self, encode_fn=None, ctx_len=10, k=1, p=2, obj="eps"):
         assert ctx_len >= k
-        self.encode_fn, self.ctx_len, self.k = encode_fn, ctx_len, k
+        self.encode_fn, self.ctx_len, self.k, self.p = encode_fn, ctx_len, k, p
+        self.myobj = obj
 
     @torch.no_grad()  # this is required
     def reset(self, *args, **kwargs):
@@ -279,9 +283,9 @@ class EpisodicReward(gym.Wrapper):
             # whereever done is true, replace the entire memory with the current latent
             self.memory[done, :, :] = latent[done, None, :]  # bp m d
 
-            d = (latent[:, None, :] - self.memory).norm(dim=-1)  # b m
+            d = (latent[:, None, :] - self.memory).float().norm(dim=-1, p=self.p)  # b m
             dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
-            info["rew_eps"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
+            info[f"rew_{self.myobj}"] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
 
             self.memory[:, self.i_mem, :] = latent
             self.i_mem = (self.i_mem + 1) % self.ctx_len
@@ -289,31 +293,31 @@ class EpisodicReward(gym.Wrapper):
         return obs, rew, term, trunc, info
 
 
-class BufferEpisodicReward:
-    def __init__(self, encode_fn=None, ctx_len=10, k=1):
-        assert ctx_len >= k
-        self.encode_fn, self.ctx_len, self.k = encode_fn, ctx_len, k
+# class BufferEpisodicReward:
+#     def __init__(self, encode_fn=None, ctx_len=10, k=1):
+#         assert ctx_len >= k
+#         self.encode_fn, self.ctx_len, self.k = encode_fn, ctx_len, k
 
-    @torch.no_grad()
-    def calc_rewards(self, obss, dones):
-        n_envs, n_steps = obss.shape[:2]
-        rews = torch.zeros(n_envs, n_steps, device=obss.device)
-        if getattr(self, "memory", None) is None:
-            self.i_mem = 0
-            latent = self.encode_fn(obss[:, 0])
-            self.memory = repeat(latent, "b d -> b m d", m=self.ctx_len)
+#     @torch.no_grad()
+#     def calc_rewards(self, obss, dones):
+#         n_envs, n_steps = obss.shape[:2]
+#         rews = torch.zeros(n_envs, n_steps, device=obss.device)
+#         if getattr(self, "memory", None) is None:
+#             self.i_mem = 0
+#             latent = self.encode_fn(obss[:, 0])
+#             self.memory = repeat(latent, "b d -> b m d", m=self.ctx_len)
 
-        for i_step in range(n_steps):
-            latent = self.encode_fn(obss[:, i_step])  # b d
-            # TODO: MEMORY ASSINGMENT SHOULD BE AFER COMPUTING REWARD
-            self.memory[:, self.i_mem, :] = latent
-            self.i_mem = (self.i_mem + 1) % self.ctx_len
-            self.memory[dones[:, i_step], :, :] = latent[dones[:, i_step], None, :]  # bp m d
+#         for i_step in range(n_steps):
+#             latent = self.encode_fn(obss[:, i_step])  # b d
+#             # TODO: MEMORY ASSINGMENT SHOULD BE AFER COMPUTING REWARD
+#             self.memory[:, self.i_mem, :] = latent
+#             self.i_mem = (self.i_mem + 1) % self.ctx_len
+#             self.memory[dones[:, i_step], :, :] = latent[dones[:, i_step], None, :]  # bp m d
 
-            d = (latent[:, None, :] - self.memory).norm(dim=-1)  # b m
-            dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
-            rews[:, i_step] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
-        return rews
+#             d = (latent[:, None, :] - self.memory).norm(dim=-1)  # b m
+#             dk = d.topk(k=self.k, dim=-1, largest=False).values  # b k
+#             rews[:, i_step] = dk.mean(dim=-1)  # b. TODO: is mean the right thing to do?
+#         return rews
 
 
 class RNDReward(gym.Wrapper):
@@ -351,17 +355,17 @@ class BufferRNDReward:
 import normalize
 
 
-class BufferNormalizeReward:
-    def __init__(self, gamma, eps=1e-8):
-        self.rms_returns, self.returns = normalize.RunningMeanStd(), None
-        self.gamma, self.eps = gamma, eps
+# class BufferNormalizeReward:
+#     def __init__(self, gamma, eps=1e-8):
+#         self.rms_returns, self.returns = normalize.RunningMeanStd(), None
+#         self.gamma, self.eps = gamma, eps
 
-    def normalize_rews(self, rews):
-        n_envs, n_steps = rews.shape
-        for i_step in range(n_steps):
-            self.returns = self.returns * self.gamma + rews[:, i_step]
-            self.rms_returns.update(self.returns)
-        return rews / (self.rms_returns.var + self.eps).sqrt()
+#     def normalize_rews(self, rews):
+#         n_envs, n_steps = rews.shape
+#         for i_step in range(n_steps):
+#             self.returns = self.returns * self.gamma + rews[:, i_step]
+#             self.rms_returns.update(self.returns)
+#         return rews / (self.rms_returns.var + self.eps).sqrt()
 
 
 """

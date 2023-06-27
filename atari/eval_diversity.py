@@ -34,7 +34,7 @@ def main(args):
     scores_lpips = []
     scores_random = [[] for _ in range(len(encoders))]
 
-    for i in range(10):
+    for i in range(1):
         buffer.collect(agent, 1)
         for _ in tqdm(range(16)):
             batch1 = buffer.generate_batch(256, 1)
@@ -56,6 +56,25 @@ def main(args):
     print(scores_random.shape)
     print(scores_lpips.mean(), scores_lpips.std())
     print(scores_random.mean(axis=(-1, -2)), scores_random.std(axis=(-1, -2)))
+
+
+loss_fn_alex = lpips.LPIPS(net="alex")
+
+
+@torch.no_grad()
+def calc_diversity(buffer, n_iters=16, batch_size=256, device=None):
+    loss_fn_alex.to(device)
+    scores = []
+    for _ in range(n_iters):
+        batch1 = buffer.generate_batch(batch_size, 1)  # b 1 1 84 84
+        batch2 = buffer.generate_batch(batch_size, 1)  # b 1 1 84 84
+        obs1 = repeat(batch1["obs"], "b 1 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+        obs2 = repeat(batch2["obs"], "b 1 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+
+        d = loss_fn_alex(obs1, obs2).flatten()
+        scores.append(d)
+    scores = torch.stack(scores)
+    return scores
 
 
 if __name__ == "__main__":

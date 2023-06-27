@@ -8,6 +8,7 @@ from distutils.util import strtobool
 import agent_atari
 import atari_data
 import buffers
+import eval_diversity
 import numpy as np
 import timers
 import torch
@@ -109,7 +110,9 @@ def main(args):
     if args.obj == "eps":
         idm = agent_atari.IDM(env.single_action_space.n, n_dim=64, normalize=True).to(args.device)
         opt.add_param_group({"params": idm.parameters(), "lr": args.lr})
-        env.configure_eps_reward(encode_fn=idm, ctx_len=1024, k=1)
+        env.configure_eps_reward(encode_fn=idm, ctx_len=1024, k=1, p=2, obj="eps")
+    if args.obj == "sps":
+        env.configure_eps_reward(encode_fn=env.state_encoder, ctx_len=1024, k=1, p=0, obj="sps")
     if args.obj == "rnd":
         rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
@@ -231,6 +234,10 @@ def main(args):
             data["details/kl_div"] = kl_div.mean().item()
             # data["details/clipfrac"] = np.mean(clipfracs)
             data["details/explained_variance"] = explained_var
+
+            for env_id, buffer in zip(args.env_ids, mbuffer.buffers):
+                lpips_diversity = eval_diversity.calc_diversity(buffer, n_iters=1, batch_size=512, device=args.device)
+                data[f"details/{env_id}_lpips_diversity"] = lpips_diversity.mean().item()
         if viz_midd:  # midd loggin, ex: histograms
             # data["details_hist/entropy"] = wandb.Histogram(to_np(loss_e).flatten())
             data["details_hist/perplexity"] = wandb.Histogram(np.e ** to_np(loss_e).flatten())

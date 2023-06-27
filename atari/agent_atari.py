@@ -5,6 +5,21 @@ from normalize import RunningMeanStd
 from torch import nn
 
 
+class NoopAgent(nn.Module):
+    def __init__(self, n_acts, ctx_len=None, logit=4.0):
+        super().__init__()
+        self.n_acts = n_acts
+        self.last_token_train = True
+        self.logit = logit
+
+    def forward(self, done, obs, act, rew):
+        b, t, c, h, w = obs.shape
+        logits = torch.zeros((b, 1, self.n_acts), device=obs.device)
+        values = torch.zeros((b, 1), device=obs.device)
+        logits[:, :, 0] = self.logit
+        return logits, values
+
+
 class RandomAgent(nn.Module):
     def __init__(self, n_acts, ctx_len=None):
         super().__init__()
