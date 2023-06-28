@@ -1,0 +1,25 @@
+python_file: ppo_atari.py
+
+--track: True
+--project: egb-atari-15
+--name: "{env_ids[0]}_{obj}_{seed}"
+--log-video: True
+
+--device: cuda
+--seed: [0, 1, 2]
+
+--env-ids: [Adventure, Alien, BankHeist, Berzerk, Darkchambers, MarioBros, MontezumaRevenge, Pitfall, Tutankham, Trondead, MsPacman, Pong, Breakout]
+--obj: [ext, rnd]
+--ctx-len: 4
+--total-steps: 50e6
+--n-envs: 32
+--n-steps: 128
+--batch-size: 1024
+--n-updates: 16
+--ent-coef: 0.001
+
+--episodic-life: False
+--norm-rew: True
+--gamma: 0.99
+
+--n-steps-rnd-init: 40000

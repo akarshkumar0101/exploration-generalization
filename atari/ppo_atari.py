@@ -65,6 +65,8 @@ parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of t
 parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
 
+parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=0)
+
 
 def parse_args(*args, **kwargs):
     args = parser.parse_args(*args, **kwargs)
@@ -117,6 +119,11 @@ def main(args):
         rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
         env.configure_rnd_reward(rnd_model=rnd_model)
+
+    if args.n_steps_rnd_init > 0:
+        print("Initializing RND model with random agent...")
+        for _ in tqdm(range(args.n_steps_rnd_init // args.collect_size)):
+            mbuffer.collect(agent_atari.RandomAgent(env.single_action_space.n), args.ctx_len)
 
     start_time = time.time()
 
