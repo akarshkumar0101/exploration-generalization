@@ -13,7 +13,7 @@ python_file: ppo_atari.py
 --env-ids: [Alien, Amidar, Assault, Asterix, Asteroids, Atlantis, BankHeist, BattleZone, BeamRider, Berzerk, Bowling, Boxing, Breakout, Centipede, ChopperCommand, CrazyClimber, Defender, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, MontezumaRevenge, MsPacman, NameThisGame, Phoenix, Pitfall, Pong, PrivateEye, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, Skiing, Solaris, SpaceInvaders, StarGunner, Surround, Tennis, TimePilot, Tutankham, UpNDown, Venture, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
 --obj: [ext, rnd]
 --ctx-len: 4
---total-steps: 20e6
+--total-steps: 50e6
 --n-envs: 128
 --n-steps: 128
 
