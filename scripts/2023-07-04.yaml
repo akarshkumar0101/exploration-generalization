@@ -1,7 +1,7 @@
 python_file: ppo_atari.py
 
 --track: True
---project: egb-atari
+--project: egb-atari-100
 --name: "specialist_{env_ids[0]}_{obj}_{seed}"
 
 --device: cuda
