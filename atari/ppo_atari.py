@@ -205,10 +205,11 @@ def main(args):
             pret_data = env.get_past_returns()
             for key, rets in pret_data.items():  # log returns
                 if len(rets) > 0 and viz_fast:  # log scalar
+                    data[f"returns_max/{env_id}_{key}"] = rets.max().item()
                     data[f"returns/{env_id}_{key}"] = rets.mean().item()
                     data[f"returns_perstep/{env_id}_{key}"] = (rets / pret_data["ret_traj"]).mean().item()
                 # if len(rets) > 0 and viz_midd:  # log histogram
-                #     data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
+                    # data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
             if args.log_video and viz_slow:  # log video
                 vid = np.stack(env.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
@@ -243,9 +244,9 @@ def main(args):
             # data["details/clipfrac"] = np.mean(clipfracs)
             data["details/explained_variance"] = explained_var
 
-            for env_id, buffer in zip(args.env_ids, mbuffer.buffers):
-                lpips_diversity = eval_diversity.calc_diversity(buffer, n_iters=1, batch_size=512, device=args.device)
-                data[f"details/{env_id}_lpips_diversity"] = lpips_diversity.mean().item()
+            # for env_id, buffer in zip(args.env_ids, mbuffer.buffers):
+            #     lpips_diversity = eval_diversity.calc_diversity(buffer, n_iters=1, batch_size=512, device=args.device)
+            #     data[f"details/{env_id}_lpips_diversity"] = lpips_diversity.mean().item()
         if viz_midd:  # midd loggin, ex: histograms
             # data["details_hist/entropy"] = wandb.Histogram(to_np(loss_e).flatten())
             data["details_hist/perplexity"] = wandb.Histogram(np.e ** to_np(loss_e).flatten())
