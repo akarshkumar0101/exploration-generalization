@@ -44,3 +44,4 @@ python_file: ppo_atari.py
 
 --n-steps-rnd-init: 50e3
 
+# requires 4 GB of GPU memory
