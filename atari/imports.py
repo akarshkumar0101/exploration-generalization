@@ -6,6 +6,7 @@ from functools import partial
 
 # import gym # as gym_old
 import gymnasium as gym
+import envpool
 import wandb
 import matplotlib.pyplot as plt
 import numpy as np

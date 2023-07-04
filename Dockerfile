@@ -1,7 +1,10 @@
 FROM --platform=linux/amd64 python:3.10
 
 # set a directory for the app
-WORKDIR /usr/src/app
+WORKDIR /app
+
+# needed for opencv
+RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 -y
 
 # copy requirements.txt
 COPY requirements.txt .

@@ -78,6 +78,7 @@ if __name__ == "__main__":
 
         command = ["python"] + [file]
         for key, val in datai.items():
+            print(type(val), val)
             assert isinstance(val, (list, str, bool, int, float))
             if isinstance(val, list):
                 command.append(f'{key} {" ".join(val)}')

@@ -24,7 +24,7 @@ class NoArgsReset(gym.Wrapper):
         return self.env.reset()
 
 
-def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, episodic_life=True, full_action_space=True, device=None, seed=0):
+def make_env_envpool(n_envs, env_id, episodic_life=True, full_action_space=True, seed=0):
     env = envpool.make_gymnasium(
         task_id=f"{env_id}-v5",
         num_envs=n_envs,
@@ -40,7 +40,7 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
         # noop_max=30,  # default: 30
         episodic_life=episodic_life,  # default: False
         # zero_discount_on_life_loss=False,  # default: False
-        reward_clip=True,  # default: False
+        # reward_clip=False,  # default: False
         # repeat_action_probability=0,  # default: 0
         # use_inter_area_resize=True,  # default: True
         # use_fire_reset=True,  # default: True
@@ -52,6 +52,31 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
     env.single_action_space = env.action_space
     env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
     env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
+    return env
+
+
+def make_env_single(env_id, episodic_life=True, full_action_space=True):
+    env = gym.make(f"ALE/{env_id}-v5", frameskip=1, repeat_action_probability=0, full_action_space=True)
+    env = gym.wrappers.AtariPreprocessing(env, noop_max=30, frame_skip=4, screen_size=84, terminal_on_life_loss=episodic_life, grayscale_obs=True, scale_obs=False)
+    env = gym.wrappers.TransformObservation(env, lambda obs: obs[None, :, :])
+    env.observation_space = gym.spaces.Box(low=0, high=255, shape=(1, *env.observation_space.shape), dtype=np.uint8)
+    return env
+
+
+def make_env_gymnasium(n_envs, env_id, episodic_life=True, full_action_space=True, seed=0):
+    env_fns = [partial(make_env_single, env_id=env_id, episodic_life=episodic_life, full_action_space=full_action_space) for _ in range(n_envs)]
+    env = gym.vector.SyncVectorEnv(env_fns)
+    env.get_ram = lambda: np.stack([e.unwrapped.ale.getRAM() for e in env.envs])
+    return env
+
+
+def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, episodic_life=True, full_action_space=True, device=None, seed=0, lib="envpool"):
+    if lib == "envpool":
+        env = make_env_envpool(n_envs, env_id, episodic_life=episodic_life, full_action_space=full_action_space, seed=seed)
+    elif lib == "gymnasium":
+        env = make_env_gymnasium(n_envs, env_id, episodic_life=episodic_life, full_action_space=full_action_space, seed=seed)
+    else:
+        raise ValueError(f"Unknown lib: {lib}")
 
     env = StoreObs(env, n_envs_store=4, buf_size=450)
     env = ToTensor(env, device=device)
@@ -111,13 +136,17 @@ class ToTensor(gym.Wrapper):
         obs, rew, term, trunc, info = self.env.step(action)
         rew = rew.astype(np.float32)
         info["obs"] = torch.from_numpy(obs).to(self.device)
-        info["rew_ext"] = torch.from_numpy(rew).to(self.device)
-        info["rew_score"] = torch.from_numpy(info["reward"]).to(self.device)
-        del info["reward"]
+        info["rew_score"] = torch.from_numpy(rew).to(self.device)
+        info["rew_ext"] = torch.sign(info["rew_score"])
+        if "reward" in info:
+            del info["reward"]
         info["rew_traj"] = torch.ones_like(info["rew_ext"])
         info["term"] = torch.from_numpy(term).to(self.device, torch.bool)
         info["trunc"] = torch.from_numpy(trunc).to(self.device, torch.bool)
-        info["term_atari"] = torch.from_numpy(info["terminated"]).to(self.device, torch.bool)
+        if "terminated" in info:
+            info["term_atari"] = torch.from_numpy(info["terminated"]).to(self.device, torch.bool)
+        else:
+            info["term_atari"] = info["term"] | info["trunc"]
         info["done"] = info["term"] | info["trunc"]
 
         self.timestep += 1

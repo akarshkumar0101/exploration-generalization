@@ -19,6 +19,8 @@ class Buffer:
         self.advs = torch.zeros((self.n_envs, self.n_steps), device=device)
         self.rets = torch.zeros((self.n_envs, self.n_steps), device=device)
 
+        self.rams = torch.zeros((self.n_envs, self.n_steps, 128), dtype=torch.uint8, device=device)
+
     def _construct_agent_input(self, i_step, ctx_len):
         # only for use during inference bc that's the only time buffer rolls over (for first observation)
         assert i_step >= 0 and i_step <= self.n_steps
@@ -55,6 +57,8 @@ class Buffer:
             if pbar is not None:
                 pbar.update(1)
 
+            if hasattr(self.env, "get_ram"):
+                self.rams[:, i_step] = torch.as_tensor(self.env.get_ram(), dtype=torch.uint8, device=self.device)
             with timer.add_time("copy_tensors"):
                 self.obss[:, i_step] = self.obs
                 self.dones[:, i_step] = self.done

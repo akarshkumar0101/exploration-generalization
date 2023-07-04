@@ -127,6 +127,7 @@ def main(args):
 
     start_time = time.time()
 
+    print('Starting Learning')
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer = timers.Timer()
