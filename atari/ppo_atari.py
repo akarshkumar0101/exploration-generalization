@@ -271,6 +271,4 @@ and in the main loop calculation that overrides buffer.
 Why? It is much more efficient (can calculate entire buffer's intrinsic reward in one go)
 And more importantly: the reward normalization will apply the same to ALL rewards in this batch.
 
-
-Graph average reward per step (ret_*/ret_traj)
 """
