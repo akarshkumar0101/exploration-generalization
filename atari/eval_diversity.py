@@ -77,44 +77,63 @@ def calc_diversity(buffer, n_iters=16, batch_size=256, device=None):
     return scores
 
 
-# @torch.no_grad()
-# def calc_div_traj_ram(buffer):
-#     div_traj = (batch["ram"].float().var(dim=1) / ram_var).mean(dim=0).mean().item()
+env_id2ram_var = {}
 
 
-# @torch.no_grad()
-# def calc_div_buff_ram():
-#     div_buff = (batch["ram"].float().var(dim=(0, 1)) / ram_var).mean().item()
+def register_envid_ram(env_id):
+    if env_id not in env_id2ram_var:
+        env = make_env(env_id, n_envs=16, lib="gymnasium")
+        buffer_random = buffers.Buffer(env, 16)
+        agent_random = agent_atari.RandomAgent(18)
+        buffer_random.collect(agent_random, 1)
+        ram_var = buffer_random.rams.float().var(dim=(0, 1)).clamp(1, None)
+        env_id2ram_var[env_id] = ram_var
 
 
-# @torch.no_grad()
-# def calc_div_traj_pix(buffer):
-#     batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
-#     return (batch["obs"].float().var(dim=1)).mean(dim=0).mean().item()
+@torch.no_grad()
+def calc_div_traj_ram(buffer, env_id):
+    register_envid_ram(env_id)
+    ram_var = env_id2ram_var[env_id]
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    return (batch["ram"].float().var(dim=1) / ram_var).mean(dim=0).mean().item()
 
 
-# @torch.no_grad()
-# def calc_div_buff_pix(buffer):
-#     batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
-#     return (batch["obs"].float().var(dim=(0, 1))).mean().item()
+@torch.no_grad()
+def calc_div_buff_ram(buffer, env_id):
+    register_envid_ram(env_id)
+    ram_var = env_id2ram_var[env_id]
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    return (batch["ram"].float().var(dim=(0, 1)) / ram_var).mean().item()
 
 
-# @torch.no_grad()
-# def calc_div_traj_lpips(buffer):
-#     i1, i2 = torch.randint(low=0, high=64, size=(2,))
-#     obs1 = repeat(batch["obs"][:, i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
-#     obs2 = repeat(batch["obs"][:, i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
-#     d = loss_fn_alex(obs1, obs2).flatten()
-#     pass
+@torch.no_grad()
+def calc_div_traj_pix(buffer):
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    return (batch["obs"].float().var(dim=1)).mean(dim=0).mean().item()
 
 
-# @torch.no_grad()
-# def calc_div_buff_lpips():
-#     i1, i2 = torch.randint(low=0, high=8 * 64, size=(2, 8))
-#     obs1 = repeat(batch["obs"].flatten(0, 1)[i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
-#     obs2 = repeat(batch["obs"].flatten(0, 1)[i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
-#     d = loss_fn_alex(obs1, obs2).flatten()
-#     pass
+@torch.no_grad()
+def calc_div_buff_pix(buffer):
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    return (batch["obs"].float().var(dim=(0, 1))).mean().item()
+
+
+@torch.no_grad()
+def calc_div_traj_lpips(buffer):
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    i1, i2 = torch.randint(low=0, high=64, size=(2,))
+    obs1 = repeat(batch["obs"][:, i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    obs2 = repeat(batch["obs"][:, i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    return loss_fn_alex(obs1, obs2).flatten().mean().item()
+
+
+@torch.no_grad()
+def calc_div_buff_lpips(buffer):
+    batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
+    i1, i2 = torch.randint(low=0, high=8 * 64, size=(2, 8))
+    obs1 = repeat(batch["obs"].flatten(0, 1)[i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    obs2 = repeat(batch["obs"].flatten(0, 1)[i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    return loss_fn_alex(obs1, obs2).flatten().mean().item()
 
 
 if __name__ == "__main__":
