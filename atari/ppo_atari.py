@@ -254,7 +254,7 @@ def main(args):
         if viz_slow:  # slow logging, ex: videos
             if args.save_agent is not None:  # save agent
                 save_agent = f"{args.save_agent}/agent_{i_collect:09d}.pt"
-                print("Saving agent to {}...")
+                print(f"Saving agent to {save_agent}...")
                 # os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
                 # torch.save(agent.state_dict(), args.save_agent)
                 os.makedirs(os.path.dirname(save_agent), exist_ok=True)
