@@ -82,12 +82,14 @@ env_id2ram_var = {}
 
 def register_envid_ram(env_id):
     if env_id not in env_id2ram_var:
-        env = make_env(env_id, n_envs=16, lib="gymnasium")
-        buffer_random = buffers.Buffer(env, 16)
+        print(f"Creating RAM var for {env_id}")
+        env = make_env(env_id, n_envs=32, lib="gymnasium")
+        buffer_random = buffers.Buffer(env, 512)
         agent_random = agent_atari.RandomAgent(18)
         buffer_random.collect(agent_random, 1)
         ram_var = buffer_random.rams.float().var(dim=(0, 1)).clamp(1, None)
         env_id2ram_var[env_id] = ram_var
+        print("done")
 
 
 @torch.no_grad()
