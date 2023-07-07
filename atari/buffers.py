@@ -137,6 +137,7 @@ class Buffer:
         batch["adv"] = self.generate_batch_tensor(self.advs, i_step, ctx_len)
         batch["ret"] = self.generate_batch_tensor(self.rets, i_step, ctx_len)
 
+        batch["ram"] = self.generate_batch_tensor(self.rams, i_step, ctx_len)
         # batch["dist"] = torch.distributions.Categorical(logits=batch["logits"])
         # batch["logprob"] = batch["dist"].log_prob(batch["act"])
         return batch

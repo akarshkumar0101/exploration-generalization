@@ -127,7 +127,7 @@ def main(args):
 
     start_time = time.time()
 
-    print('Starting Learning')
+    print("Starting Learning")
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer = timers.Timer()
@@ -209,7 +209,7 @@ def main(args):
                     data[f"returns/{env_id}_{key}"] = rets.mean().item()
                     data[f"returns_perstep/{env_id}_{key}"] = (rets / pret_data["ret_traj"]).mean().item()
                 # if len(rets) > 0 and viz_midd:  # log histogram
-                    # data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
+                # data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
             if args.log_video and viz_slow:  # log video
                 vid = np.stack(env.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
@@ -253,9 +253,12 @@ def main(args):
             data["details_hist/action"] = wandb.Histogram(to_np(batch["act"]).flatten())
         if viz_slow:  # slow logging, ex: videos
             if args.save_agent is not None:  # save agent
-                print("Saving agent...")
-                os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
-                torch.save(agent.state_dict(), args.save_agent)
+                save_agent = f"{args.save_agent}/agent_{i_collect:09d}.pt"
+                print("Saving agent to {}...")
+                # os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
+                # torch.save(agent.state_dict(), args.save_agent)
+                os.makedirs(os.path.dirname(save_agent), exist_ok=True)
+                torch.save(agent.state_dict(), save_agent)
 
         if args.track and viz_fast:  # tracking
             wandb.log(data, step=i_collect * args.collect_size)
