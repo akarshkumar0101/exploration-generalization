@@ -93,7 +93,7 @@ def register_envid_ram(env_id):
 @torch.no_grad()
 def calc_div_traj_ram(buffer, env_id):
     register_envid_ram(env_id)
-    ram_var = env_id2ram_var[env_id]
+    ram_var = env_id2ram_var[env_id].to(buffer.device)
     batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
     return (batch["ram"].float().var(dim=1) / ram_var).mean(dim=0).mean().item()
 
@@ -101,7 +101,7 @@ def calc_div_traj_ram(buffer, env_id):
 @torch.no_grad()
 def calc_div_buff_ram(buffer, env_id):
     register_envid_ram(env_id)
-    ram_var = env_id2ram_var[env_id]
+    ram_var = env_id2ram_var[env_id].to(buffer.device)
     batch = buffer.generate_batch(buffer.env.num_envs, buffer.n_steps)
     return (batch["ram"].float().var(dim=(0, 1)) / ram_var).mean().item()
 
@@ -124,6 +124,7 @@ def calc_div_traj_lpips(buffer):
     i1, i2 = torch.randint(low=0, high=buffer.n_steps, size=(2,))
     obs1 = repeat(batch["obs"][:, i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
     obs2 = repeat(batch["obs"][:, i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    loss_fn_alex = loss_fn_alex.to(obs1.device)
     return loss_fn_alex(obs1, obs2).flatten().mean().item()
 
 
@@ -133,6 +134,7 @@ def calc_div_buff_lpips(buffer):
     i1, i2 = torch.randint(low=0, high=buffer.env.num_envs * buffer.n_steps, size=(2, buffer.env.num_envs))
     obs1 = repeat(batch["obs"].flatten(0, 1)[i1], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
     obs2 = repeat(batch["obs"].flatten(0, 1)[i2], "b 1 ... -> b 3 ...") / 255.0 * 2.0 - 1.0
+    loss_fn_alex = loss_fn_alex.to(obs1.device)
     return loss_fn_alex(obs1, obs2).flatten().mean().item()
 
 
