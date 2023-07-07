@@ -23,7 +23,7 @@ python_file: ppo_atari.py
 
 --model: cnn
 # --load-agent: 
---save-agent: "./data/{project}/{name}/agent.pt"
+--save-agent: "./data/{project}/{name}/"
 --full-action-space: True
 
 --lr: 2.5e-4
