@@ -1,6 +1,6 @@
 FROM --platform=linux/amd64 python:3.10
 
-WORKDIR /app
+WORKDIR /exploration-generalization
 
 # needed for opencv
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 -y
@@ -11,6 +11,6 @@ RUN pip install jupyterlab==4.0.2 tqdm ipywidgets
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# COPY . exploration-generalization
+COPY . exploration-generalization
 
 CMD echo pwd; ls; which python pip jupyter; lscpu

@@ -18,6 +18,7 @@ from einops import rearrange
 from env_atari import make_env
 from torch.distributions import Categorical
 from tqdm.auto import tqdm
+import normalize
 
 import wandb
 
@@ -125,6 +126,7 @@ def main(args):
         for _ in tqdm(range(args.n_steps_rnd_init // args.collect_size)):
             mbuffer.collect(agent_atari.RandomAgent(env.single_action_space.n), args.ctx_len)
 
+    rms_hist = normalize.RunningMeanStd() # variance over entire history
     start_time = time.time()
 
     print("Starting Learning")
@@ -184,6 +186,13 @@ def main(args):
                 break
 
         # ------------------- Logging ------------------- #
+        buffer = mbuffer.buffers[0]
+        rms_traj = normalize.RunningMeanStd() # variance over current trajectory
+        rms_coll = normalize.RunningMeanStd() # variance over current collection
+        rms_traj.update(rearrange(buffer.obss, "n t c h w -> t n c h w"))
+        rms_coll.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
+        rms_hist.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
+
         data = {}
         viz_slow = i_collect % np.clip(args.n_collects // 10, 1, None) == 0
         viz_midd = i_collect % np.clip(args.n_collects // 100, 1, None) == 0 or viz_slow
@@ -219,6 +228,10 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:  # fast logging, ex: scalars
+            data['diversity/div_traj'] = rms_traj.var.mean().item()
+            data['diversity/div_coll'] = rms_coll.var.mean().item()
+            data['diversity/div_hist'] = rms_hist.var.mean().item()
+            
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
                 # if viz_midd:
