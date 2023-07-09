@@ -228,9 +228,9 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:  # fast logging, ex: scalars
-            data['diversity/div_traj'] = rms_traj.var.mean().item()
-            data['diversity/div_coll'] = rms_coll.var.mean().item()
-            data['diversity/div_hist'] = rms_hist.var.mean().item()
+            data['diversity/traj_pix'] = rms_traj.var.mean().item()
+            data['diversity/coll_pix'] = rms_coll.var.mean().item()
+            data['diversity/hist_pix'] = rms_hist.var.mean().item()
             
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
