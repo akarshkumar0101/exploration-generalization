@@ -1,5 +1,5 @@
-# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/finetuning_bc.sh --mem-gpu 6000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
-# requires 6 GB of GPU memory
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/finetuning_bc.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
+# requires 4 GB of GPU memory
 
 python_file: train.py
 
@@ -10,7 +10,7 @@ python_file: train.py
 --log-hist: False
 
 --device: cuda
---seed: [0, 1]
+--seed: [0, 1, 2]
 
 # Test: MsPacman # Pong # SpaceInvaders # StarGunner # Boxing
 --env-ids: [MsPacman, Pong, SpaceInvaders, StarGunner, Boxing]
