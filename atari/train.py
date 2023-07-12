@@ -81,7 +81,7 @@ def parse_args(*args, **kwargs):
     for key in ["project", "name", "load_agent", "save_agent", "load_agent_teacher"]:
         if getattr(args, key) is not None:
             setattr(args, key, getattr(args, key).format(**vars(args)))
-    args.n_envs_per_id = args.n_envs // 1  # len(args.env_ids)
+    args.n_envs_per_id = args.n_envs // len(args.env_ids)
     args.collect_size = args.n_envs * args.n_steps
     args.n_collects = args.total_steps // args.collect_size
     return args
