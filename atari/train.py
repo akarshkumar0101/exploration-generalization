@@ -45,6 +45,7 @@ parser.add_argument("--n-updates", type=int, default=16, help="gradient updates 
 
 parser.add_argument("--model", type=str, default="cnn", help="either cnn or gpt")
 parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
+parser.add_argument("--load-agent-history", type=lambda x: bool(strtobool(x)), default=False)
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
 parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)

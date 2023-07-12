@@ -1,34 +1,37 @@
-python_file: ppo_atari.py
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/finetuning_bc.sh --mem-gpu 6000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
+# requires 6 GB of GPU memory
+
+python_file: train.py
 
 --track: True
---project: egb-atari-100
---name: "specialist_{env_ids[0]}_{obj}_{seed}"
+--project: egb-atari
+--name: "finetune_bc_{env_ids[0]}_{obj}_{pre_obj}_{load_agent_history}_{seed}"
+--log-video: False
+--log-hist: False
 
 --device: cuda
---seed: [0]
+--seed: [0, 1]
 
---log-video: True
---log-hist: True
-
-# --env-ids: [Amidar, Assault, Asterix, Atlantis, BankHeist, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, TimePilot, UpNDown, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
---env-ids: [Amidar, Assault, Asterix, Atlantis, BankHeist, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, Phoenix, RoadRunner, Seaquest, TimePilot, UpNDown, YarsRevenge, Zaxxon]
---obj: [ext, rnd, sps, eps]
---ctx-len: 4
---total-steps: 20e6
---n-envs: 128
+# Test: MsPacman # Pong # SpaceInvaders # StarGunner # Boxing
+--env-ids: [MsPacman, Pong, SpaceInvaders, StarGunner, Boxing]
+--obj: ext
+--total-steps: 10e6
+--n-envs: 16 # 30*8
 --n-steps: 128
-
---batch-size: 256
+--batch-size: 3840 # 30*128
 --n-updates: 16
 
---model: cnn
-# --load-agent: 
---save-agent: "./data/{project}/{name}/agent.pt"
+--model: gpt
+--ctx-len: 4
+--load-agent-history: [False, True]
+--load-agent: "./data/egb-atari/generalist_30_{pre_obj}_history_{load_agent_history}_{seed}/agent_000000320.pt"
+--save-agent: "./data/{project}/{name}/"
 --full-action-space: True
 
 --lr: 2.5e-4
 --lr-warmup: True
 --lr-decay: "none"
+--max-grad-norm: 1.0
 
 --episodic-life: False
 --norm-rew: True
@@ -37,10 +40,15 @@ python_file: ppo_atari.py
 --norm-adv: True
 --ent-coef: 0.001
 --clip-coef: 0.1
---clip-vloss: True
 --vf-coef: 0.5
+# --max-kl-div: 0.01
 
---max-grad-norm: 1.0
-# --max-kl-div:
+--pre-obj: [ext, rnd]
+--train-klbc: True
+--model-teacher: cnn
+--ctx-len-teacher: 4
+--load-agent-teacher: "./data/{project}/specialist_{{env_id}}_{obj}_0/"
+--teacher-last-agent-only: [True]
+--freq-teacher-switch: 1e6
 
---n-steps-rnd-init: 2
+--n-steps-rnd-init: 0
