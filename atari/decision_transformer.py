@@ -174,27 +174,28 @@ class DecisionTransformer(nn.Module):
         i_step = torch.arange(0, ctx_len, dtype=torch.long, device=obs.device)  # (ctx_len, )
         x_step = self.encode_step(i_step)  # (ctx_len, n_embd)
 
-        rtg = rearrange(rtg, "b t -> (b t) 1")
+        # rtg = rearrange(rtg, "b t -> (b t) 1")
         obs = rearrange(obs, "b t c h w -> (b t) c h w")
         act = rearrange(act, "b t -> (b t)")
 
-        with timer.add_time("embed_rtg"):
-            x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
+        # with timer.add_time("embed_rtg"):
+            # x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
         with timer.add_time("embed_obs"):
             x_obs = self.encode_obs(obs)  # (batch_size * n_steps, n_embd)
         with timer.add_time("embed_act"):
             x_act = self.encode_act(act)  # (batch_size * n_steps, n_embd)
 
-        x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
+        # x_rtg = x_step + rearrange(x_rtg, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
         x_obs = x_step + rearrange(x_obs, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
         x_act = x_step + rearrange(x_act, "(b t) d -> b t d", b=batch_size)  # (batch_size, n_steps, n_embd)
 
-        x = torch.stack([x_rtg, x_obs, x_act], dim=-2)  # (batch_size, n_steps, 3, n_embd)
+        # x = torch.stack([x_rtg, x_obs, x_act], dim=-2)  # (batch_size, n_steps, 3, n_embd)
+        x = torch.stack([x_obs, x_act], dim=-2)  # (batch_size, n_steps, 3, n_embd)
         x = rearrange(x, "b t c d -> b (t c) d")  # (batch_size, n_steps * 3, n_embd)
 
-        assert torch.allclose(x[:, 0::3, :], x_rtg)  # sanity check, TODO: remove
-        assert torch.allclose(x[:, 1::3, :], x_obs)  # sanity check, TODO: remove
-        assert torch.allclose(x[:, 2::3, :], x_act)  # sanity check, TODO: remove
+        # assert torch.allclose(x[:, 0::3, :], x_rtg)  # sanity check, TODO: remove
+        # assert torch.allclose(x[:, 1::3, :], x_obs)  # sanity check, TODO: remove
+        # assert torch.allclose(x[:, 2::3, :], x_act)  # sanity check, TODO: remove
 
         x = self.drop(x)
         with timer.add_time("blocks"):
@@ -202,7 +203,7 @@ class DecisionTransformer(nn.Module):
         x = self.ln_f(x)
 
         x = rearrange(x, "b (t c) d -> b t c d", t=ctx_len)  # (batch_size, n_steps, 3, n_embd)
-        x = x[:, :, 1, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
+        x = x[:, :, 0, :]  # (batch_size, n_steps, n_embd) - only keep the obs tokens for predicting the next action
 
         with timer.add_time("out_heads"):
             logits, values = self.actor(x), self.critic(x)  # (batch_size, n_steps, n_acts), (batch_size, n_steps, 1)

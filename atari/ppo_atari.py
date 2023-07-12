@@ -37,7 +37,6 @@ parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), 
 # Algorithm arguments
 parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
 parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
-parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
 parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
 parser.add_argument("--n-envs", type=int, default=8, help="the number of parallel game environments")
 parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
@@ -45,6 +44,7 @@ parser.add_argument("--batch-size", type=int, default=256, help="the batch size 
 parser.add_argument("--n-updates", type=int, default=16, help="gradient updates per collection")
 
 parser.add_argument("--model", type=str, default="cnn", help="either cnn or gpt")
+parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
 parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
 parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
@@ -52,6 +52,7 @@ parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), de
 parser.add_argument("--lr", type=float, default=2.5e-4, help="the learning rate of the optimizer")
 parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--lr-decay", type=str, default="none")
+parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 
 parser.add_argument("--episodic-life", type=lambda x: bool(strtobool(x)), default=True)
 parser.add_argument("--norm-rew", type=lambda x: bool(strtobool(x)), default=True)
@@ -62,8 +63,6 @@ parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of
 parser.add_argument("--clip-coef", type=float, default=0.1, help="the surrogate clipping coefficient")
 parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
 parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
-
-parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
 
 parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=0)
@@ -71,14 +70,9 @@ parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=
 
 def parse_args(*args, **kwargs):
     args = parser.parse_args(*args, **kwargs)
-    if args.project is not None:
-        args.project = args.project.format(**vars(args))
-    if args.name is not None:
-        args.name = args.name.format(**vars(args))
-    if args.load_agent is not None:
-        args.load_agent = args.load_agent.format(**vars(args))
-    if args.save_agent is not None:
-        args.save_agent = args.save_agent.format(**vars(args))
+    for key in ["project", "name", "load_agent", "save_agent"]:
+        if getattr(args, key) is not None:
+            setattr(args, key, getattr(args, key).format(**vars(args)))
     args.n_envs_per_id = args.n_envs // 1  # len(args.env_ids)
     args.collect_size = args.n_envs * args.n_steps
     args.n_collects = args.total_steps // args.collect_size
@@ -126,7 +120,7 @@ def main(args):
         for _ in tqdm(range(args.n_steps_rnd_init // args.collect_size)):
             mbuffer.collect(agent_atari.RandomAgent(env.single_action_space.n), args.ctx_len)
 
-    rms_hist = normalize.RunningMeanStd() # variance over entire history
+    rms_hist = normalize.RunningMeanStd()  # variance over entire history
     start_time = time.time()
 
     print("Starting Learning")
@@ -148,7 +142,7 @@ def main(args):
                 batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
             with timer.add_time("forward_pass"):
                 logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
-            dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
+                dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
 
             with timer.add_time("calc_loss"):
                 loss_p = utils.calc_ppo_policy_loss(dist, batch_dist, batch["act"], batch["adv"], norm_adv=args.norm_adv, clip_coef=args.clip_coef)
@@ -187,8 +181,8 @@ def main(args):
 
         # ------------------- Logging ------------------- #
         buffer = mbuffer.buffers[0]
-        rms_traj = normalize.RunningMeanStd() # variance over current trajectory
-        rms_coll = normalize.RunningMeanStd() # variance over current collection
+        rms_traj = normalize.RunningMeanStd()  # variance over current trajectory
+        rms_coll = normalize.RunningMeanStd()  # variance over current collection
         rms_traj.update(rearrange(buffer.obss, "n t c h w -> t n c h w"))
         rms_coll.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
         rms_hist.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
@@ -228,10 +222,10 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:  # fast logging, ex: scalars
-            data['diversity/traj_pix'] = rms_traj.var.mean().item()
-            data['diversity/coll_pix'] = rms_coll.var.mean().item()
-            data['diversity/hist_pix'] = rms_hist.var.mean().item()
-            
+            data["diversity/traj_pix"] = rms_traj.var.mean().item()
+            data["diversity/coll_pix"] = rms_coll.var.mean().item()
+            data["diversity/hist_pix"] = rms_hist.var.mean().item()
+
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
                 # if viz_midd:

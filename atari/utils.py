@@ -3,15 +3,16 @@ import torch
 from agent_atari import DecisionTransformer, NatureCNNAgent, RandomAgent
 
 
-def create_agent(model, n_acts, ctx_len, load_agent=None):
+def create_agent(model, n_acts, ctx_len, load_agent=None, device=None):
     if model == "cnn":
         agent = NatureCNNAgent(n_acts, ctx_len)
     elif model == "gpt":
         agent = DecisionTransformer(n_acts, ctx_len)
     elif model == "rand":
         agent = RandomAgent(n_acts)
+    agent = agent.to(device)
     if load_agent is not None:
-        agent.load_state_dict(torch.load(load_agent))
+        agent.load_state_dict(torch.load(load_agent, map_location=device))
     return agent
 
 

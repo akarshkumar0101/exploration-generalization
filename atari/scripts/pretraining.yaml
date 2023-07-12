@@ -1,34 +1,35 @@
-python_file: ppo_atari.py
+# requires 12 GB of GPU memory
+python_file: train.py
 
---track: True
---project: egb-atari-100
---name: "specialist_{env_ids[0]}_{obj}_{seed}"
+--track: False
+--project: egb-atari
+--name: "generalist_31_{pre_obj}_history_{teacher_last_agent_only}_{seed}"
+--log-video: False
+--log-hist: False
 
---device: cuda
---seed: [0]
+--device: cpu
+--seed: [0, 1]
 
---log-video: True
---log-hist: True
-
-# --env-ids: [Amidar, Assault, Asterix, Atlantis, BankHeist, BattleZone, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, NameThisGame, Phoenix, Pooyan, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, TimePilot, UpNDown, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
---env-ids: [Amidar, Assault, Asterix, Atlantis, BankHeist, BeamRider, Boxing, Breakout, Carnival, Centipede, ChopperCommand, CrazyClimber, DemonAttack, DoubleDunk, Enduro, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, Phoenix, RoadRunner, Seaquest, TimePilot, UpNDown, YarsRevenge, Zaxxon]
---obj: [ext, rnd, sps, eps]
---ctx-len: 4
---total-steps: 20e6
---n-envs: 128
---n-steps: 128
-
---batch-size: 256
---n-updates: 16
+# Test: MsPacman # Pong # SpaceInvaders # StarGunner
+--env-ids: [[Asteroids, BankHeist, BattleZone, BeamRider, Berzerk, Boxing, Breakout, Centipede, ChopperCommand, CrazyClimber, Freeway, Frostbite, Gopher, Gravitar, Hero, Kangaroo, Krull, KungFuMaster, MontezumaRevenge, Pitfall, PrivateEye, Qbert, RoadRunner, Robotank, Seaquest, Solaris, TimePilot, Tutankham, Venture, YarsRevenge, Zaxxon]]
+--obj: ext
+--total-steps: 100e6
+--n-envs: 248 # 31*8
+--n-steps: 16
+--batch-size: 16
+--n-updates: 4
 
 --model: cnn
-# --load-agent: 
---save-agent: "./data/{project}/{name}/agent.pt"
+--ctx-len: 4
+# --load-agent: "./data/egb-atari/specialist_Pong_ext_0/agent_100000000.pt"
+--save-agent: "./data/{project}/{name}/"
 --full-action-space: True
 
 --lr: 2.5e-4
 --lr-warmup: True
 --lr-decay: "none"
+--max-grad-norm: 1.0
+
 
 --episodic-life: False
 --norm-rew: True
@@ -37,10 +38,15 @@ python_file: ppo_atari.py
 --norm-adv: True
 --ent-coef: 0.001
 --clip-coef: 0.1
---clip-vloss: True
 --vf-coef: 0.5
+# --max-kl-div: 0.01
 
---max-grad-norm: 1.0
-# --max-kl-div:
+--pre-obj: [ext, rnd]
+--train-klbc: True
+--model-teacher: cnn
+--ctx-len-teacher: 4
+--load-agent-teacher: "./data/{project}/specialist_{{env_id}}_{pre_obj}_0/"
+--teacher-last-agent-only: [True, False]
+--freq-teacher-switch: 1e6
 
---n-steps-rnd-init: 2
+--n-steps-rnd-init: 0
