@@ -104,7 +104,7 @@ def load_teachers(args, env):
 
 
 def main(args):
-    print("Running PPO with args: ", args)
+    print("Running PPO/KLBC with args: ", args)
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 

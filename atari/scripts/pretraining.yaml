@@ -15,11 +15,11 @@ python_file: train.py
 --obj: ext
 --total-steps: 100e6
 --n-envs: 248 # 31*8
---n-steps: 16
---batch-size: 16
---n-updates: 4
+--n-steps: 128
+--batch-size: 4092 # 31*132
+--n-updates: 16
 
---model: cnn
+--model: gpt
 --ctx-len: 4
 # --load-agent: "./data/egb-atari/specialist_Pong_ext_0/agent_100000000.pt"
 --save-agent: "./data/{project}/{name}/"
