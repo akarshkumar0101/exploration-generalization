@@ -13,7 +13,7 @@ python_file: train.py
 # Test: MsPacman # Pong # SpaceInvaders # StarGunner # Boxing
 --env-ids: [[Asteroids, BankHeist, BattleZone, BeamRider, Berzerk, Breakout, Centipede, ChopperCommand, CrazyClimber, Freeway, Frostbite, Gopher, Gravitar, Hero, Kangaroo, Krull, KungFuMaster, MontezumaRevenge, Pitfall, PrivateEye, Qbert, RoadRunner, Robotank, Seaquest, Solaris, TimePilot, Tutankham, Venture, YarsRevenge, Zaxxon]]
 --obj: ext
---total-steps: 100e6
+--total-steps: 10e6
 --n-envs: 240 # 30*8
 --n-steps: 128
 --batch-size: 3840 # 30*128
