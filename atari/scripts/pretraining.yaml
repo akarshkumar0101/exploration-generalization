@@ -10,7 +10,7 @@ python_file: train.py
 --log-hist: False
 
 --device: cuda
---seed: [0, 1]
+--seed: [0, 1, 2, 3]
 
 # Test: MsPacman # Pong # SpaceInvaders # StarGunner # Boxing
 --env-ids: [[Asteroids, BankHeist, BattleZone, BeamRider, Berzerk, Breakout, Centipede, ChopperCommand, CrazyClimber, Freeway, Frostbite, Gopher, Gravitar, Hero, Kangaroo, Krull, KungFuMaster, MontezumaRevenge, Pitfall, PrivateEye, Qbert, RoadRunner, Robotank, Seaquest, Solaris, TimePilot, Tutankham, Venture, YarsRevenge, Zaxxon]]
