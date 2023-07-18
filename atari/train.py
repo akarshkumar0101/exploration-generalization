@@ -231,6 +231,8 @@ def main(args):
 
         # ------------------- Logging ------------------- #
         buffer = mbuffer.buffers[0]
+        for buffer in mbuffer.buffers:
+            pass
         rms_traj = normalize.RunningMeanStd()  # variance over current trajectory
         rms_coll = normalize.RunningMeanStd()  # variance over current collection
         rms_traj.update(rearrange(buffer.obss, "n t c h w -> t n c h w"))
