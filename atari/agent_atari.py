@@ -27,7 +27,6 @@ class RandomAgent(nn.Module):
         self.last_token_train = True
 
     def forward(self, done, obs, act, rew):
-        print(f'done: {done.shape}, obs: {obs.shape}, act: {act.shape}, rew: {rew.shape}')
         b, t, c, h, w = obs.shape
         logits = torch.zeros((b, 1, self.n_acts), device=obs.device)
         values = torch.zeros((b, 1), device=obs.device)
@@ -90,7 +89,6 @@ class NatureCNNAgent(nn.Module):
         self.last_token_train = True
 
     def forward(self, done, obs, act, rew):
-        print(f'done: {done.shape}, obs: {obs.shape}, act: {act.shape}, rew: {rew.shape}')
         b, t, c, h, w = obs.shape
         x = rearrange(obs, "b t c h w -> b (t c) h w")
         hidden = self.encode_obs(x)
