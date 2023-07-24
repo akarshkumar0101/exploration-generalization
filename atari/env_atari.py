@@ -151,8 +151,8 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
     return env
 
 
-def make_concat_env(env_ids, **kwargs):
-    return ConcatEnv([make_env(env_id, **kwargs) for env_id in env_ids])
+def make_concat_env(env_ids, *args, **kwargs):
+    return ConcatEnv([make_env(env_id, *args, **kwargs) for env_id in env_ids])
 
 
 class StoreObs(gym.Wrapper):

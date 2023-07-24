@@ -49,6 +49,5 @@ python_file: train.py
 --ctx-len-teacher: 4
 --load-agent-teacher: "./data/{project}/specialist_{{env_id}}_{pre_obj}_0/"
 --teacher-last-agent-only: [True, False]
---freq-teacher-switch: 1e6
 
 --n-steps-rnd-init: 0

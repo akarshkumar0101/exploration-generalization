@@ -72,7 +72,6 @@ parser.add_argument("--model-teacher", type=str, default="cnn", help="either cnn
 parser.add_argument("--ctx-len-teacher", type=int, default=4, help="agent's context length")
 parser.add_argument("--load-agent-teacher", type=str, default=None, help="file to load the agent from")
 parser.add_argument("--teacher-last-agent-only", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--freq-teacher-switch", type=lambda x: int(float(x)), default=1e6)
 
 parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=0)
 
