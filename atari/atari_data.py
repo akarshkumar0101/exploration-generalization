@@ -39,6 +39,7 @@ corresponds to human performance.
 
 import math
 import re
+import numpy as np
 
 # Game: score-tuple dictionary. Each score tuple contains
 #  0: score random (float) and 1: score human (float).
@@ -115,6 +116,12 @@ def calc_hns(env_id, score):
 
     if env_id in env_id2scores:
         score_random, score_human = env_id2scores[env_id]
+        return (score - score_random) / (score_human - score_random)
     else:
-        score_random, score_human = 0.0, 1.0
-    return (score - score_random) / (score_human - score_random)
+        return np.nan
+
+"""
+((x-a)/b + (y-a)/b)/2
+((x-a)/b + (y-a)/b)/2
+
+"""

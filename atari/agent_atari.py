@@ -120,6 +120,23 @@ class NatureCNNAgent(nn.Module):
     #     return obs
 
 
+class ConcatAgent(nn.Module):
+    def __init__(self, agents):
+        super().__init__()
+        self.agents = agents
+
+    def forward(self, done, obs, act, rew):
+        nb, t, c, h, w = obs.shape
+        assert nb % len(self.agents) == 0
+        done = rearrange(done, "(n b) ... -> n b ...", n=len(self.agents))
+        obs = rearrange(obs, "(n b) ... -> n b ...", n=len(self.agents))
+        act = rearrange(act, "(n b) ... -> n b ...", n=len(self.agents))
+        rew = rearrange(rew, "(n b) ... -> n b ...", n=len(self.agents))
+        logitss, valuess = zip(*[agent(donei, obsi, acti, rewi) for agent, donei, obsi, acti, rewi in zip(self.agents, done, obs, act, rew)])
+        logits, values = rearrange(list(logitss), "n b ... -> (n b) ..."), rearrange(list(valuess), "n b ... -> (n b) ...")
+        return logits, values
+
+
 class RNDModel(nn.Module):
     def __init__(self):
         super().__init__()

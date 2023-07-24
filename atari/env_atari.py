@@ -9,6 +9,8 @@ import normalize
 
 import envpool
 
+from einops import rearrange
+
 
 # def make_env_single(env_id="Breakout", frame_stack=4):
 #     env = gym.make(f"ALE/{env_id}-v5", frameskip=1, full_action_space=True)
@@ -19,40 +21,92 @@ import envpool
 #     return env
 
 
-class NoArgsReset(gym.Wrapper):
+class ConcatEnv:
+    def __init__(self, envs):
+        self.envs = envs
+        self.n_envs = self.num_envs = sum([env.num_envs for env in envs])
+        self.single_observation_space = envs[0].single_observation_space
+        self.single_action_space = envs[0].single_action_space
+        self.action_space = gym.spaces.MultiDiscrete([envs[0].single_action_space.n for _ in range(self.num_envs)])
+
+    def reset(self):
+        obss, infos = zip(*[env.reset() for env in self.envs])  # lists
+        obs = rearrange(list(obss), "n b ... -> (n b) ...")
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys() if k != "players"}
+        return obs, info
+
+    def step(self, action):
+        action = rearrange(action, "(n b) ... -> n b ...", n=len(self.envs))
+        obss, rews, terms, truncs, infos = zip(*[env.step(a) for env, a in zip(self.envs, action)])
+        obs = rearrange(list(obss), "n b ... -> (n b) ...")
+        rew = rearrange(list(rews), "n b ... -> (n b) ...")
+        term = rearrange(list(terms), "n b ... -> (n b) ...")
+        trunc = rearrange(list(truncs), "n b ... -> (n b) ...")
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys() if k != "players"}
+        return obs, rew, term, trunc, info
+
+
+# class NoArgsReset(gym.Wrapper):
+#     def reset(self, *args, **kwargs):
+#         return self.env.reset()
+
+
+# def make_env_envpool(n_envs, env_id, episodic_life=True, full_action_space=True, seed=0):
+#     env = envpool.make_gymnasium(
+#         task_id=f"{env_id}-v5",
+#         num_envs=n_envs,
+#         # batch_size=None,
+#         # num_threads=None,
+#         seed=seed,  # default: 42
+#         max_episode_steps=2700,  # default: 27000
+#         # img_height=84,  # default: 84
+#         # img_width=84,  # default: 84
+#         stack_num=1,  # default: 4
+#         # gray_scale=True,  # default: True
+#         # frame_skip=4,  # default: 4
+#         # noop_max=30,  # default: 30
+#         episodic_life=episodic_life,  # default: False
+#         # zero_discount_on_life_loss=False,  # default: False
+#         # reward_clip=False,  # default: False
+#         # repeat_action_probability=0,  # default: 0
+#         # use_inter_area_resize=True,  # default: True
+#         # use_fire_reset=True,  # default: True
+#         full_action_space=full_action_space,  # default: False
+#     )
+#     env = NoArgsReset(env)
+#     env.num_envs = n_envs
+#     env.single_observation_space = env.observation_space
+#     env.single_action_space = env.action_space
+#     env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
+#     env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
+#     return env
+
+
+class MyEnvpool(gym.Env):
+    def __init__(self, *args, **kwargs):
+        self.env = envpool.make_gymnasium(*args, **kwargs)
+        self.n_envs, self.num_envs = kwargs["num_envs"], kwargs["num_envs"]
+        self.single_observation_space = self.env.observation_space
+        self.single_action_space = self.env.action_space
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(self.n_envs,) + self.single_observation_space.shape, dtype=np.uint8)
+        self.action_space = gym.spaces.MultiDiscrete([self.single_action_space.n for _ in range(self.n_envs)])
+
     def reset(self, *args, **kwargs):
-        return self.env.reset()
+        obs, info = self.env.reset()
+        info["players"] = info["players"]["env_id"]
+        return obs, info
 
+    def reset_subenvs(self, indices):
+        return self.env.reset_subenvs(indices)
 
-def make_env_envpool(n_envs, env_id, episodic_life=True, full_action_space=True, seed=0):
-    env = envpool.make_gymnasium(
-        task_id=f"{env_id}-v5",
-        num_envs=n_envs,
-        # batch_size=None,
-        # num_threads=None,
-        seed=seed,  # default: 42
-        max_episode_steps=2700,  # default: 27000
-        # img_height=84,  # default: 84
-        # img_width=84,  # default: 84
-        stack_num=1,  # default: 4
-        # gray_scale=True,  # default: True
-        # frame_skip=4,  # default: 4
-        # noop_max=30,  # default: 30
-        episodic_life=episodic_life,  # default: False
-        # zero_discount_on_life_loss=False,  # default: False
-        # reward_clip=False,  # default: False
-        # repeat_action_probability=0,  # default: 0
-        # use_inter_area_resize=True,  # default: True
-        # use_fire_reset=True,  # default: True
-        full_action_space=full_action_space,  # default: False
-    )
-    env = NoArgsReset(env)
-    env.num_envs = n_envs
-    env.single_observation_space = env.observation_space
-    env.single_action_space = env.action_space
-    env.observation_space = gym.spaces.Box(low=0, high=255, shape=(n_envs,) + env.single_observation_space.shape, dtype=np.uint8)
-    env.action_space = gym.spaces.MultiDiscrete([env.single_action_space.n for _ in range(n_envs)])
-    return env
+    def step(self, action):
+        if isinstance(action, torch.Tensor):
+            action = action.cpu().numpy()
+        elif isinstance(action, list):
+            action = np.array(action)
+        obs, rew, term, trunc, info = self.env.step(action)
+        info["players"] = info["players"]["env_id"]
+        return obs, rew, term, trunc, info
 
 
 def make_env_single(env_id, episodic_life=True, full_action_space=True):
@@ -72,7 +126,16 @@ def make_env_gymnasium(n_envs, env_id, episodic_life=True, full_action_space=Tru
 
 def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, episodic_life=True, full_action_space=True, device=None, seed=0, lib="envpool"):
     if lib == "envpool":
-        env = make_env_envpool(n_envs, env_id, episodic_life=episodic_life, full_action_space=full_action_space, seed=seed)
+        # env = make_env_envpool(n_envs, env_id, episodic_life=episodic_life, full_action_space=full_action_space, seed=seed)
+        env = MyEnvpool(
+            task_id=f"{env_id}-v5",
+            num_envs=n_envs,
+            seed=seed,
+            # max_episode_steps=27000, stack_num=1, noop_Max=1, use_fire_reset=False,
+            episodic_life=episodic_life,
+            full_action_space=full_action_space,
+        )
+
     elif lib == "gymnasium":
         env = make_env_gymnasium(n_envs, env_id, episodic_life=episodic_life, full_action_space=full_action_space, seed=seed)
     else:
@@ -86,6 +149,10 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
     env = normalize.NormalizeReward(env, key_rew=obj, gamma=gamma, eps=1e-5)
     env = RewardSelector(env, obj=f"{obj}_norm" if norm_rew else obj)
     return env
+
+
+def make_concat_env(env_ids, **kwargs):
+    return ConcatEnv([make_env(env_id, **kwargs) for env_id in env_ids])
 
 
 class StoreObs(gym.Wrapper):
@@ -102,7 +169,6 @@ class StoreObs(gym.Wrapper):
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
         self.past_obs.append(obs[: self.n_envs_store])
-        info["past_obs"] = self.past_obs
         return obs, rew, term, trunc, info
 
     def get_past_obs(self):
@@ -169,30 +235,63 @@ class RewardSelector(gym.Wrapper):
         return obs, rew, term, trunc, info
 
 
+# class StoreReturns(gym.Wrapper):
+#     def __init__(self, env, key_ret="ret_", key_term="term_atari", buf_size=512):
+#         super().__init__(env)
+#         self.key_ret, self.key_term, self.buf_size = key_ret, key_term, buf_size
+#         self.key2running_ret = {}  # key -> running return
+#         self.key2past_rets = {}  # key -> list of arrays of past returns
+
+#     def step(self, action):
+#         obs, rew, term, trunc, info = self.env.step(action)
+#         done = info[self.key_term]
+#         for key in [key for key in info if key.startswith("rew_")]:
+#             keyr = key.replace("rew_", self.key_ret)
+#             if keyr not in self.key2running_ret:
+#                 self.key2running_ret[keyr] = torch.zeros_like(info[key])
+#                 self.key2past_rets[keyr] = collections.deque(maxlen=self.buf_size)
+
+#             self.key2running_ret[keyr] += info[key]
+#             self.key2past_rets[keyr].append(self.key2running_ret[keyr][done].clone())
+#             # info[keyr] = self.key2running_ret[keyr].clone()
+#             self.key2running_ret[keyr][done] = 0.0
+#         return obs, rew, term, trunc, info
+
+#     def get_past_returns(self):
+#         return {key: torch.cat(list(val), dim=0) for key, val in self.key2past_rets.items()}
+
+
+# This is correct implementation of StoreReturns
+
+
 class StoreReturns(gym.Wrapper):
-    def __init__(self, env, key_ret="ret_", key_term="term_atari", buf_size=512):
+    def __init__(self, env, key_term="term_atari", past_k_rets=5):
         super().__init__(env)
-        self.key_ret, self.key_term, self.buf_size = key_ret, key_term, buf_size
+        self.key_term = key_term
+        self.past_k_rets = past_k_rets
         self.key2running_ret = {}  # key -> running return
-        self.key2past_rets = {}  # key -> list of arrays of past returns
+        self.key2past_rets = {}  # key -> list (over env) of deque (over time) of past returns
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        term = info[self.key_term]
+        done = info[self.key_term]
         for key in [key for key in info if key.startswith("rew_")]:
-            keyr = key.replace("rew_", self.key_ret)
+            keyr = key.replace("rew_", "ret_")
             if keyr not in self.key2running_ret:
                 self.key2running_ret[keyr] = torch.zeros_like(info[key])
-                self.key2past_rets[keyr] = collections.deque(maxlen=self.buf_size)
-
+                self.key2past_rets[keyr] = [collections.deque([np.nan] * self.num_envs, maxlen=self.past_k_rets) for _ in range(self.num_envs)]
             self.key2running_ret[keyr] += info[key]
-            self.key2past_rets[keyr].append(self.key2running_ret[keyr][term].clone())
-            # info[keyr] = self.key2running_ret[keyr].clone()
-            self.key2running_ret[keyr][term] = 0.0
+
+            donelist = done.tolist()
+            retlist = self.key2running_ret[keyr].tolist()
+            for i in range(self.num_envs):
+                if donelist[i]:  # env finished
+                    self.key2past_rets[keyr][i].append(retlist[i])
+            self.key2running_ret[keyr][done] = 0.0
         return obs, rew, term, trunc, info
 
     def get_past_returns(self):
-        return {key: torch.cat(list(val), dim=0) for key, val in self.key2past_rets.items()}
+        return {key: np.array(val) for key, val in self.key2past_rets.items()}
 
 
 class E3BReward(gym.Wrapper):

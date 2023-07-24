@@ -8,19 +8,19 @@ from distutils.util import strtobool
 import agent_atari
 import atari_data
 import buffers
+import normalize
+
 # import eval_diversity
 import numpy as np
 import timers
 import torch
 import torchinfo
 import utils
+import wandb
 from einops import rearrange
-from env_atari import make_env
+from env_atari import make_concat_env
 from torch.distributions import Categorical
 from tqdm.auto import tqdm
-import normalize
-
-import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
@@ -88,20 +88,18 @@ def parse_args(*args, **kwargs):
     return args
 
 
-def load_teachers(args, env):
+def load_teacher(args, env):
     agent_teachers = []
     for env_id in args.env_ids:
         load_agent_dir = args.load_agent_teacher.format(env_id=env_id)
-        files = os.listdir(load_agent_dir)
-        files.sort()
-        files = [f"{load_agent_dir}/{file}" for file in files]
+        files = [f"{load_agent_dir}/{file}" for file in np.sort(os.listdir(load_agent_dir))]
         if args.teacher_last_agent_only:
             files = [files[-1]]
-        load_agent = np.random.choice(files)
-        print(f"Loading teacher agent from {load_agent}")
-        agent = utils.create_agent(args.model_teacher, env.single_action_space.n, args.ctx_len_teacher, load_agent, device=args.device)
-        agent_teachers.append(agent)
-    return agent_teachers
+        for load_agent in files:
+            print(f"Loading teacher agent from {load_agent}")
+            agent = utils.create_agent(args.model_teacher, env.single_action_space.n, args.ctx_len_teacher, load_agent, device=args.device)
+            agent_teachers.append(agent)
+    return agent_atari.ConcatAgent(agent_teachers)
 
 
 def main(args):
@@ -114,16 +112,12 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    mbuffer = buffers.MultiBuffer()
-    for env_id in args.env_ids:
-        env = make_env(env_id, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
-        mbuffer.buffers.append(buffers.Buffer(env, args.n_steps, device=args.device))
-
+    env = make_concat_env(args.env_ids, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
+    buffer = buffers.Buffer(env, args.n_steps, device=args.device)
     if args.train_klbc:
-        mbuffer_teacher = buffers.MultiBuffer()
-        for env_id in args.env_ids:
-            env = make_env(env_id, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
-            mbuffer_teacher.buffers.append(buffers.Buffer(env, args.n_steps, device=args.device))
+        env_teacher = make_concat_env(args.env_ids, args.n_envs_per_id, args.obj, args.norm_rew, args.gamma, args.episodic_life, args.full_action_space, args.device, args.seed)
+        buffer_teacher = buffers.Buffer(env_teacher, args.n_steps, device=args.device)
+        agent_teacher = load_teacher(args, env_teacher)
 
     agent = utils.create_agent(args.model, env.single_action_space.n, args.ctx_len, args.load_agent, device=args.device)
     print("Agent Summary: ")
@@ -149,25 +143,21 @@ def main(args):
     if args.n_steps_rnd_init > 0:
         print("Initializing RND model with random agent...")
         for _ in tqdm(range(args.n_steps_rnd_init // args.collect_size)):
-            mbuffer.collect(agent_atari.RandomAgent(env.single_action_space.n), args.ctx_len)
+            buffer.collect(agent_atari.RandomAgent(env.single_action_space.n), args.ctx_len)
 
-    rms_hist = normalize.RunningMeanStd()  # variance over entire history
+    # rms_hist = normalize.RunningMeanStd()  # variance over entire history
     start_time = time.time()
 
     print("Starting Learning")
     pbar = tqdm(range(args.n_collects))
     for i_collect in pbar:
         timer = timers.Timer()
-
-        if args.train_klbc and i_collect % (args.freq_teacher_switch // args.collect_size) == 0:
-            agent_teachers = load_teachers(args, env)
-
         with timer.add_time("collect"):
             if args.train_klbc:
-                mbuffer_teacher.collect(agent_teachers, args.ctx_len_teacher, timer=timer)
-            mbuffer.collect(agent, args.ctx_len, timer=timer)
+                buffer_teacher.collect(agent_teacher, args.ctx_len_teacher, timer=timer)
+            buffer.collect(agent, args.ctx_len, timer=timer)
         with timer.add_time("calc_gae"):
-            mbuffer.calc_gae(args.gamma, args.gae_lambda)
+            buffer.calc_gae(args.gamma, args.gae_lambda)
 
         lr = utils.get_lr(args.lr, args.lr / 10.0, i_collect, args.n_collects, warmup=args.lr_warmup, decay=args.lr_decay)
         for param_group in opt.param_groups:
@@ -176,9 +166,9 @@ def main(args):
         for _ in range(args.n_updates):
             with timer.add_time("generate_batch"):
                 if args.train_klbc:
-                    batch = mbuffer_teacher.generate_batch(args.batch_size, args.ctx_len)
+                    batch = buffer_teacher.generate_batch(args.batch_size, args.ctx_len)
                 else:
-                    batch = mbuffer.generate_batch(args.batch_size, args.ctx_len)
+                    batch = buffer.generate_batch(args.batch_size, args.ctx_len)
             with timer.add_time("forward_pass"):
                 logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
                 dist, batch_dist = Categorical(logits=logits), Categorical(logits=batch["logits"])
@@ -230,14 +220,12 @@ def main(args):
                 break
 
         # ------------------- Logging ------------------- #
-        buffer = mbuffer.buffers[0]
-        for buffer in mbuffer.buffers:
-            pass
-        rms_traj = normalize.RunningMeanStd()  # variance over current trajectory
-        rms_coll = normalize.RunningMeanStd()  # variance over current collection
-        rms_traj.update(rearrange(buffer.obss, "n t c h w -> t n c h w"))
-        rms_coll.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
-        rms_hist.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
+        # buffer = mbuffer.buffers[0]
+        # rms_traj = normalize.RunningMeanStd()  # variance over current trajectory
+        # rms_coll = normalize.RunningMeanStd()  # variance over current collection
+        # rms_traj.update(rearrange(buffer.obss, "n t c h w -> t n c h w"))
+        # rms_coll.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
+        # rms_hist.update(rearrange(buffer.obss, "n t c h w -> (n t) c h w"))
 
         data = {}
         viz_slow = i_collect % np.clip(args.n_collects // 10, 1, None) == 0
@@ -246,27 +234,21 @@ def main(args):
         to_np = lambda x: x.detach().cpu().numpy()
 
         # Explained Variance
-        y_pred = to_np(mbuffer.buffers[0].vals).flatten()
-        y_true = to_np(mbuffer.buffers[0].rets).flatten()
-        explained_var = np.nan if np.var(y_true) == 0 else 1.0 - np.var(y_true - y_pred) / np.var(y_true)
+        # y_pred = to_np(buffer.buffers[0].vals).flatten()
+        # y_true = to_np(buffer.buffers[0].rets).flatten()
+        # explained_var = np.nan if np.var(y_true) == 0 else 1.0 - np.var(y_true - y_pred) / np.var(y_true)
 
-        hns = []
-        for env_id, env in zip(args.env_ids, mbuffer.envs):
-            hns_env = atari_data.calc_hns(env_id, env.get_past_returns()["ret_score"]).mean().item()
-            if not np.isnan(hns_env):
-                hns.append(hns_env)
-
-        for env_id, env in zip(args.env_ids, mbuffer.envs):
-            pret_data = env.get_past_returns()
+        hns = [atari_data.calc_hns(env_id, np.nanmean(envi.get_past_returns()["ret_score"])) for env_id, envi in zip(args.env_ids, env.envs)]
+        hns_teacher = [atari_data.calc_hns(env_id, np.nanmean(envi.get_past_returns()["ret_score"])) for env_id, envi in zip(args.env_ids, env_teacher.envs)]
+        for env_id, envi in zip(args.env_ids, env.envs):
+            pret_data = envi.get_past_returns()
             for key, rets in pret_data.items():  # log returns
-                if len(rets) > 0 and viz_fast:  # log scalar
-                    data[f"returns_max/{env_id}_{key}"] = rets.max().item()
-                    data[f"returns/{env_id}_{key}"] = rets.mean().item()
-                    data[f"returns_perstep/{env_id}_{key}"] = (rets / pret_data["ret_traj"]).mean().item()
-                # if len(rets) > 0 and viz_midd:  # log histogram
-                # data[f"returns_hist/{env_id}_{key}"] = wandb.Histogram(to_np(rets))
+                if viz_fast:  # log scalar
+                    data[f"returns_max/{env_id}_{key}"] = np.nanmax(rets)
+                    data[f"returns/{env_id}_{key}"] = np.nanmean(rets)
+                    data[f"returns_perstep/{env_id}_{key}"] = np.nanmean(rets / pret_data["ret_traj"])
             if args.log_video and viz_slow:  # log video
-                vid = np.stack(env.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
+                vid = np.stack(envi.get_past_obs()).copy()[-450:, :4]  # t, b, c, h, w
                 vid[:, :, :, -1, :] = 128
                 vid[:, :, :, :, -1] = 128
                 vid = rearrange(vid, "t (H W) 1 h w -> t 1 (H h) (W w)", H=2, W=2)
@@ -274,9 +256,9 @@ def main(args):
                 data[f"media/{env_id}_vid"] = wandb.Video(vid, fps=15)
 
         if viz_fast:  # fast logging, ex: scalars
-            data["diversity/traj_pix"] = rms_traj.var.mean().item()
-            data["diversity/coll_pix"] = rms_coll.var.mean().item()
-            data["diversity/hist_pix"] = rms_hist.var.mean().item()
+            # data["diversity/traj_pix"] = rms_traj.var.mean().item()
+            # data["diversity/coll_pix"] = rms_coll.var.mean().item()
+            # data["diversity/hist_pix"] = rms_hist.var.mean().item()
 
             for key, tim in timer.key2time.items():
                 data[f"time/{key}"] = tim
@@ -285,8 +267,8 @@ def main(args):
             data["meta/SPS"] = (i_collect + 1) * args.collect_size / (time.time() - start_time)
             data["meta/global_step"] = (i_collect + 1) * args.collect_size
 
-            if len(hns) > 0:
-                data["charts/hns"] = np.mean(hns)
+            data["charts/hns"] = np.nanmean(hns)
+            data["charts/hns_teacher"] = np.nanmean(hns_teacher)
             data["charts/perplexity"] = np.e ** loss_e.mean().item()
             data["details/lr"] = opt.param_groups[0]["lr"]
             if args.train_klbc:
@@ -298,13 +280,13 @@ def main(args):
                 data["details/loss_idm"] = loss_idm.mean().item()
                 data["details/grad_norm_idm"] = grad_norm_idm.item()
                 data["charts/perplexity_idm"] = np.e ** entropy_idm.mean().item()
-            data["details/rms_returns_mean"] = env.rms_returns.mean.item()
-            data["details/rms_returns_var"] = env.rms_returns.var.item()
+            # data["details/rms_returns_mean"] = env.rms_returns.mean.item()
+            # data["details/rms_returns_var"] = env.rms_returns.var.item()
             data["details/grad_norm"] = grad_norm.item()
             data["details/entropy"] = loss_e.mean().item()
             data["details/kl_div"] = kl_div.mean().item()
             # data["details/clipfrac"] = np.mean(clipfracs)
-            data["details/explained_variance"] = explained_var
+            # data["details/explained_variance"] = explained_var
 
             # for env_id, buffer in zip(args.env_ids, mbuffer.buffers):
             #     lpips_diversity = eval_diversity.calc_diversity(buffer, n_iters=1, batch_size=512, device=args.device)
@@ -317,8 +299,6 @@ def main(args):
             if args.save_agent is not None:  # save agent
                 save_agent = f"{args.save_agent}/agent_{i_collect:09d}.pt"
                 print(f"Saving agent to {save_agent}...")
-                # os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
-                # torch.save(agent.state_dict(), args.save_agent)
                 os.makedirs(os.path.dirname(save_agent), exist_ok=True)
                 torch.save(agent.state_dict(), save_agent)
 
