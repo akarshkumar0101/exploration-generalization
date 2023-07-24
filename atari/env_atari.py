@@ -32,7 +32,7 @@ class ConcatEnv:
     def reset(self):
         obss, infos = zip(*[env.reset() for env in self.envs])  # lists
         obs = rearrange(list(obss), "n b ... -> (n b) ...")
-        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys() if k != "players"}
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
         return obs, info
 
     def step(self, action):
@@ -42,7 +42,7 @@ class ConcatEnv:
         rew = rearrange(list(rews), "n b ... -> (n b) ...")
         term = rearrange(list(terms), "n b ... -> (n b) ...")
         trunc = rearrange(list(truncs), "n b ... -> (n b) ...")
-        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys() if k != "players"}
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
         return obs, rew, term, trunc, info
 
 
@@ -131,7 +131,10 @@ def make_env(env_id="Breakout", n_envs=8, obj="ext", norm_rew=True, gamma=0.99, 
             task_id=f"{env_id}-v5",
             num_envs=n_envs,
             seed=seed,
-            # max_episode_steps=27000, stack_num=1, noop_Max=1, use_fire_reset=False,
+            # max_episode_steps=27000,
+            stack_num=1,
+            # noop_max=1,
+            # use_fire_reset=False,
             episodic_life=episodic_life,
             full_action_space=full_action_space,
         )
