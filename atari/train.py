@@ -71,7 +71,8 @@ parser.add_argument("--train-klbc", type=lambda x: bool(strtobool(x)), default=F
 parser.add_argument("--model-teacher", type=str, default="cnn", help="either cnn or gpt")
 parser.add_argument("--ctx-len-teacher", type=int, default=4, help="agent's context length")
 parser.add_argument("--load-agent-teacher", type=str, default=None, help="file to load the agent from")
-parser.add_argument("--teacher-last-agent-only", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--teacher-last-k", type=int, default=1)
+parser.add_argument("--pre-teacher-last-k", type=int, default=1)
 
 parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=0)
 
@@ -92,8 +93,7 @@ def load_teacher(args, env):
     for env_id in args.env_ids:
         load_agent_dir = args.load_agent_teacher.format(env_id=env_id)
         files = [f"{load_agent_dir}/{file}" for file in np.sort(os.listdir(load_agent_dir))]
-        if args.teacher_last_agent_only:
-            files = [files[-1]]
+        files = files[-args.teacher_last_k :]
         for load_agent in files:
             print(f"Loading teacher agent from {load_agent}")
             agent = utils.create_agent(args.model_teacher, env.single_action_space.n, args.ctx_len_teacher, load_agent, device=args.device)

@@ -5,7 +5,7 @@ python_file: train.py
 
 --track: True
 --project: egb-atari
---name: "generalist_30_{pre_obj}_history_{teacher_last_agent_only}_{seed}"
+--name: "generalist_30_{pre_obj}_history_{teacher_last_k}_{seed}"
 --log-video: False
 --log-hist: False
 
@@ -48,6 +48,6 @@ python_file: train.py
 --model-teacher: cnn
 --ctx-len-teacher: 4
 --load-agent-teacher: "./data/{project}/specialist_{{env_id}}_{pre_obj}_0/"
---teacher-last-agent-only: [True, False]
+--teacher-last-k: [1, 8]
 
 --n-steps-rnd-init: 0
