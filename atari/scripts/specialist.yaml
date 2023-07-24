@@ -1,4 +1,4 @@
-# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/specialists.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/specialist.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
 # requires 4 GB of GPU memory
 
 python_file: ppo_atari.py
