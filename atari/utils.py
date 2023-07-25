@@ -14,7 +14,7 @@ def create_agent(model, n_acts, ctx_len, load_agent=None, device=None):
     if load_agent is not None:
         try:
             agent.load_state_dict(torch.load(load_agent, map_location=device))
-        except RuntimeError as e:
+        except:
             print(f"----------------------------------------------------")
             print(f"WARNING: UNABLE TO LOAD AGENT FROM {load_agent}...")
             print(f"----------------------------------------------------")
