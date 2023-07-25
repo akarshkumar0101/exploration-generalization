@@ -5,7 +5,7 @@ python_file: train.py
 
 --track: True
 --project: egb-atari
---name: "finetune_ppo_{env_ids[0]}_{obj}_{pre_obj}_{load_agent_history}_{seed}"
+--name: "finetune_ppo_{env_ids[0]}_{obj}_{pre_obj}_history_{pre_teacher_last_k}_{seed}"
 --log-video: False
 --log-hist: False
 
@@ -23,8 +23,7 @@ python_file: train.py
 
 --model: gpt
 --ctx-len: 4
---load-agent-history: [False, True]
---load-agent: "./data/egb-atari/generalist_30_{pre_obj}_history_{load_agent_history}_{seed}/agent_000000320.pt"
+--load-agent: "./data/egb-atari/generalist_30_{pre_obj}_history_{pre_teacher_last_k}_{seed}/agent_000000320.pt"
 --save-agent: "./data/{project}/{name}/"
 --full-action-space: True
 
@@ -32,6 +31,7 @@ python_file: train.py
 --lr-warmup: True
 --lr-decay: "none"
 --max-grad-norm: 1.0
+
 
 --episodic-life: False
 --norm-rew: True
@@ -43,12 +43,12 @@ python_file: train.py
 --vf-coef: 0.5
 # --max-kl-div: 0.01
 
---pre-obj: [ext, rnd]
+--pre-obj: [None, ext, rnd]
 --train-klbc: False
 --model-teacher: cnn
 --ctx-len-teacher: 4
 --load-agent-teacher: "./data/{project}/specialist_{{env_id}}_{obj}_0/"
---teacher-last-agent-only: [True]
---freq-teacher-switch: 1e6
+--teacher-last-k: [1]
+--pre-teacher-last-k: [1, 8]
 
 --n-steps-rnd-init: 0

@@ -238,7 +238,8 @@ def main(args):
         # explained_var = np.nan if np.var(y_true) == 0 else 1.0 - np.var(y_true - y_pred) / np.var(y_true)
 
         hns = [atari_data.calc_hns(env_id, np.nanmean(envi.get_past_returns()["ret_score"])) for env_id, envi in zip(args.env_ids, env.envs)]
-        hns_teacher = [atari_data.calc_hns(env_id, np.nanmean(envi.get_past_returns()["ret_score"])) for env_id, envi in zip(args.env_ids, env_teacher.envs)]
+        if args.train_klbc:
+            hns_teacher = [atari_data.calc_hns(env_id, np.nanmean(envi.get_past_returns()["ret_score"])) for env_id, envi in zip(args.env_ids, env_teacher.envs)]
         for env_id, envi in zip(args.env_ids, env.envs):
             pret_data = envi.get_past_returns()
             for key, rets in pret_data.items():  # log returns
@@ -267,7 +268,8 @@ def main(args):
             data["meta/global_step"] = (i_collect + 1) * args.collect_size
 
             data["charts/hns"] = np.nanmean(hns)
-            data["charts/hns_teacher"] = np.nanmean(hns_teacher)
+            if args.train_klbc:
+                data["charts/hns_teacher"] = np.nanmean(hns_teacher)
             data["charts/perplexity"] = np.e ** loss_e.mean().item()
             data["details/lr"] = opt.param_groups[0]["lr"]
             if args.train_klbc:
