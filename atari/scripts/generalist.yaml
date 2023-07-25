@@ -1,4 +1,4 @@
-# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/generalist.sh --mem-gpu 8000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu visiongpu19.csail.mit.edu visiongpu20.csail.mit.edu visiongpu21.csail.mit.edu visiongpu22.csail.mit.edu visiongpu23.csail.mit.edu --conda-env atari
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/generalist.sh --mem-gpu 8000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu37 visiongpu36 visiongpu35 visiongpu34 visiongpu33 visiongpu32 visiongpu29 visiongpu23 visiongpu22 visiongpu21 visiongpu20 visiongpu19 visiongpu18 visiongpu17 visiongpu16 visiongpu15 visiongpu14 visiongpu13 visiongpu12 visiongpu11 --conda-env atari
 # requires 12 GB of GPU memory
 
 python_file: train.py
