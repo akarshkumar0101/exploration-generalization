@@ -81,20 +81,6 @@ class Cell(object):
         self.times_chosen_since_new += 1
         return self.ram, self.reward, self.trajectory.copy()
 
-class EnvpoolLike(gym.Wrapper):
-    def reset(self, *args, **kwargs):
-        self.just_reset = True
-        obs, info = self.env.reset(*args, **kwargs)
-        obs, _, _, _, info = self.env.step(0)
-        return obs, info
-    def step(self, action):
-        if self.just_reset:
-            self.just_reset = False
-            action = np.ones_like(action)
-        return self.env.step(action)
-
-
-
 
 def explore(id):
     global highscore, frames, iterations, best_cell, new_cell, archive
@@ -189,7 +175,7 @@ if __name__ == "__main__":
 
     i_main = 0
     while True:
-        if i_main%10==0:
+        if i_main % 10 == 0:
             print("Iterations: %d, Cells: %d, Frames: %d, Max Reward: %d" % (iterations, len(archive), frames, highscore))
         # image = np.concatenate((best_cell, new_cell), axis = 1)
         # cv2.imshow('best cell – newest cell', image)
@@ -202,20 +188,12 @@ if __name__ == "__main__":
                 data = {"iterations": iterations, "cells": len(archive), "frames": frames, "max reward": highscore}
                 wandb.log(data, step=iterations)
 
-        if i_main%100==0:
-            print('saving archive')
+        if i_main % 100 == 0:
+            print("saving archive")
             np.save("archive.npy", dict(archive))
-            print('done saving')
+            print("done saving")
 
         i_main += 1
-
-class CustomFireReset(gym.Wrapper):
-    def reset(self, *args, **kwargs):
-        obs, info = self.env.reset(*args, **kwargs)
-        # if hasattr
-        obs, _, _, _, info = self.env.step(0)
-        obs, _, _, _, info = self.env.step(1)
-        return obs, info
 
 """
 # gymnasium

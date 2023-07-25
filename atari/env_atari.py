@@ -96,8 +96,8 @@ class MyEnvpool(gym.Env):
         info["players"] = info["players"]["env_id"]
         return obs, info
 
-    def reset_subenvs(self, indices):
-        return self.env.reset_subenvs(indices)
+    def reset_subenvs(self, ids):
+        return self.env.reset(ids)
 
     def step(self, action):
         if isinstance(action, torch.Tensor):
