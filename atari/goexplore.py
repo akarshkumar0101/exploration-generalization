@@ -18,7 +18,7 @@ parser.add_argument("--entity", type=str, default=None)
 parser.add_argument("--project", type=str, default="goexplore")
 parser.add_argument("--name", type=str, default=None)
 # parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
 
 # parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0)
@@ -102,6 +102,7 @@ def main(args):
     action = 0
     trajectory = []
 
+    max_traj_len = 0
     max_running_ret = 0
 
     archive = defaultdict(lambda: Cell())
@@ -121,6 +122,7 @@ def main(args):
             terminal |= info["lives"] < max_lives
             terminal |= trunc
             trajectory.append(action)
+            max_traj_len = max(max_traj_len, len(trajectory))
             max_running_ret = max(max_running_ret, running_ret)
             if terminal:
                 break
@@ -155,6 +157,7 @@ def main(args):
         if viz_fast:
             data["n_cells"] = len(archive)
             # data["frames"] = 0.0
+            data["max_traj_len"] = max_traj_len
             data["max_running_ret"] = max_running_ret
         # if viz_slow:
         # plt.figure(figsize=(6, 3))
@@ -165,7 +168,7 @@ def main(args):
         # plt.tight_layout()
         # data["cell_repr"] = plt.gcf()
         # plt.close()
-        if viz_slow:
+        if args.log_hist and viz_slow:
             traj_lens = np.array([len(cell.trajectory) for cell in archive.values()])
             traj_rets = np.array([cell.running_ret for cell in archive.values()])
             data["traj_lens"] = wandb.Histogram(traj_lens)
