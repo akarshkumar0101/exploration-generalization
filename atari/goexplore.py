@@ -179,7 +179,7 @@ def main(args):
             os.makedirs(os.path.dirname(args.save_archive), exist_ok=True)
             np.save(args.save_archive, dict(archive))
 
-        if viz_midd:
+        if viz_slow:
             print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
     return archive
 
