@@ -151,8 +151,8 @@ def main(args):
 
         # ------------------------------- LOGGING ------------------------------- #
         viz_slow = i_iter % (args.n_iters // 10) == 0
-        viz_midd = i_iter % (args.n_iters // 100) == 0 or viz_slow
-        viz_fast = i_iter % (args.n_iters // 1000) == 0 or viz_midd
+        viz_midd = i_iter % (args.n_iters // 10) == 0 or viz_slow
+        viz_fast = i_iter % (args.n_iters // 100) == 0 or viz_midd
         data = {}
         if viz_fast:
             data["n_cells"] = len(archive)
