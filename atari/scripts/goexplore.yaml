@@ -5,7 +5,7 @@ python_file: goexplore.py
 
 --track: True
 --project: goexplore
---name: "goexplore_{env_id}_{seed}"
+--name: "goexplore_{env_id}_{p_repeat}_{seed}"
 --log-hist: False
 
 --seed: [0, 1, 2, 3, 4]
