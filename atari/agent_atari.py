@@ -4,7 +4,6 @@ from einops import rearrange
 from normalize import RunningMeanStd
 from torch import nn
 
-
 class NoopAgent(nn.Module):
     def __init__(self, n_acts, ctx_len=None, logit=4.0):
         super().__init__()

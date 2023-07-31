@@ -1,4 +1,5 @@
 import argparse
+import os
 from collections import defaultdict
 from distutils.util import strtobool
 
@@ -6,8 +7,10 @@ import cv2
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
-import wandb
 from tqdm.auto import tqdm
+import random
+
+import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
@@ -21,11 +24,19 @@ parser.add_argument("--name", type=str, default=None)
 parser.add_argument("--seed", type=int, default=0)
 
 parser.add_argument("--env-id", type=str, default="MontezumaRevenge")
-parser.add_argument("--n-iters", type=lambda x: float(int(x)), default=int(1e5))
+parser.add_argument("--n-iters", type=lambda x: int(float(x)), default=int(1e5))
 parser.add_argument("--n-steps", type=int, default=100)
 parser.add_argument("--p-repeat", type=float, default=0.95)
 
 parser.add_argument("--save-archive", type=str, default=None)
+
+
+def parse_args(*args, **kwargs):
+    args = parser.parse_args(*args, **kwargs)
+    for key in ["project", "name", "save_archive"]:
+        if getattr(args, key) is not None:
+            setattr(args, key, getattr(args, key).format(**vars(args)))
+    return args
 
 
 def cellfn(frame):
@@ -79,6 +90,10 @@ class Cell(object):
 
 
 def main(args):
+    print(f"Running Goexplore with args: {args}")
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
     env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
     env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     _, info = env.reset()
@@ -99,7 +114,8 @@ def main(args):
         found_new_cell = False
         for i_step in range(args.n_steps):
             if not np.random.random() < args.p_repeat:
-                action = env.action_space.sample()
+                # action = env.action_space.sample()
+                action = np.random.randint(0, env.action_space.n, 1).item()
             frame, reward, terminal, trunc, info = env.step(action)
             running_ret += reward
             terminal |= info["lives"] < max_lives
@@ -113,6 +129,7 @@ def main(args):
             cell = archive[cellhash]
             first_visit = cell.visit()
             if first_visit or running_ret > cell.running_ret or running_ret == cell.running_ret and len(trajectory) < len(cell.trajectory):
+                cell.cell_raw = pixcell.flatten().tolist()
                 cell.ram = env.clone_state(True)
                 cell.running_ret = running_ret
                 cell.trajectory = trajectory.copy()
@@ -131,23 +148,23 @@ def main(args):
         env.restore_state(ram)
 
         # ------------------------------- LOGGING ------------------------------- #
-        viz_slow = i_iter % (args.n_iters // 8) == 0
-        viz_midd = i_iter % (args.n_iters // 128) == 0 or viz_slow
+        viz_slow = i_iter % (args.n_iters // 10) == 0
+        viz_midd = i_iter % (args.n_iters // 100) == 0 or viz_slow
         viz_fast = i_iter % (args.n_iters // 1000) == 0 or viz_midd
         data = {}
         if viz_fast:
             data["n_cells"] = len(archive)
-            data["frames"] = 0.0
+            # data["frames"] = 0.0
             data["max_running_ret"] = max_running_ret
-        if viz_slow:
-            plt.figure(figsize=(6, 3))
-            plt.subplot(121)
-            plt.imshow(frame)
-            plt.subplot(122)
-            plt.imshow(pixcell)
-            plt.tight_layout()
-            data["cell_repr"] = plt.gcf()
-            plt.close()
+        # if viz_slow:
+        # plt.figure(figsize=(6, 3))
+        # plt.subplot(121)
+        # plt.imshow(frame)
+        # plt.subplot(122)
+        # plt.imshow(pixcell)
+        # plt.tight_layout()
+        # data["cell_repr"] = plt.gcf()
+        # plt.close()
         if viz_slow:
             traj_lens = np.array([len(cell.trajectory) for cell in archive.values()])
             traj_rets = np.array([cell.running_ret for cell in archive.values()])
@@ -156,15 +173,16 @@ def main(args):
         if args.track and viz_fast:
             wandb.log(data, step=i_iter)
         if args.save_archive is not None and viz_slow:
+            os.makedirs(os.path.dirname(args.save_archive), exist_ok=True)
             np.save(args.save_archive, dict(archive))
 
-        if viz_fast:
+        if viz_midd:
             print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
     return archive
 
 
 if __name__ == "__main__":
-    main(parser.parse_args())
+    main(parse_args())
 
 
 """
