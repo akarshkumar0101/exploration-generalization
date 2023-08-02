@@ -24,9 +24,9 @@ parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=Fal
 parser.add_argument("--seed", type=int, default=0)
 
 parser.add_argument("--env-id", type=str, default="MontezumaRevenge")
-parser.add_argument("--n-iters", type=lambda x: int(float(x)), default=int(1e5))
+parser.add_argument("--n-iters", type=lambda x: int(float(x)), default=int(1e3))
 parser.add_argument("--n-steps", type=int, default=100)
-parser.add_argument("--p-repeat", type=float, default=0.95)
+parser.add_argument("--p-repeat", type=float, default=0.0)
 
 parser.add_argument("--save-archive", type=str, default=None)
 
@@ -39,10 +39,10 @@ def parse_args(*args, **kwargs):
     return args
 
 
-def cellfn(frame):
+def cellfn(frame, h=8, w=11, d=8):
     cell = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-    cell = cv2.resize(cell, (11, 8), interpolation=cv2.INTER_AREA)
-    cell = cell // 32
+    cell = cv2.resize(cell, (w, h), interpolation=cv2.INTER_AREA)
+    cell = cell // (256 // d)
     return cell
 
 
@@ -94,6 +94,8 @@ def main(args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
+    env2 = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
+    env2 = gym.wrappers.AtariPreprocessing(env2, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
     env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     _, info = env.reset()
@@ -112,9 +114,25 @@ def main(args):
 
     for i_iter in tqdm(range(args.n_iters)):
         # ------------------------------- DATA COLLECTION ------------------------------- #
+        # if i_iter>1:
+        #     plt.figure(figsize=(10, 10))
+        #     ak_cells = list(archive.values())
+        #     for ak in range(len(ak_cells)):
+        #         akcell = ak_cells[ak]
+        #         env2.reset()
+        #         env.restore_state(akcell.ram)
+        #         ako, _, _, _, _ = env.step(0)
+        #         plt.subplot(2, 6, ak+1)
+        #         plt.title(f'{akcell.score: 8.5f}')
+        #         plt.imshow(ako)
+        #     plt.tight_layout()
+        #     plt.show()
+
         found_new_cell = False
         for i_step in range(args.n_steps):
-            if not np.random.random() < args.p_repeat:
+            if i_iter == 0 and i_step == 0:
+                action = 0
+            elif not np.random.random() < args.p_repeat:
                 # action = env.action_space.sample()
                 action = np.random.randint(0, env.action_space.n, 1).item()
             frame, reward, terminal, trunc, info = env.step(action)

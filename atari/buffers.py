@@ -165,6 +165,7 @@ class MultiBuffer:
             buffer.calc_gae(gamma, gae_lambda, episodic=episodic)
 
     def generate_batch(self, batch_size, ctx_len):
+        assert batch_size % len(self.buffers) == 0
         data = [buffer.generate_batch(batch_size // len(self.buffers), ctx_len) for buffer in self.buffers]
         # list of dicts to dict of lists
         data = {key: [di[key] for di in data] for key in data[0]}  # list of dicts to dict of lists
