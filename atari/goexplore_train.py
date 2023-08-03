@@ -394,12 +394,7 @@ def main(args):
                 archive = np.load(f"./data/goexplore/goexplore_{env_id}_{seed}.npy", allow_pickle=True).item()
                 env_id2archives[env_id].append(archive)
     env_id2archives = dict(env_id2archives)
-    env_id2archives = {k: env_id2archives[k] for k in list(env_id2archives.keys())[:4]}
-    # env_id2archives = {k: env_id2archives[k] for k in ["Amidar"]}
-    # Alien: 1 archives
-    # Amidar: 1 archives
-    # Assault: 1 archives
-    # Asterix:
+    env_id2archives = {k: env_id2archives[k] for k in list(env_id2archives.keys())[:20]}
 
     for env_id, archives in env_id2archives.items():
         print(f"{env_id}: {len(archives)} archives")
@@ -414,7 +409,7 @@ def main(args):
         env = ToTensor(env, device=args.device)
 
         sample_traj_fn = partial(sample_traj, archives=env_id2archives[env_id], sampling="best_1")
-        gebuff = GEBuffer(env, 1024, sample_traj_fn=sample_traj_fn, device=args.device)
+        gebuff = GEBuffer(env, 128, sample_traj_fn=sample_traj_fn, device=args.device)
         mbuffer.buffers.append(gebuff)
     # print("Done creating buffers")
 
@@ -425,7 +420,7 @@ def main(args):
         for buf in mbuffer.buffers:
             buf.gecollect()
             assert not buf.dones.any(), "No dones expected"
-        for i in range(2):
+        for _ in range(16):
             bs = len(env_id2archives) * 8
             batch = mbuffer.generate_batch(bs, 16)
             print(f"{batch['obs'].shape=}, {batch['act'].shape=}")
@@ -439,6 +434,7 @@ def main(args):
             opt.zero_grad()
             loss.backward()
             opt.step()
+            print(loss.item())
 
     # import imageio
     # vid = rearrange(buf.obss[0], "t 1 h w -> t h w 1").detach().cpu().numpy()
