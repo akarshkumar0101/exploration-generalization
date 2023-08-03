@@ -28,6 +28,10 @@ parser.add_argument("--n-iters", type=lambda x: int(float(x)), default=int(1e3))
 parser.add_argument("--n-steps", type=int, default=100)
 parser.add_argument("--p-repeat", type=float, default=0.0)
 
+parser.add_argument("--h", type=int, default=8)
+parser.add_argument("--w", type=int, default=11)
+parser.add_argument("--d", type=int, default=8)
+
 parser.add_argument("--save-archive", type=str, default=None)
 
 
@@ -94,8 +98,6 @@ def main(args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
-    env2 = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
-    env2 = gym.wrappers.AtariPreprocessing(env2, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
     env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     _, info = env.reset()
@@ -114,20 +116,6 @@ def main(args):
 
     for i_iter in tqdm(range(args.n_iters)):
         # ------------------------------- DATA COLLECTION ------------------------------- #
-        # if i_iter>1:
-        #     plt.figure(figsize=(10, 10))
-        #     ak_cells = list(archive.values())
-        #     for ak in range(len(ak_cells)):
-        #         akcell = ak_cells[ak]
-        #         env2.reset()
-        #         env.restore_state(akcell.ram)
-        #         ako, _, _, _, _ = env.step(0)
-        #         plt.subplot(2, 6, ak+1)
-        #         plt.title(f'{akcell.score: 8.5f}')
-        #         plt.imshow(ako)
-        #     plt.tight_layout()
-        #     plt.show()
-
         found_new_cell = False
         for i_step in range(args.n_steps):
             if i_iter == 0 and i_step == 0:
@@ -144,7 +132,7 @@ def main(args):
             max_running_ret = max(max_running_ret, running_ret)
             if terminal:
                 break
-            pixcell = cellfn(frame)
+            pixcell = cellfn(frame, h=args.h, w=args.w, d=args.d)
             cellhash = hashfn(pixcell)
             cell = archive[cellhash]
             first_visit = cell.visit()
@@ -168,7 +156,7 @@ def main(args):
         env.restore_state(ram)
 
         # ------------------------------- LOGGING ------------------------------- #
-        viz_slow = i_iter % (args.n_iters // 10) == 0
+        viz_slow = i_iter % (args.n_iters // 3) == 0
         viz_midd = i_iter % (args.n_iters // 10) == 0 or viz_slow
         viz_fast = i_iter % (args.n_iters // 100) == 0 or viz_midd
         data = {}
@@ -194,12 +182,19 @@ def main(args):
         if args.track and viz_fast:
             wandb.log(data, step=i_iter)
         if args.save_archive is not None and viz_slow:
-            os.makedirs(os.path.dirname(args.save_archive), exist_ok=True)
-            np.save(args.save_archive, dict(archive))
-
-        if viz_slow:
+            save_archive(archive, args.save_archive)
+        if viz_midd:
             print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
     return archive
+
+
+def save_archive(archive, path):
+    data = {}
+    data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
+    data["rets"] = np.array([cell.running_ret for cell in archive.values()])
+    data["scores"] = np.array([cell.score for cell in archive.values()])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    np.save(path, data)
 
 
 if __name__ == "__main__":
