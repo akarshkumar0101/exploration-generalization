@@ -37,6 +37,7 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        assert self.flash
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -179,7 +180,7 @@ class DecisionTransformer(nn.Module):
         act = rearrange(act, "b t -> (b t)")
 
         # with timer.add_time("embed_rtg"):
-            # x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
+        # x_rtg = self.encode_rtg(rtg)  # (batch_size * n_steps, n_embd)
         with timer.add_time("embed_obs"):
             x_obs = self.encode_obs(obs)  # (batch_size * n_steps, n_embd)
         with timer.add_time("embed_act"):

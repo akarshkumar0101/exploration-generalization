@@ -98,7 +98,8 @@ def main(args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
-    env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0)
+    env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
+    assert env.action_space.n == 18
     env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
     _, info = env.reset()
     max_lives = info["lives"]
@@ -132,6 +133,7 @@ def main(args):
             max_running_ret = max(max_running_ret, running_ret)
             if terminal:
                 break
+            assert not terminal
             pixcell = cellfn(frame, h=args.h, w=args.w, d=args.d)
             cellhash = hashfn(pixcell)
             cell = archive[cellhash]
@@ -156,9 +158,9 @@ def main(args):
         env.restore_state(ram)
 
         # ------------------------------- LOGGING ------------------------------- #
-        viz_slow = i_iter % (args.n_iters // 3) == 0
-        viz_midd = i_iter % (args.n_iters // 10) == 0 or viz_slow
-        viz_fast = i_iter % (args.n_iters // 100) == 0 or viz_midd
+        viz_slow = (i_iter + 1) % (args.n_iters // 3) == 0
+        viz_midd = (i_iter + 1) % (args.n_iters // 10) == 0 or viz_slow
+        viz_fast = (i_iter + 1) % (args.n_iters // 100) == 0 or viz_midd
         data = {}
         if viz_fast:
             data["n_cells"] = len(archive)
@@ -182,6 +184,7 @@ def main(args):
         if args.track and viz_fast:
             wandb.log(data, step=i_iter)
         if args.save_archive is not None and viz_slow:
+            print("saving archive at iteration", i_iter, "with", len(archive), "cells")
             save_archive(archive, args.save_archive)
         if viz_midd:
             print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
@@ -203,10 +206,10 @@ if __name__ == "__main__":
 
 """
 # gymnasium
-env = gym.make(f"ALE/MontezumaRevenge-v5", frameskip=1, repeat_action_probability=0.0)
+env = gym.make(f"ALE/MontezumaRevenge-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
 env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
 
 
 # envpool
-env = envpool.make_gymnasium('MontezumaRevenge-v5', img_height=210, img_width=210, gray_scale=False, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False)
+env = envpool.make_gymnasium('MontezumaRevenge-v5', img_height=210, img_width=210, gray_scale=False, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True)
 """

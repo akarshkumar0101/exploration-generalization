@@ -8,7 +8,7 @@ python_file: goexplore.py
 --name: "goexplore_{env_id}_{p_repeat}_{seed}"
 --log-hist: False
 
---seed: [0]
+--seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 --env-id: [Alien, Amidar, Assault, Asterix, Asteroids, Atlantis, BankHeist, BattleZone, BeamRider, Berzerk, Bowling, Boxing, Breakout, Centipede, ChopperCommand, CrazyClimber, Defender, DemonAttack, DoubleDunk, Enduro, FishingDerby, Freeway, Frostbite, Gopher, Gravitar, Hero, IceHockey, Jamesbond, Kangaroo, Krull, KungFuMaster, MontezumaRevenge, MsPacman, NameThisGame, Phoenix, Pitfall, Pong, PrivateEye, Qbert, Riverraid, RoadRunner, Robotank, Seaquest, Solaris, SpaceInvaders, StarGunner, Surround, Tennis, TimePilot, Tutankham, UpNDown, Venture, VideoPinball, WizardOfWor, YarsRevenge, Zaxxon]
 # --env-id: [MontezumaRevenge, Pitfall, Pong, Breakout, BankHeist]
