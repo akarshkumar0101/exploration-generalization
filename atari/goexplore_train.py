@@ -423,11 +423,9 @@ def main(args):
         for _ in range(16):
             bs = len(env_id2archives) * 8
             batch = mbuffer.generate_batch(bs, 16)
-            print(f"{batch['obs'].shape=}, {batch['act'].shape=}")
             logits, values = agent(None, batch["obs"], batch["act"], None)
-            print(f"{logits.shape=}, {values.shape=}")
 
-            loss_bc = cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(batch["act"], "b t -> (b t)"))
+            loss_bc = cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(batch["act"], "b t -> (b t)"), reduction="none")
             loss_bc = rearrange(loss_bc, "(b t) -> b t", b=bs)
             loss = loss_bc.mean()
 
