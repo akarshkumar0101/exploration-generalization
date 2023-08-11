@@ -1,6 +1,6 @@
 Alien
+Boxing
 MsPacman
 Pong
 SpaceInvaders
 StarGunner
-Boxing

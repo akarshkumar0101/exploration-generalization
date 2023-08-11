@@ -94,13 +94,14 @@ shared_config = config.copy()
 
 # ---------- STARTING SWEEPING ---------- #
 configs = []
-sweep_seed = [0, 1]
+sweep_seed = [0]
 
-sweep_env_id = ["Asteroids", "Alien"]
-# with open("../atari_games_train.txt") as f:
-#     sweep_env_id += [line.strip() for line in f.readlines()]
+# sweep_env_id = ["Asteroids", "Alien"]
+sweep_env_id = []
+with open("../atari_games_train_small.txt") as f:
+    sweep_env_id += [line.strip() for line in f.readlines()]
 # with open("../atari_games_test.txt") as f:
-#     sweep_env_id += [line.strip() for line in f.readlines()]
+# sweep_env_id += [line.strip() for line in f.readlines()]
 
 sweep_obj = ["ext", "rnd"]
 for seed in sweep_seed:
