@@ -137,7 +137,8 @@ def main(args):
     if args.obj == "rnd":
         rnd_model = agent_atari.RNDModel().to(args.device)
         opt.add_param_group({"params": rnd_model.parameters(), "lr": args.lr})
-        env.configure_rnd_reward(rnd_model=rnd_model)
+        for envi in env.envs:
+            envi.configure_rnd_reward(rnd_model=rnd_model)
 
     if args.n_steps_rnd_init > 0:
         print("Initializing RND model with random agent...")

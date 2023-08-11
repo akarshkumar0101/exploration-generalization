@@ -1,4 +1,4 @@
-# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/specialist.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers visiongpu10.csail.mit.edu visiongpu11.csail.mit.edu visiongpu13.csail.mit.edu visiongpu14.csail.mit.edu visiongpu15.csail.mit.edu visiongpu16.csail.mit.edu visiongpu17.csail.mit.edu visiongpu18.csail.mit.edu --conda-env atari
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts/specialist.sh --mem-gpu 5000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers freeman-titanxp-1 freeman-titanxp-2 fr    eeman-titanxp-3 freeman-titanxp-5 freeman-titanxp-6 freeman-titanxp-7 torralba-titanxp-1 torralba-titanxp-2 torralba-titanxp-3 torralba-titanxp-4 torralba-titanxp-5 torralba-titanxp-7 --conda-env egb
 # requires 4 GB of GPU memory
 
 
