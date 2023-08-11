@@ -383,8 +383,12 @@ def main(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
+    with open("atari_games_ignore.txt") as f:
+        env_ids_ignore = [a.strip() for a in f.readlines()]
     with open("atari_games_104.txt") as f:
         env_ids = [a.strip() for a in f.readlines()]
+    env_ids = [env_id for env_id in env_ids if env_id not in env_ids_ignore]
+
     env_id2archives = defaultdict(list)
     for env_id in tqdm(env_ids):
         for seed in range(0, 1):
@@ -394,7 +398,8 @@ def main(args):
                 archive = np.load(f"./data/goexplore/goexplore_{env_id}_{seed}.npy", allow_pickle=True).item()
                 env_id2archives[env_id].append(archive)
     env_id2archives = dict(env_id2archives)
-    env_id2archives = {k: env_id2archives[k] for k in list(env_id2archives.keys())[:20]}
+    env_id2archives = {k: env_id2archives[k] for k in list(env_id2archives.keys())[:30]}
+    # env_id2archives = {k: env_id2archives[k] for k in ["BeamRider"]}
 
     for env_id, archives in env_id2archives.items():
         print(f"{env_id}: {len(archives)} archives")
@@ -417,22 +422,25 @@ def main(args):
     opt = agent.create_optimizer(lr=1e-4)
     for i_iter in tqdm(range(1000)):
         print("Collecting...")
-        for buf in mbuffer.buffers:
+        for env_id, buf in zip(env_id2archives.keys(), mbuffer.buffers):
             buf.gecollect()
-            assert not buf.dones.any(), "No dones expected"
-        for _ in range(16):
-            bs = len(env_id2archives) * 8
-            batch = mbuffer.generate_batch(bs, 16)
-            logits, values = agent(None, batch["obs"], batch["act"], None)
+            if buf.dones.any().item():
+                print(env_id)
+                a = buf.dones.any(dim=-1)
+            assert not buf.dones.any().item(), "No dones expected"
+        # for _ in range(16):
+        #     bs = len(env_id2archives) * 128
+        #     batch = mbuffer.generate_batch(bs, 16)
+        #     logits, values = agent(None, batch["obs"], batch["act"], None)
 
-            loss_bc = cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(batch["act"], "b t -> (b t)"), reduction="none")
-            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=bs)
-            loss = loss_bc.mean()
+        #     loss_bc = cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(batch["act"], "b t -> (b t)"), reduction="none")
+        #     loss_bc = rearrange(loss_bc, "(b t) -> b t", b=bs)
+        #     loss = loss_bc.mean()
 
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            print(loss.item())
+        #     opt.zero_grad()
+        #     loss.backward()
+        #     opt.step()
+        #     print(loss.item())
 
     # import imageio
     # vid = rearrange(buf.obss[0], "t 1 h w -> t h w 1").detach().cpu().numpy()

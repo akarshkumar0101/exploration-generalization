@@ -1,4 +1,3 @@
-Alien
 Amidar
 Assault
 Asterix
@@ -9,7 +8,6 @@ BattleZone
 BeamRider
 Berzerk
 Bowling
-Boxing
 Breakout
 Centipede
 ChopperCommand
@@ -30,11 +28,9 @@ Kangaroo
 Krull
 KungFuMaster
 MontezumaRevenge
-MsPacman
 NameThisGame
 Phoenix
 Pitfall
-Pong
 PrivateEye
 Qbert
 Riverraid
@@ -42,8 +38,6 @@ RoadRunner
 Robotank
 Seaquest
 Solaris
-SpaceInvaders
-StarGunner
 Surround
 Tennis
 TimePilot

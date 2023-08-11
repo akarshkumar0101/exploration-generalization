@@ -24,57 +24,57 @@ from tqdm.auto import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--entity", type=str, default=None, help="the entity (team) of wandb's project")
-parser.add_argument("--project", type=str, default=None, help="the wandb's project name")
-parser.add_argument("--name", type=str, default=None, help="the name of this experiment")
-parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--entity", type=lambda x: None if x.lower() == "none" else x, default=None)
+parser.add_argument("--project", type=lambda x: None if x.lower() == "none" else x, default=None)
+parser.add_argument("--name", type=lambda x: None if x.lower() == "none" else x, default=None)
+parser.add_argument("--log_video", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--log_hist", type=lambda x: bool(strtobool(x)), default=False)
 
 parser.add_argument("--device", type=str, default="cpu")
-parser.add_argument("--seed", type=int, default=0, help="seed of the experiment")
-parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=True, help="if toggled, `torch.backends.cudnn.deterministic=False`")
 
 # Algorithm arguments
-parser.add_argument("--env-ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
+parser.add_argument("--env_ids", type=str, nargs="+", default=["Pong"], help="the id of the environment")
 parser.add_argument("--obj", type=str, default="ext", help="the objective of the agent, either ext or e3b")
-parser.add_argument("--total-steps", type=lambda x: int(float(x)), default=10000000, help="total timesteps of the experiments")
-parser.add_argument("--n-envs", type=int, default=8, help="the number of parallel game environments")
-parser.add_argument("--n-steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
-parser.add_argument("--batch-size", type=int, default=256, help="the batch size for training")
-parser.add_argument("--n-updates", type=int, default=16, help="gradient updates per collection")
+parser.add_argument("--total_steps", type=lambda x: int(float(x)), default=int(100e6), help="total timesteps of the experiments")
+parser.add_argument("--n_envs", type=int, default=128, help="the number of parallel game environments")
+parser.add_argument("--n_steps", type=int, default=128, help="the number of steps to run in each environment per policy rollout")
+parser.add_argument("--batch_size", type=int, default=4096, help="the batch size for training")
+parser.add_argument("--n_updates", type=int, default=16, help="gradient updates per collection")
 
 parser.add_argument("--model", type=str, default="cnn", help="either cnn or gpt")
-parser.add_argument("--ctx-len", type=int, default=4, help="agent's context length")
-parser.add_argument("--load-agent-history", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--load-agent", type=str, default=None, help="file to load the agent from")
-parser.add_argument("--save-agent", type=str, default=None, help="file to periodically save the agent to")
-parser.add_argument("--full-action-space", type=lambda x: bool(strtobool(x)), default=True)
+parser.add_argument("--ctx_len", type=int, default=4, help="agent's context length")
+parser.add_argument("--load_agent_history", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--load_agent", type=lambda x: None if x.lower() == "none" else x, default=None, help="file to load the agent from")
+parser.add_argument("--save_agent", type=lambda x: None if x.lower() == "none" else x, default=None, help="file to periodically save the agent to")
+parser.add_argument("--full_action_space", type=lambda x: bool(strtobool(x)), default=True)
 
-parser.add_argument("--lr", type=float, default=2.5e-4, help="the learning rate of the optimizer")
-parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
-parser.add_argument("--lr-decay", type=str, default="none")
-parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
+parser.add_argument("--lr", type=float, default=2.5e-4)
+parser.add_argument("--lr_warmup", type=lambda x: bool(strtobool(x)), default=True)
+parser.add_argument("--lr_decay", type=str, default="none")
+parser.add_argument("--max_grad_norm", type=float, default=1.0)
 
-parser.add_argument("--episodic-life", type=lambda x: bool(strtobool(x)), default=True)
-parser.add_argument("--norm-rew", type=lambda x: bool(strtobool(x)), default=True)
-parser.add_argument("--gamma", type=float, default=0.99, help="the discount factor gamma")
-parser.add_argument("--gae-lambda", type=float, default=0.95, help="the lambda for the general advantage estimation")
-parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, help="Toggles advantages normalization")
-parser.add_argument("--ent-coef", type=float, default=0.01, help="coefficient of the entropy")
-parser.add_argument("--clip-coef", type=float, default=0.1, help="the surrogate clipping coefficient")
-parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
-parser.add_argument("--vf-coef", type=float, default=0.5, help="coefficient of the value function")
-parser.add_argument("--max-kl-div", type=float, default=None, help="the target KL divergence threshold")
+parser.add_argument("--episodic_life", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--norm_rew", type=lambda x: bool(strtobool(x)), default=True)
+parser.add_argument("--gamma", type=float, default=0.99)
+parser.add_argument("--gae_lambda", type=float, default=0.95)
+parser.add_argument("--norm_adv", type=lambda x: bool(strtobool(x)), default=True)
+parser.add_argument("--ent_coef", type=float, default=0.001)
+parser.add_argument("--clip_coef", type=float, default=0.1)
+parser.add_argument("--clip_vloss", type=lambda x: bool(strtobool(x)), default=True, help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
+parser.add_argument("--vf_coef", type=float, default=0.5, help="coefficient of the value function")
+parser.add_argument("--max_kl_div", type=lambda x: None if x.lower == "none" else float(x), default=None, help="the target KL divergence threshold")
 
-parser.add_argument("--pre-obj", type=str, default="ext")
-parser.add_argument("--train-klbc", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--model-teacher", type=str, default="cnn", help="either cnn or gpt")
-parser.add_argument("--ctx-len-teacher", type=int, default=4, help="agent's context length")
-parser.add_argument("--load-agent-teacher", type=str, default=None, help="file to load the agent from")
-parser.add_argument("--teacher-last-k", type=int, default=1)
-parser.add_argument("--pre-teacher-last-k", type=int, default=1)
+parser.add_argument("--pre_obj", type=str, default="ext")
+parser.add_argument("--train_klbc", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--model_teacher", type=str, default="cnn", help="either cnn or gpt")
+parser.add_argument("--ctx_len_teacher", type=int, default=4, help="agent's context length")
+parser.add_argument("--load_agent_teacher", type=lambda x: None if x.lower() == "none" else x, default=None, help="file to load the agent from")
+parser.add_argument("--teacher_last_k", type=int, default=1)
+parser.add_argument("--pre_teacher_last_k", type=int, default=1)
 
-parser.add_argument("--n-steps-rnd-init", type=lambda x: int(float(x)), default=0)
+parser.add_argument("--n_steps_rnd_init", type=lambda x: int(float(x)), default=int(100e3))
 
 
 def parse_args(*args, **kwargs):
@@ -318,4 +318,8 @@ and in the main loop calculation that overrides buffer.
 Why? It is much more efficient (can calculate entire buffer's intrinsic reward in one go)
 And more importantly: the reward normalization will apply the same to ALL rewards in this batch.
 
+Three phases:
+- specialist
+- generalist
+- finetune-bc OR finetune-ppo
 """
