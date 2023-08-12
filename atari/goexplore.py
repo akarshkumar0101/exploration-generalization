@@ -162,7 +162,7 @@ def main(args):
 
         # capping archive size
         if args.max_cells is not None and i_iter % (args.n_iters // 10) == 0 and len(archive) > args.max_cells:
-            hashes = list(archive.keys())
+            hashes = np.array(archive.keys())
             scores = np.array([cell.score for cell in archive.values()])
             prune_k = len(archive) - args.max_cells
             hashes_delete = hashes[np.argsort(scores)[:prune_k]]

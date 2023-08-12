@@ -63,11 +63,11 @@ shared_config = config.copy()
 
 # ---------- STARTING SWEEPING ---------- #
 configs = []
-sweep_seed = np.arange(3)
+sweep_seed = np.arange(40)
 sweep_env_id = []
 with open("../atari_games_57.txt") as f:
     sweep_env_id += [line.strip() for line in f.readlines()]
-sweep_env_id = sweep_env_id[:40]
+# sweep_env_id = sweep_env_id[:40]
 # with open("../atari_games_test.txt") as f:
 # sweep_env_id += [line.strip() for line in f.readlines()]
 
