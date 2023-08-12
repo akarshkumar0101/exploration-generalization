@@ -18,21 +18,24 @@ parser.add_argument("--entity", type=str, default=None)
 parser.add_argument("--project", type=str, default="goexplore")
 parser.add_argument("--name", type=str, default=None)
 # parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
+parser.add_argument("--log_hist", type=lambda x: bool(strtobool(x)), default=False)
 
 # parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0)
 
-parser.add_argument("--env-id", type=str, default="MontezumaRevenge")
-parser.add_argument("--n-iters", type=lambda x: int(float(x)), default=int(1e3))
-parser.add_argument("--n-steps", type=int, default=100)
-parser.add_argument("--p-repeat", type=float, default=0.0)
+parser.add_argument("--env_id", type=str, default="MontezumaRevenge")
+parser.add_argument("--n_iters", type=lambda x: int(float(x)), default=int(1e3))
+parser.add_argument("--n_steps", type=int, default=100)
+parser.add_argument("--p_repeat", type=float, default=0.0)
 
 parser.add_argument("--h", type=int, default=8)
 parser.add_argument("--w", type=int, default=11)
 parser.add_argument("--d", type=int, default=8)
 
-parser.add_argument("--save-archive", type=str, default=None)
+parser.add_argument("--max_cells", type=int, default=None)
+parser.add_argument("--use_reward", type=lambda x: bool(strtobool(x)), default=True)
+
+parser.add_argument("--save_archive", type=str, default=None)
 
 
 def parse_args(*args, **kwargs):
@@ -115,7 +118,8 @@ def main(args):
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args)
 
-    for i_iter in tqdm(range(args.n_iters)):
+    pbar = tqdm(range(args.n_iters))
+    for i_iter in pbar:
         # ------------------------------- DATA COLLECTION ------------------------------- #
         found_new_cell = False
         for i_step in range(args.n_steps):
@@ -138,7 +142,14 @@ def main(args):
             cellhash = hashfn(pixcell)
             cell = archive[cellhash]
             first_visit = cell.visit()
-            if first_visit or running_ret > cell.running_ret or running_ret == cell.running_ret and len(trajectory) < len(cell.trajectory):
+
+            replace_cell = first_visit
+            if args.use_reward:
+                replace_cell = replace_cell or running_ret > cell.running_ret or running_ret == cell.running_ret and len(trajectory) < len(cell.trajectory)
+            else:
+                replace_cell = replace_cell or len(trajectory) < len(cell.trajectory)
+
+            if replace_cell:
                 cell.cell_raw = pixcell.flatten().tolist()
                 cell.ram = env.clone_state(True)
                 cell.running_ret = running_ret
@@ -148,6 +159,16 @@ def main(args):
                 found_new_cell = True
         if found_new_cell and i_iter > 0:
             restore_cell.times_chosen_since_new = 0
+
+        # capping archive size
+        if args.max_cells is not None and i_iter % (args.n_iters // 10) == 0 and len(archive) > args.max_cells:
+            hashes = list(archive.keys())
+            scores = np.array([cell.score for cell in archive.values()])
+            prune_k = len(archive) - args.max_cells
+            hashes_delete = hashes[np.argsort(scores)[:prune_k]]
+            for cellhash in hashes_delete:
+                del archive[cellhash]
+
         scores = np.array([cell.score for cell in archive.values()])
         hashes = [cellhash for cellhash in archive.keys()]
         probs = scores / scores.sum()
@@ -185,17 +206,20 @@ def main(args):
             wandb.log(data, step=i_iter)
         if args.save_archive is not None and viz_slow:
             print("saving archive at iteration", i_iter, "with", len(archive), "cells")
-            save_archive(archive, args.save_archive)
+            save_archive(archive, args, args.save_archive)
         if viz_midd:
             print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
+        if viz_fast:
+            pbar.set_postfix(cells=len(archive), ret=max_running_ret)
     return archive
 
 
-def save_archive(archive, path):
+def save_archive(archive, args, path):
     data = {}
     data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
     data["rets"] = np.array([cell.running_ret for cell in archive.values()])
     data["scores"] = np.array([cell.score for cell in archive.values()])
+    data["config"] = vars(args)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     np.save(path, data)
 
