@@ -47,7 +47,7 @@ config["log_hist"] = False
 config["seed"] = 0
 
 config["env_id"] = "Asteroids"
-config["n_iters"] = int(1e3)
+config["n_iters"] = int(2e3)
 config["p_repeat"] = 0.0
 
 config["h"] = 8
@@ -63,7 +63,7 @@ shared_config = config.copy()
 
 # ---------- STARTING SWEEPING ---------- #
 configs = []
-sweep_seed = np.arange(100)
+sweep_seed = np.arange(1)
 sweep_env_id = []
 with open("../atari_games_57.txt") as f:
     sweep_env_id += [line.strip() for line in f.readlines()]
