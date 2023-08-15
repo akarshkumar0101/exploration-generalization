@@ -46,10 +46,10 @@ parser.add_argument("--n_steps", type=int, default=512)
 parser.add_argument("--batch_size", type=int, default=384)
 parser.add_argument("--n_updates", type=int, default=32)
 
-parser.add_argument("--ctx_len", type=int, default=32)
+parser.add_argument("--ctx_len", type=int, default=64)
 parser.add_argument("--save_agent", type=lambda x: None if x.lower() == "none" else x, default=None)
 
-parser.add_argument("--lr", type=float, default=2.5e-4)
+parser.add_argument("--lr", type=float, default=1e-4)
 # parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
 # parser.add_argument("--lr-decay", type=str, default="none")
 # parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")

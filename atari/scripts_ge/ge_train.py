@@ -57,10 +57,10 @@ config["n_steps"] = 512
 config["batch_size"] = 384
 config["n_updates"] = 32
 
-config["ctx_len"] = 32
+config["ctx_len"] = 64
 config["save_agent"] = None
 
-config["lr"] = 2.5e-4
+config["lr"] = 1e-4
 
 config["n_archives"] = 40
 
