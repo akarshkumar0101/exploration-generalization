@@ -238,6 +238,7 @@ def main(args):
             if args.track:
                 wandb.log(dict(loss=loss.item(), ppl=np.e ** loss.item()))
         if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
+            os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
             torch.save(agent.state_dict(), args.save_agent)
 
 
