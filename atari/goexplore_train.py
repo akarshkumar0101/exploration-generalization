@@ -22,6 +22,24 @@ from env_atari import make_concat_env
 from torch.distributions import Categorical
 from tqdm.auto import tqdm
 
+
+
+from collections import defaultdict
+from functools import partial
+
+
+from buffers import Buffer, MultiBuffer
+from env_atari import MyEnvpool, ToTensor
+
+from einops import repeat
+
+from torch.nn.functional import cross_entropy
+import utils
+import glob
+
+import gymnasium as gym
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
 parser.add_argument("--entity", type=str, default=None, help="the entity (team) of wandb's project")
@@ -88,53 +106,114 @@ def parse_args(*args, **kwargs):
     return args
 
 
-from collections import defaultdict
-from functools import partial
-
-
-from buffers import Buffer, MultiBuffer
-from env_atari import MyEnvpool, ToTensor
-
-from einops import repeat
-
-from torch.nn.functional import cross_entropy
-
-
 class GEBuffer(Buffer):
     def __init__(self, env, n_steps, sample_traj_fn, device=None):
         super().__init__(env, n_steps, device=device)
-        self.trajs = [None for _ in range(self.env.n_envs)]
-        self.traj_lens = np.zeros(self.env.n_envs, dtype=int)
-        self.i_locs = np.zeros(self.env.n_envs, dtype=int)
+        self.trajs = [None for _ in range(self.env.num_envs)]
+        self.traj_lens = np.zeros(self.env.num_envs, dtype=int)
+        self.i_locs = np.zeros(self.env.num_envs, dtype=int)
         self.sample_traj_fn = sample_traj_fn
 
-    def sample_new_traj(self, ids):
-        for id in ids:
-            self.trajs[id] = self.sample_traj_fn()
-            self.traj_lens[id] = len(self.trajs[id])
-            self.i_locs[id] = 0
-        obs, _ = self.env.reset_subenvs(ids)
-        self.next_obs[ids] = torch.from_numpy(obs).to(self.device)
+        self.buf_obs = np.zeros((env.num_envs, n_steps, 84, 84), dtype=np.uint8)
+        self.buf_act = np.zeros((env.num_envs, n_steps), dtype=np.uint8)
+        self.next_obs = np.zeros_like(env.observation_space.sample())
+        env.envs[0].reset(seed=0)
+        self.ram_start = env.envs[0].ale.getRAM().copy()
+
+    def traj_over_subenv(self, id):
+        self.trajs[id] = self.sample_traj_fn()
+        self.traj_lens[id] = len(self.trajs[id])
+        self.i_locs[id] = 0
+        obs, _ = self.env.envs[id].reset(seed=0)
+        assert np.array_equal(self.env.envs[id].ale.getRAM(), self.ram_start), "env reset to seed=0"
+        return obs
 
     def gecollect(self, pbar=None):
         if self.first_collect:
             self.first_collect = False
-            _, info = self.env.reset()
-            self.next_obs = info["obs"]
-            self.sample_new_traj(np.arange(self.env.num_envs))
-        for t in range(self.n_steps):
-            self.obss[:, t] = self.next_obs
+            # obs, info = self.env.reset()
+            # self.next_obs = info["obs"]
+            # self.sample_new_traj(np.arange(self.env.num_envs))
+            for id in range(self.env.num_envs):
+                self.next_obs[id] = self.traj_over_subenv(id)
+        
+        for t in tqdm(range(self.n_steps)):
+            self.buf_obs[:, t] = self.next_obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
             self.i_locs += 1
-            self.acts[:, t] = torch.from_numpy(action)
-            _, _, _, _, info = self.env.step(action)
-            self.dones[:, t] = info["done"]
-            self.next_obs = info["obs"]
-            self.sample_new_traj(np.where(self.i_locs >= self.traj_lens)[0])
+            self.buf_act[:, t] = action
+            self.next_obs, _, term, trunc, _ = self.env.step(action)
+            assert not any(term) and not any(trunc), "found a done in the ge buffer"
+            # self.dones[:, t] = info["done"]
+            # self.next_obs = info["obs"]
+            for id in np.where(self.i_locs >= self.traj_lens)[0]:
+                self.next_obs[id] = self.traj_over_subenv(id)
+        self.obss[:, :] = torch.from_numpy(self.buf_obs).to(self.device)
+        self.acts[:, :] = torch.from_numpy(self.buf_act).to(self.device)
+            
+def make_ge_env_single(env_id):
+    env = gym.make(f"ALE/{env_id}-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
+    env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=84, grayscale_obs=True)
+    return env
+def make_ge_env(env_id, n_envs):
+    make_fn = partial(make_ge_env_single, env_id=env_id)
+    return gym.vector.SyncVectorEnv([make_fn for _ in range(n_envs)])
 
-    # data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
-    # data["rets"] = np.array([cell.running_ret for cell in archive.values()])
-    # data["scores"] = np.array([cell.score for cell in archive.values()])
+
+
+def main(args):
+
+    device = 'cuda:1'
+    
+    print('starting run')
+    env_ids = ['MontezumaRevenge']
+    env_id = 'MontezumaRevenge'
+    n_archives = 1
+
+    print('loading archives')
+    env_id2archives = {}
+    for env_id in tqdm(env_ids):
+        env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in sorted(glob.glob(f'./data/goexplore/{env_id}*'))[:n_archives]]
+    print('done loading')
+    archives = env_id2archives[env_id]
+    archive = archives[0]
+    trajs, rets = archive['trajs'], archive['rets']
+    traj_best, ret_best = trajs[np.argmax(rets)], rets[np.argmax(rets)]
+    print('retbest', ret_best)
+    print('lenbest', len(traj_best))
+    
+    env = make_ge_env(env_id, 8)
+
+    sample_traj_fn = lambda : traj_best
+    sample_traj_fn = lambda : np.random.choice(trajs)
+    buf = GEBuffer(env, 512, sample_traj_fn=sample_traj_fn, device=device)
+    
+    agent = utils.create_agent('gpt', 18, 64, device=device)
+    opt = agent.create_optimizer(lr=2.5e-4)
+    
+    for _ in range(10):
+        buf.gecollect()
+        for i in tqdm(range(100)):
+            batch = buf.generate_batch(8*128, 64)
+            obs, act = batch['obs'], batch['act']
+            obs, act = obs[::8], act[::8]
+            obs = obs[:, :, None, :, :]
+            logits, values = agent(None, obs, act, None)
+        
+            loss_bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), reduction="none")
+            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=128)
+            loss = loss_bc.mean()
+        
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            if i%50==0:
+                print(np.e**loss.item())
+
+                
+# data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
+# data["rets"] = np.array([cell.running_ret for cell in archive.values()])
+# data["scores"] = np.array([cell.score for cell in archive.values()])
 
 
 def sample_traj(archives, sampling="uniform"):
@@ -150,7 +229,7 @@ def sample_traj(archives, sampling="uniform"):
         return trajs_best[-1]
 
 
-def main(args):
+def mainjfeiwjafoiewajijfoiea(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
