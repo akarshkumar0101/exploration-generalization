@@ -31,11 +31,11 @@ for seed in range(10):
             config["seed"] = seed
 
             config["env_ids"] = [env_id]
-            config["total_steps"] = int(10e6)
-            config["n_envs"] = 128
-            config["n_steps"] = 128
-            config["batch_size"] = 4096
-            config["n_updates"] = 16
+            config["total_steps"] = int(40e6)
+            config["n_envs"] = 32
+            config["n_steps"] = 256
+            config["batch_size"] = 128
+            config["n_updates"] = 4
 
             config["model"] = "gpt"
             config["ctx_len"] = 64
