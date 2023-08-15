@@ -237,6 +237,8 @@ def main(args):
 
             if args.track:
                 wandb.log(dict(loss=loss.item(), ppl=np.e ** loss.item()))
+        if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
+            torch.save(agent.state_dict(), args.save_agent)
 
 
 # data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)

@@ -81,7 +81,7 @@ for seed in sweep_seed:
         config["seed"] = seed
         config["strategy"] = strategy
         config["name"] = f"ge_train_{strategy}_{seed:04d}"
-        config["save_agent"] = f"./data/ge_train/generalist_{seed:04d}.pt"
+        config["save_agent"] = f"./data/ge_train/ge_train_{strategy}_{seed:04d}"
         configs.append(config.copy())
 
 # assert all configs have same key set
