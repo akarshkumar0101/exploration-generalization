@@ -1,3 +1,6 @@
+# requires 4gb gpu memory
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts_ge/ge_finetune.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers freeman-titanxp-1 freeman-titanxp-2 freeman-titanxp-5 freeman-titanxp-6 freeman-titanxp-7 freeman-titanxp-8 freeman-titanxp-9 oliva-titanxp-1 oliva-titanxp-2 --conda-env egb
+
 import os
 import sys
 import copy
@@ -31,7 +34,7 @@ for seed in range(10):
             config["seed"] = seed
 
             config["env_ids"] = [env_id]
-            config["total_steps"] = int(40e6)
+            config["total_steps"] = int(10e6)
             config["n_envs"] = 32
             config["n_steps"] = 256
             config["batch_size"] = 128
