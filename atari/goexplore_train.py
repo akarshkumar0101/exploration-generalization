@@ -188,8 +188,7 @@ def main(args):
     for env_id, trajs in env_id2trajs.items():
         print(f"env_id: {env_id}, #trajs: {len(trajs)}")
 
-    print("Creating buffers")
-
+    print("Creating envs")
     make_env_fns = []
     for env_id in args.env_ids:
         make_env_fns.extend([partial(make_ge_env_single, env_id=env_id) for _ in range(args.n_envs)])
@@ -200,6 +199,7 @@ def main(args):
         trajs = env_id2trajs[env_id]
         return trajs[np.random.choice(len(trajs))]
 
+    print("Creating buffer")
     buf = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Creating agent")
