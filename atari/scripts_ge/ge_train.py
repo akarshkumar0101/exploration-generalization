@@ -39,7 +39,7 @@ def get_commands(commands):
 
 
 # ---------- SHARED CONFIG ---------- #
-config["track"] = False
+config["track"] = True
 config["entity"] = None
 config["project"] = "ge_train"
 config["name"] = None
@@ -51,8 +51,8 @@ config["device"] = "cuda"
 # config["env_ids"] = ["Asteroids"]
 with open("../atari_games_train_small.txt") as f:
     config["env_ids"] = [line.strip() for line in f.readlines()]
-config["n_iters"] = int(1e4)
-config["n_envs"] = 8
+config["n_iters"] = int(1e3)
+config["n_envs"] = 4
 config["n_steps"] = 512
 config["batch_size"] = 384
 config["n_updates"] = 32
@@ -62,7 +62,7 @@ config["save_agent"] = None
 
 config["lr"] = 2.5e-4
 
-config["n_archives"] = 20
+config["n_archives"] = 40
 
 shared_config = config.copy()
 
@@ -75,11 +75,12 @@ sweep_seed = np.arange(0, 1)
 
 np.random.seed(0)
 for seed in sweep_seed:
-    for strategy in ['best', 'random']:
+    for strategy in ["best", "random"]:
         config = default_config.copy()
         config.update(shared_config.copy())
         config["seed"] = seed
         config["strategy"] = strategy
+        config["name"] = f"ge_train_{strategy}_{seed:04d}"
         config["save_agent"] = f"./data/ge_train/generalist_{seed:04d}.pt"
         configs.append(config.copy())
 
