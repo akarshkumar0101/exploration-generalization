@@ -62,7 +62,7 @@ config["save_agent"] = None
 
 config["lr"] = 2.5e-4
 
-config["n_archives"] = 1
+config["n_archives"] = 20
 
 shared_config = config.copy()
 
