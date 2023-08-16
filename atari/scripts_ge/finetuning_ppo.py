@@ -1,5 +1,5 @@
 # requires 4 GB of GPU memory
-# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts_ge/finetuning_ppo.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers freeman-titanxp-1 freeman-titanxp-2 freeman-titanxp-5 freeman-titanxp-6 freeman-titanxp-7 freeman-titanxp-8 freeman-titanxp-9 oliva-titanxp-1 oliva-titanxp-2 --conda-env egb
+# python cluster_run.py /data/vision/phillipi/akumar01/exploration-generalization/atari/scripts_ge/finetuning_ppo.sh --mem-gpu 4000 --dir /data/vision/phillipi/akumar01/exploration-generalization/atari --servers freeman-titanxp-1 freeman-titanxp-2 freeman-titanxp-3 freeman-titanxp-5 freeman-titanxp-6 freeman-titanxp-7 freeman-titanxp-8 freeman-titanxp-9 oliva-titanxp-1 oliva-titanxp-2 torralba-titanxp-1 torralba-titanxp-2 torralba-titanxp-3 torralba-titanxp-4 torralba-titanxp-5 torralba-titanxp-7 --conda-env egb
 
 import os
 import sys
