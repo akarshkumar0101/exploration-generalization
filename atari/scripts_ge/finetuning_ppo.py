@@ -22,7 +22,7 @@ default_config = vars(parser.parse_args())
 configs = []
 for seed in range(8):
     for env_id in ["MsPacman", "Pong", "SpaceInvaders", "StarGunner", "Boxing"]:
-    # for env_id in ["Boxing"]:
+        # for env_id in ["Boxing"]:
         for pre_obj in ["ext", "rnd"]:
             for pre_teacher_last_k in [1, 8]:
                 config = copy.deepcopy(default_config)
@@ -51,6 +51,7 @@ for seed in range(8):
                 config["episodic_life"] = True
                 config["ent_coef"] = 0.0  # 0.001
 
+                config["pre_teacher_last_k"] = pre_teacher_last_k
                 config["pre_obj"] = pre_obj
 
                 config["n_steps_rnd_init"] = 0
