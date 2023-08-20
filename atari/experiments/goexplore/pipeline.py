@@ -43,6 +43,7 @@ for i_split in range(5):
     print()
 
 # ------------------------ SPECIALIST ------------------------ #
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge/ --job_cpu_mem=10000 --max_jobs_cpu=2 --max_jobs_gpu=10 --conda_env=egb
 print("Creating ge_specialist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore.parser.parse_args())
