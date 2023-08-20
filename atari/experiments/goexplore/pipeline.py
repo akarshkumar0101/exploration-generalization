@@ -48,7 +48,7 @@ print("Creating ge_specialist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore.parser.parse_args())
 configs = []
-for seed in range(200):
+for seed in range(30):
     for env_id in env_ids:
         config = default_config.copy()
         config["track"] = False
