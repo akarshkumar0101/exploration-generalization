@@ -8,7 +8,6 @@ RUN pip install gym==0.23.1 "gymnasium[atari, accept-rom-license]==0.28.1" procg
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-WORKDIR /app
-COPY . /app/.
+WORKDIR /exploration-generalization
 
 CMD echo pwd; ls; which python pip jupyter; lscpu

@@ -226,7 +226,7 @@ def main(args):
             logits, values = agent(None, obs, act, None)
 
             loss_bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), reduction="none")
-            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=128)
+            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=args.batch_size)
             loss = loss_bc.mean()
 
             opt.zero_grad()
@@ -237,9 +237,11 @@ def main(args):
 
             if args.track:
                 wandb.log(dict(loss=loss.item(), ppl=np.e ** loss.item()))
+
         if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
-            os.makedirs(os.path.dirname(args.save_agent), exist_ok=True)
-            torch.save(agent.state_dict(), args.save_agent)
+            save_agent = args.save_agent.format(**locals())
+            os.makedirs(os.path.dirname(save_agent), exist_ok=True)
+            torch.save(agent.state_dict(), save_agent)
 
 
 # data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)

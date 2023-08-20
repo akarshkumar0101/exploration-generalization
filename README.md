@@ -22,7 +22,10 @@ For these reason, these 4 environments are in atari_games_ignore.txt.
 - Frogger
 - KingKong
 
+
+
 ### Does not reset RAM on actual env.reset
+ACTUALLY, THIS IS JUST A PROBLEM WITH NOT USING reset(seed=0)...
 ```python
 for env_id in env_ids:
     try:

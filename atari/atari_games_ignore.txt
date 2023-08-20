@@ -1,14 +1,4 @@
-Frogger
-KingKong
 LostLuggage
 Skiing
-Assault
-BeamRider
-Berzerk
-HauntedHouse
-SirLancelot
-Solaris
-SpaceWar
-Surround
-Tennis
-YarsRevenge
+Frogger
+KingKong
