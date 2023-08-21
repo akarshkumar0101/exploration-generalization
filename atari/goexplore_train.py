@@ -164,14 +164,16 @@ def get_env_id2trajs(env_id2archives, strategy="best"):
     for env_id, archives in tqdm(env_id2archives.items()):
         env_id2trajs[env_id] = []
         for archive in archives:
-            trajs, rets, scores = archive["trajs"], archive["rets"], archive["scores"]
+            trajs, rets, novelty, is_leaf = archive["traj"], archive["ret"], archive["novelty"], archive["is_leaf"]
             if strategy == "best":
                 idx = [np.argmax(rets)]
-            elif strategy == "random":
+            elif strategy == "all":
                 idx = np.arange(len(trajs))
+            elif strategy == "leaf":
+                idx = np.where(is_leaf)[0]
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
-            trajs, rets, scores = trajs[idx], rets[idx], scores[idx]
+            trajs = trajs[idx]
             env_id2trajs[env_id].extend(trajs)
     return env_id2trajs
 
@@ -238,7 +240,16 @@ def main(args):
             # print(np.e ** loss.item())
 
             if args.track:
-                wandb.log(dict(loss=loss.item(), ppl=np.e ** loss.item()))
+                data = {}
+                data["loss"] = loss.item()
+                data["ppl"] = np.e ** loss.item()
+
+                ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
+                pos = np.arange(len(ppl))
+                table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+                data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
+
+                wandb.log(data)
 
         if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
             save_agent = args.save_agent.format(**locals())
@@ -255,3 +266,10 @@ if __name__ == "__main__":
     main(parse_args())
 
 # TODO do goexplore runs with different seeds
+
+
+# plt.plot(pos, ppl)
+# plt.ylim(0, args.vocab_size)
+# plt.ylabel("PPL")
+# plt.xlabel("Token Position")
+# data["mpl"] = plt
