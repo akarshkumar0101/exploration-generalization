@@ -58,8 +58,10 @@ parser.add_argument("--n_archives", type=int, default=1)
 
 
 def parse_args(*args, **kwargs):
-    args = parser.parse_args(*args, **kwargs)
+    args, uargs = parser.parse_known_args(*args, **kwargs)
     args.n_envs_per_id = args.n_envs // len(args.env_ids)
+    for k, v in dict([tuple(uarg.replace("--", "").split("=")) for uarg in uargs]).items():
+        setattr(args, k, v)
     return args
 
 

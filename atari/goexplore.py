@@ -161,7 +161,7 @@ def main(args):
             restore_cell.times_chosen_since_new = 0
 
         # capping archive size
-        if args.max_cells is not None and i_iter % (args.n_iters // 10) == 0 and len(archive) > args.max_cells:
+        if args.max_cells is not None and (i_iter + 1) % (args.n_iters // 20) == 0 and len(archive) > args.max_cells:
             hashes = np.array(list(archive.keys()))
             scores = np.array([cell.score for cell in archive.values()])
             prune_k = len(archive) - args.max_cells
@@ -197,31 +197,81 @@ def main(args):
         # plt.tight_layout()
         # data["cell_repr"] = plt.gcf()
         # plt.close()
-        if args.log_hist and viz_slow:
+        if args.track and args.log_hist and viz_slow:
             traj_lens = np.array([len(cell.trajectory) for cell in archive.values()])
             traj_rets = np.array([cell.running_ret for cell in archive.values()])
             data["traj_lens"] = wandb.Histogram(traj_lens)
             data["traj_rets"] = wandb.Histogram(traj_rets)
         if args.track and viz_fast:
             wandb.log(data, step=i_iter)
-        if args.save_archive is not None and viz_slow:
-            print("saving archive at iteration", i_iter, "with", len(archive), "cells")
-            save_archive(archive, args, args.save_archive)
-        if viz_midd:
-            print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
+        # if viz_midd:
+        # print(f"i_iter: {i_iter: 10d}, n_cells: {len(archive): 10d}, frames: 0, max_running_ret: {max_running_ret: 9.1f}")
         if viz_fast:
             pbar.set_postfix(cells=len(archive), ret=max_running_ret)
+
+    # print(np.array([cell.times_seen for cell in archive.values()]))
+    # print(np.array([cell.score for cell in archive.values()]))
+    if args.save_archive is not None:
+        print(f"Saving GE archive with {len(archive)} cells.")
+        save_archive(archive, args, args.save_archive)
     return archive
 
 
 def save_archive(archive, args, path):
     data = {}
-    data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
-    data["rets"] = np.array([cell.running_ret for cell in archive.values()])
-    data["scores"] = np.array([cell.score for cell in archive.values()])
+    data["traj"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
+    data["ret"] = np.array([cell.running_ret for cell in archive.values()])
+    data["novelty"] = np.array([cell.score for cell in archive.values()])
+    data["is_leaf"] = filter_substrings(data["traj"])[0]
     data["config"] = vars(args)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     np.save(path, data)
+
+
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.data = None
+
+    def insert_one(self, word, data):
+        node = self
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.data = data
+
+    def insert_all(self, words, datas):
+        for word, data in zip(words, datas):
+            self.insert_one(word, data)
+
+    def trie_num_nodes(root):
+        assert root is not None
+        count = 0
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            count += 1
+            stack.extend(node.children.values())
+        return count
+
+
+def filter_substrings(trajs):
+    root = TrieNode()
+    root.insert_all(trajs, np.arange(len(trajs)))
+
+    ids = []
+    nodes_to_visit = [root]
+    while len(nodes_to_visit) > 0:
+        node = nodes_to_visit.pop(0)
+        nodes_to_visit.extend(node.children.values())
+        if len(node.children) == 0:
+            assert node.data is not None
+            ids.append(node.data)
+    ids = np.array(ids)
+    is_leaf = np.zeros(len(trajs), dtype=bool)
+    is_leaf[ids] = True
+    return is_leaf, ids
 
 
 if __name__ == "__main__":

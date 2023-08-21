@@ -43,12 +43,13 @@ for i_split in range(5):
     print()
 
 # ------------------------ SPECIALIST ------------------------ #
-# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge/ --job_cpu_mem=10000 --max_jobs_cpu=2 --max_jobs_gpu=10 --conda_env=egb
+# 11200*15/60/80/10 = 3.5 hours
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge/ --job_cpu_mem=2000 --max_jobs_cpu=2 --max_jobs_gpu=10 --conda_env=egb
 print("Creating ge_specialist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore.parser.parse_args())
 configs = []
-for seed in range(30):
+for seed in range(200):
     for env_id in env_ids:
         config = default_config.copy()
         config["track"] = False
@@ -63,9 +64,9 @@ for seed in range(30):
         config["n_iters"] = int(2e3)
         config["p_repeat"] = 0.0
 
-        config["h"] = 8
-        config["w"] = 11
-        config["d"] = 8
+        config["h"] = np.random.randint(4, 20)  # 8
+        config["w"] = np.random.randint(4, 20)  # 11
+        config["d"] = np.random.randint(4, 20)  # 8
 
         config["max_cells"] = 50000
         config["use_reward"] = True
@@ -77,13 +78,14 @@ print("Done!")
 # ------------------------------------------------------------ #
 
 # ------------------------ GENERALIST ------------------------ #
+# 20*48/4/5 = 48 hours
 print("Creating ge_generalist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore_train.parser.parse_args())
 configs = []
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
     for seed in range(1):
-        for strategy in ["best", "random"]:
+        for strategy in ["best", "all", "leaf", "none"]:
             config = copy.deepcopy(default_config)
             config["track"] = True
             config["entity"] = None
@@ -109,6 +111,7 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
             config["n_archives"] = 40
 
             config["strategy"] = strategy
+            config["i_split"] = i_split
 
             configs.append(config.copy())
 command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python goexplore_train.py", out_file=f"ge_generalist.sh")
@@ -116,14 +119,15 @@ print("Done!")
 # ------------------------------------------------------------ #
 
 # ------------------------ FINE TUNING ------------------------ #
+
 print("Creating ge_finetune_ppo.sh ...")
 np.random.seed(0)
 default_config = vars(train.parser.parse_args())
 configs = []
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-    for seed in range(15):
+    for seed in range(10):
         for env_id in env_ids_test:
-            for strategy in ["best", "random"]:
+            for strategy in ["best", "all", "leaf", "none"]:
                 config = copy.deepcopy(default_config)
 
                 config["track"] = True
@@ -152,6 +156,8 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
                 config["ent_coef"] = 0.0  # 0.001
 
                 config["n_steps_rnd_init"] = 0
+
+                config["i_split"] = i_split
 
                 configs.append(config)
 command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python train.py", out_file=f"ge_finetune_ppo.sh")
