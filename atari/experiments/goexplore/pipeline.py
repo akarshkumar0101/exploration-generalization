@@ -44,7 +44,7 @@ for i_split in range(5):
 
 # ------------------------ SPECIALIST ------------------------ #
 # 11200*15/60/80/10 = 3.5 hours
-# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge/ --job_cpu_mem=1000 --max_jobs_cpu=1 --max_jobs_gpu=10 --conda_env=egb
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_specialist/ --job_cpu_mem=1000 --max_jobs_cpu=1 --max_jobs_gpu=10 --conda_env=egb
 print("Creating ge_specialist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore.parser.parse_args())
