@@ -64,9 +64,9 @@ for seed in range(200):
         config["n_iters"] = int(2e3)
         config["p_repeat"] = 0.0
 
-        config["h"] = 8 # np.random.randint(4, 20)  # 8
-        config["w"] = 11 #np.random.randint(4, 20)  # 11
-        config["d"] = 8 # np.random.randint(4, 20)  # 8
+        config["h"] = 8  # np.random.randint(4, 20)  # 8
+        config["w"] = 11  # np.random.randint(4, 20)  # 11
+        config["d"] = 8  # np.random.randint(4, 20)  # 8
 
         config["max_cells"] = 50000
         config["use_reward"] = True
@@ -108,6 +108,7 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
 
             config["lr"] = 1e-4
 
+            config["ge_data_dir"] = f"./data/ge_specialist/"
             config["n_archives"] = 200
 
             config["strategy"] = strategy

@@ -54,6 +54,7 @@ parser.add_argument("--lr", type=float, default=1e-4)
 # parser.add_argument("--lr-decay", type=str, default="none")
 # parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 
+parser.add_argument("--ge_data_dir", type=str, default=None)
 parser.add_argument("--n_archives", type=int, default=1)
 
 
@@ -152,10 +153,12 @@ def make_ge_env(env_id, n_envs):
     return gym.vector.SyncVectorEnv([make_fn for _ in range(n_envs)])
 
 
-def load_env_id2archives(env_ids, n_archives):
+def load_env_id2archives(args):
     env_id2archives = {}
-    for env_id in tqdm(env_ids):
-        env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in sorted(glob.glob(f"./data/goexplore/{env_id}*"))[:n_archives]]
+    for env_id in tqdm(args.env_ids):
+        files = sorted(glob.glob(f"{args.ge_data_dir}/*{env_id}*"))
+        files = files[: args.n_archives]
+        env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in files]
     return env_id2archives
 
 
@@ -165,10 +168,10 @@ def get_env_id2trajs(env_id2archives, strategy="best"):
         env_id2trajs[env_id] = []
         for archive in archives:
             trajs, rets, novelty, is_leaf = archive["traj"], archive["ret"], archive["novelty"], archive["is_leaf"]
-            if strategy == "best":
-                idx = [np.argmax(rets)]
-            elif strategy == "all":
+            if strategy == "all":
                 idx = np.arange(len(trajs))
+            elif strategy == "best":
+                idx = np.array([np.argmax(rets)])
             elif strategy == "leaf":
                 idx = np.where(is_leaf)[0]
             else:
@@ -186,7 +189,7 @@ def main(args):
     torch.manual_seed(args.seed)
 
     print("Loading archives")
-    env_id2archives = load_env_id2archives(args.env_ids, args.n_archives)
+    env_id2archives = load_env_id2archives(args)
     print("Creating trajs")
     env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy)
     for env_id, trajs in env_id2trajs.items():
@@ -197,6 +200,7 @@ def main(args):
     for env_id in args.env_ids:
         make_env_fns.extend([partial(make_ge_env_single, env_id=env_id) for _ in range(args.n_envs)])
     env = MyAsyncVectorEnv(make_env_fns)
+    print("Done creating envs!")
 
     def sample_traj_fn(id):
         env_id = args.env_ids[id // args.n_envs]
@@ -244,11 +248,11 @@ def main(args):
                 data["loss"] = loss.item()
                 data["ppl"] = np.e ** loss.item()
 
-                ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
-                pos = np.arange(len(ppl))
-                table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
-                data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
-
+                if i_iter % (args.n_iters // 100) == 0 and i_update == 0:
+                    ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
+                    pos = np.arange(len(ppl))
+                    table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+                    data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
                 wandb.log(data)
 
         if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
