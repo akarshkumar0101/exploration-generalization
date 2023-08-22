@@ -173,7 +173,7 @@ def get_env_id2trajs(env_id2archives, strategy="best"):
             elif strategy == "best":
                 idx = np.array([np.argmax(rets)])
             elif strategy == "leaf":
-                idx = np.where(is_leaf)[0]
+                idx = np.nonzero(is_leaf)[0]
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
             trajs = trajs[idx]

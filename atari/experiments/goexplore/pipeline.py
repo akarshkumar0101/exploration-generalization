@@ -78,7 +78,8 @@ print("Done!")
 # ------------------------------------------------------------ #
 
 # ------------------------ GENERALIST ------------------------ #
-# 20*48/4/5 = 48 hours
+# 15*48/2/7 = 48 hours
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_generalist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_generalist/ --job_cpu_mem=10000 --job_gpu_mem=10000 --max_jobs_cpu=1 --max_jobs_gpu=1 --max_jobs_node=2 --conda_env=egb
 print("Creating ge_generalist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore_train.parser.parse_args())
