@@ -79,14 +79,14 @@ print("Done!")
 
 # ------------------------ GENERALIST ------------------------ #
 # 15*48/2/7 = 48 hours
-# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_generalist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_generalist/ --job_cpu_mem=10000 --job_gpu_mem=10000 --max_jobs_cpu=1 --max_jobs_gpu=1 --max_jobs_node=2 --conda_env=egb
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_generalist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_generalist/ --job_cpu_mem=10000 --job_gpu_mem=10000 --max_jobs_cpu=1 --max_jobs_gpu=1 --max_jobs_node=1 --conda_env=egb
 print("Creating ge_generalist.sh ...")
 np.random.seed(0)
 default_config = vars(goexplore_train.parser.parse_args())
 configs = []
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
     for seed in range(1):
-        for strategy in ["best", "all", "leaf"]:
+        for strategy in ["best", "leaf"]:
             config = copy.deepcopy(default_config)
             config["track"] = True
             config["entity"] = None
@@ -98,7 +98,7 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
             config["device"] = "cuda"
 
             config["env_ids"] = env_ids_train.tolist()
-            config["n_iters"] = int(1e3)
+            config["n_iters"] = int(1500)
             config["n_envs"] = 4
             config["n_steps"] = 512
             config["batch_size"] = 384
@@ -110,7 +110,7 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
             config["lr"] = 1e-4
 
             config["ge_data_dir"] = f"./data/ge_specialist/"
-            config["n_archives"] = 200
+            config["n_archives"] = 40
 
             config["strategy"] = strategy
             config["i_split"] = i_split

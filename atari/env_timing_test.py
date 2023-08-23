@@ -45,7 +45,7 @@ print()
 
 
 env = envpool.make_gymnasium(
-    f"{env_id}-v5", img_height=210, img_width=210, gray_scale=False, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True
+    f"{env_id}-v5", num_envs=n_envs, img_height=210, img_width=210, gray_scale=False, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True
 )
 start = time.time()
 env.reset()
