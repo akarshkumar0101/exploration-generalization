@@ -129,7 +129,7 @@ configs = []
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
     for seed in range(10):
         for env_id in env_ids_test:
-            for strategy in ["best", "all", "leaf", "none"]:
+            for strategy in ["best", "leaf", "none"]:
                 config = copy.deepcopy(default_config)
 
                 config["track"] = True
@@ -148,7 +148,7 @@ for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_
 
                 config["model"] = "gpt"
                 config["ctx_len"] = 64
-                config["load_agent"] = f"./data/ge_generalist/ge_generalist_{strategy}_{i_split}_{seed%1:04d}"
+                config["load_agent"] = f"./data/ge_generalist/ge_generalist_{strategy}_{i_split}_{seed%1:04d}" if strategy != "none" else None
                 config["save_agent"] = f"./data/{config['project']}/{config['name']}.pt"
                 config["strategy"] = strategy
 
