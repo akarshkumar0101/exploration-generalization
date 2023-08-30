@@ -105,6 +105,8 @@ def load_teacher(args, env):
 
 def main(args):
     print("Running PPO/KLBC with args: ", args)
+    a = torch.randn(100).to(args.device)
+    print(f"Testing device: {args.device}, {a.mean().item()}")
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
