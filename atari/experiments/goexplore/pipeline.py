@@ -122,13 +122,13 @@ print("Done!")
 
 # ------------------------ FINE TUNING ------------------------ #
 
-# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_finetune_ppo.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_finetune_ppo/ --job_cpu_mem=1000 --job_gpu_mem=4000 --max_jobs_cpu=1 --max_jobs_gpu=3 --max_jobs_node=20 --conda_env=egb
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_finetune_ppo.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_finetune_ppo/ --job_cpu_mem=1000 --job_gpu_mem=4000 --max_jobs_cpu=1 --max_jobs_gpu=2 --max_jobs_node=30 --conda_env=egb
 print("Creating ge_finetune_ppo.sh ...")
 np.random.seed(0)
 default_config = vars(train.parser.parse_args())
 configs = []
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-    if i_split == 4: # temporary
+    if i_split == 4:  # temporary
         continue
     for seed in range(10):
         for env_id in env_ids_test:
