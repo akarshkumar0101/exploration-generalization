@@ -134,6 +134,10 @@ def main(args):
     print("Creating buffer...")
     buffer = Buffer(env, agent, args.n_steps, device="cpu")
 
+    print("Warming up buffer...")
+    for i_iter in tqdm(range(40)):
+        buffer.collect()
+
     start_time = time.time()
     pbar_iters = tqdm(total=args.n_iters)
     pbar_steps = tqdm(total=args.n_steps)
