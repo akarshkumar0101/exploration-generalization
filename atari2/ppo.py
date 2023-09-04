@@ -135,7 +135,7 @@ def main(args):
     buffer = Buffer(env, agent, args.n_steps, device="cpu")
 
     print("Warming up buffer...")
-    for i_iter in tqdm(range(40)):
+    for i_iter in tqdm(range(40), leave=False):
         buffer.collect()
 
     start_time = time.time()
@@ -186,6 +186,7 @@ def main(args):
             data["charts/env_steps"] = env_steps
             sps = int(env_steps / (time.time() - start_time))
             data["charts/SPS"] = sps
+            print(sps)
         if args.track and viz_fast:
             wandb.log(data)
         pbar_iters.update(1)
