@@ -35,7 +35,7 @@ parser.add_argument("--env_ids", type=str, nargs="+", default=["Pong"])
 parser.add_argument("--n_iters", type=myint, default=10000)
 parser.add_argument("--n_envs", type=int, default=8)
 parser.add_argument("--n_steps", type=int, default=128)
-parser.add_argument("--batch_size", type=int, default=4096)
+parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--n_updates", type=int, default=16)
 
 parser.add_argument("--model", type=str, default="stacked_cnn")
@@ -172,7 +172,6 @@ def main(args):
 
         data = {}
         if viz_fast:
-            print("logging! ", i_iter, args.n_iters)
             for envi in envs:
                 data["charts/avg_episodic_return"] = np.mean(envi.traj_rets)
                 data["charts/episodic_length"] = np.mean(envi.traj_lens)
