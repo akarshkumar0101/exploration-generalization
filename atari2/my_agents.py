@@ -53,10 +53,14 @@ class StackedCNNAgent(nn.Module):
         return logits, val
 
 
-def create_agent(model_name, n_acts, ctx_len=4):
+def make_agent(model_name, n_acts=18):
+    model_name, ctx_len = model_name.split("_")
+    ctx_len = int(ctx_len)
     if model_name == "random":
         return RandomAgent(n_acts, ctx_len)
-    elif model_name == "stacked_cnn":
+    elif model_name == "cnn":
         return StackedCNNAgent(n_acts, ctx_len)
+    elif model_name == "transformer":
+        return None
     else:
         raise ValueError(f"Unknown model name {model_name}")

@@ -21,13 +21,25 @@ mybool = lambda x: x.lower() == "true"
 myint = lambda x: int(float(x))
 
 parser = argparse.ArgumentParser()
+# Wandb arguments
 parser.add_argument("--track", type=mybool, default=False)
 parser.add_argument("--entity", type=mystr, default=None)
 parser.add_argument("--project", type=mystr, default=None)
 parser.add_argument("--name", type=mystr, default=None)
 
+# General arguments
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0)
+
+# Model arguments
+parser.add_argument("--model", type=str, default="cnn-4")
+parser.add_argument("--load_ckpt", type=mystr, default=None)
+parser.add_argument("--save_ckpt", type=mystr, default=None)
+parser.add_argument("--n_ckpts", type=int, default=1)
+
+# Optimizer arguments
+parser.add_argument("--lr", type=float, default=2.5e-4)
+parser.add_argument("--clip_grad_norm", type=float, default=1.0)
 
 # Algorithm arguments
 parser.add_argument("--env_ids", type=str, nargs="+", default=["Pong"])
@@ -37,18 +49,7 @@ parser.add_argument("--n_steps", type=int, default=128)
 parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--n_updates", type=int, default=16)
 
-parser.add_argument("--model", type=str, default="stacked_cnn")
-parser.add_argument("--ctx_len", type=int, default=4)
-# parser.add_argument("--load_agent_history", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--load_agent", type=nonestr, help="file to load the agent from")
-# parser.add_argument("--save_agent", type=nonestr, help="file to periodically save the agent to")
-# parser.add_argument("--full_action_space", type=lambda x: bool(strtobool(x)), default=True)
-
-parser.add_argument("--lr", type=float, default=2.5e-4)
-# parser.add_argument("--lr_warmup", type=lambda x: bool(strtobool(x)), default=True)
-# parser.add_argument("--lr_decay", type=str, default="none")
-parser.add_argument("--max_grad_norm", type=float, default=1.0)
-
+# PPO arguments
 parser.add_argument("--episodic_life", type=mybool, default=True)
 parser.add_argument("--norm_rew", type=mybool, default=True)
 parser.add_argument("--gamma", type=float, default=0.99)
@@ -59,14 +60,6 @@ parser.add_argument("--clip_coef", type=float, default=0.1)
 parser.add_argument("--clip_vloss", type=lambda x: mybool, default=True)
 parser.add_argument("--vf_coef", type=float, default=0.5)
 # parser.add_argument("--max_kl_div", type=lambda x: None if x.lower == "none" else float(x), default=None)
-
-# parser.add_argument("--pre_obj", type=str, default="ext")
-# parser.add_argument("--train_klbc", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--model_teacher", type=str, default="cnn")
-# parser.add_argument("--ctx_len_teacher", type=int, default=4)
-# parser.add_argument("--load_agent_teacher", type=lambda x: None if x.lower() == "none" else x, default=None)
-# parser.add_argument("--teacher_last_k", type=int, default=1)
-# parser.add_argument("--pre_teacher_last_k", type=int, default=1)
 
 
 def parse_args(*args, **kwargs):
@@ -103,6 +96,19 @@ def calc_ppo_value_loss(val, val_old, ret, clip_coef=0.1):
     return loss_v
 
 
+def make_env(args):
+    envs = []
+    for env_id in args.env_ids:
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, reward_clip=True, seed=args.seed, full_action_space=True)
+        if args.norm_rew:
+            envi = gym.wrappers.NormalizeReward(envi, gamma=args.gamma)
+        envi = RecordEpisodeStatistics(envi, deque_size=32)
+        envi = ToTensor(envi, device=args.device)
+        envs.append(envi)
+    env = ConcatEnv(envs)
+    return env
+
+
 def main(args):
     print("Running PPO with args: ", args)
     print("Starting wandb...")
@@ -110,24 +116,21 @@ def main(args):
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
     print("Seeding...")
-    # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
     print("Creating environment...")
-    envs = []
-    for env_id in args.env_ids:
-        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, reward_clip=True, seed=args.seed, full_action_space=True)
-        envi = gym.wrappers.NormalizeReward(envi, gamma=args.gamma)
-        envi = RecordEpisodeStatistics(envi, deque_size=32)
-        envi = ToTensor(envi, device=args.device)
-        envs.append(envi)
-    env = ConcatEnv(envs)
+    env = make_env(args)
 
     print("Creating agent...")
-    agent = create_agent(args.model, 18, args.ctx_len).to(args.device)
+    agent = make_agent(args.model, 18, args.ctx_len).to(args.device)
     opt = torch.optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
+    if args.load_ckpt is not None:
+        print("Loading checkpoint...")
+        ckpt = torch.load(args.load_ckpt, map_location=args.device)
+        agent.load_state_dict(ckpt["agent"])
+        opt.load_state_dict(ckpt["opt"])
 
     print("Creating buffer...")
     buffer = Buffer(env, agent, args.n_steps, device=args.device)
@@ -137,16 +140,11 @@ def main(args):
         buffer.collect()
 
     start_time = time.time()
-    pbar_iters = tqdm(total=args.n_iters)
-    pbar_steps = tqdm(total=args.n_steps)
-    pbar_updates = tqdm(total=args.n_updates)
-
-    for i_iter in range(args.n_iters):
-        pbar_steps.reset()
-        buffer.collect(pbar_steps)
+    print("Starting learning...")
+    for i_iter in tqdm(range(args.n_iters)):
+        buffer.collect()
         buffer.calc_gae(gamma=args.gamma, gae_lambda=args.gae_lambda, episodic=True)
 
-        pbar_updates.reset()
         for _ in range(args.n_updates):
             batch = buffer.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
 
@@ -163,18 +161,22 @@ def main(args):
 
             opt.zero_grad()
             loss.backward()
-            nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+            nn.utils.clip_grad_norm_(agent.parameters(), args.clip_grad_norm)
             opt.step()
-            pbar_updates.update(1)
+
+        if args.save_ckpt is not None and args.n_ckpts > 0 and (i_iter + 1) % (args.n_iters // args.n_ckpts) == 0:
+            print(f"Saving Checkpoint at {i_iter}/{args.n_iters}")
+            file = args.save_ckpt.format(i_iter=i_iter)
+            ckpt = dict(i_iter=i_iter, agent=agent, opt=opt)
+            torch.save(ckpt, file)
 
         viz_slow = i_iter % np.clip(args.n_iters // 10, 1, None) == 0
         viz_midd = i_iter % np.clip(args.n_iters // 100, 1, None) == 0 or viz_slow
         viz_fast = i_iter % np.clip(args.n_iters // 1000, 1, None) == 0 or viz_midd
-        to_np = lambda x: x.detach().cpu().numpy()
 
         data = {}
         if viz_fast:
-            for envi in envs:
+            for envi in env.envs:
                 data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
                 data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
                 low, high = hns.atari_human_normalized_scores[envi.env_id]
@@ -184,11 +186,8 @@ def main(args):
             data["env_steps"] = env_steps
             sps = int(env_steps / (time.time() - start_time))
             data["meta/SPS"] = sps
-            # print()
-            print(sps)
         if args.track and viz_fast:
             wandb.log(data)
-        pbar_iters.update(1)
 
 
 if __name__ == "__main__":
