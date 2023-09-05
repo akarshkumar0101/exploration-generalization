@@ -124,7 +124,7 @@ def main(args):
     env = make_env(args)
 
     print("Creating agent...")
-    agent = make_agent(args.model, 18, args.ctx_len).to(args.device)
+    agent = make_agent(args.model, 18).to(args.device)
     opt = torch.optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
     if args.load_ckpt is not None:
         print("Loading checkpoint...")
