@@ -4,7 +4,6 @@ import os
 import random
 import time
 
-import envpool
 import gym
 import numpy as np
 import torch
@@ -115,24 +114,23 @@ def main(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.use_deterministic_algorithms(True)
 
     print("Creating environment...")
     envs = []
     for env_id in args.env_ids:
-        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, seed=args.seed, full_action_space=True)
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, reward_clip=True, seed=args.seed, full_action_space=True)
         envi = gym.wrappers.NormalizeReward(envi, gamma=args.gamma)
-        envi = RecordEpisodeStatistics(envi)
-        envi = ToTensor(envi)
+        envi = RecordEpisodeStatistics(envi, deque_size=32)
+        envi = ToTensor(envi, device=args.device)
         envs.append(envi)
     env = ConcatEnv(envs)
 
     print("Creating agent...")
-    agent = create_agent(args.model, 18, args.ctx_len)
+    agent = create_agent(args.model, 18, args.ctx_len).to(args.device)
     opt = torch.optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
 
     print("Creating buffer...")
-    buffer = Buffer(env, agent, args.n_steps, device="cpu")
+    buffer = Buffer(env, agent, args.n_steps, device=args.device)
 
     print("Warming up buffer...")
     for i_iter in tqdm(range(40), leave=False):
@@ -177,15 +175,16 @@ def main(args):
         data = {}
         if viz_fast:
             for envi in envs:
-                data["charts/avg_episodic_return"] = np.mean(envi.traj_rets)
-                data["charts/episodic_length"] = np.mean(envi.traj_lens)
+                data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+                data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
                 low, high = hns.atari_human_normalized_scores[envi.env_id]
                 data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
 
-            env_steps = len(args.env_ids) * args.n_steps * args.n_envs * i_iter
-            data["charts/env_steps"] = env_steps
+            env_steps = len(args.env_ids) * args.n_steps * args.n_envs * (i_iter + 1)
+            data["env_steps"] = env_steps
             sps = int(env_steps / (time.time() - start_time))
-            data["charts/SPS"] = sps
+            data["meta/SPS"] = sps
+            # print()
             print(sps)
         if args.track and viz_fast:
             wandb.log(data)
