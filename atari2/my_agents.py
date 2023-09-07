@@ -189,6 +189,9 @@ class Config:
 class TransformerAgent(nn.Module):
     def __init__(self, n_acts, ctx_len, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True):
         super().__init__()
+        self.train_per_token = True
+        self.ctx_len = ctx_len
+
         self.config = Config(n_acts=n_acts, ctx_len=ctx_len, n_layers=n_layers, n_heads=n_heads, n_embd=n_embd, dropout=dropout, bias=bias)
 
         self.encode_step = nn.Embedding(self.config.ctx_len, self.config.n_embd)
