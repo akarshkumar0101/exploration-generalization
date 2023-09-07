@@ -184,8 +184,10 @@ def main(args):
                 low, high = hns.atari_human_normalized_scores[envi.env_id]
                 data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
 
-            env_steps = len(args.env_ids) * args.n_steps * args.n_envs * (i_iter + 1)
+            env_steps = (i_iter + 1) * len(args.env_ids) * args.n_envs * args.n_steps
+            grad_steps = (i_iter + 1) * args.n_updates
             data["env_steps"] = env_steps
+            data["grad_steps"] = grad_steps
             sps = int(env_steps / (time.time() - start_time))
             data["meta/SPS"] = sps
         if args.track and viz_fast:
