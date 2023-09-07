@@ -74,7 +74,7 @@ for seed in range(1):
         config["device"] = "cuda"
         config["seed"] = seed
 
-        config["model"] = "cnn-4"
+        config["model"] = "cnn_4"
         config["load_ckpt"] = None
         config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt_{{i_iter}}.pt"
         config["n_ckpts"] = 8
@@ -108,7 +108,7 @@ for seed in range(1):
             config["device"] = "cuda"
             config["seed"] = seed
 
-            config["model"] = "trans-64"
+            config["model"] = "trans_64"
             config["load_ckpt"] = None
             config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt_{{i_iter}}.pt"
             config["n_ckpts"] = 1
@@ -122,7 +122,7 @@ for seed in range(1):
             config["batch_size"] = 256
             config["n_updates"] = 16
 
-            config["model_teacher"] = "cnn-4"
+            config["model_teacher"] = "cnn_4"
 
             if strategy == "final_ckpt":
                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
@@ -155,7 +155,7 @@ for seed in range(1):
                 config["device"] = "cuda"
                 config["seed"] = seed
 
-                config["model"] = "trans-64"
+                config["model"] = "trans_64"
                 if strategy is not None:
                     config["load_ckpt"] = f"./data/egb_generalist/{strategy}_{i_split}_{seed:04d}/ckpt_9999.pt"
                 config["save_ckpt"] = None

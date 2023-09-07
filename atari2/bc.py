@@ -32,7 +32,7 @@ parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0)
 
 # Model arguments
-parser.add_argument("--model", type=str, default="cnn-4")
+parser.add_argument("--model", type=str, default="cnn_4")
 parser.add_argument("--load_ckpt", type=mystr, default=None)
 parser.add_argument("--save_ckpt", type=mystr, default=None)
 parser.add_argument("--n_ckpts", type=int, default=1)
