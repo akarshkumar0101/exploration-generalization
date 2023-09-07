@@ -5,12 +5,12 @@ import random
 import time
 
 import gym
+import hns
 import numpy as np
 import torch
 from my_agents import *
 from my_buffers import *
 from my_envs import *
-import hns
 from torch import nn
 from tqdm.auto import tqdm
 

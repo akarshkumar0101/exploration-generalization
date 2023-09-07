@@ -5,12 +5,12 @@ import random
 import time
 
 import gym
+import hns
 import numpy as np
 import torch
 from my_agents import *
 from my_buffers import *
 from my_envs import *
-import hns
 from torch import nn
 from tqdm.auto import tqdm
 
@@ -50,11 +50,9 @@ parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--n_updates", type=int, default=16)
 
 # BC arguments
-parser.add_argument("--ent_coef", type=float, default=0.001)
+parser.add_argument("--ent_coef", type=float, default=0.000)
 parser.add_argument("--model-teacher", type=str, default="cnn-4")
 parser.add_argument("--load-ckpt-teacher", type=str, nargs="+", default=None)
-
-parser.add_argument("--run_agent", type=mybool, default=True)
 
 
 def parse_args(*args, **kwargs):
