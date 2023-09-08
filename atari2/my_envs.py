@@ -47,7 +47,10 @@ class MyEnvpool(gym.Env):
         return obs, info
 
     def reset_subenvs(self, ids):
-        return self.env.reset(ids)
+        obs, info = self.env.reset(ids)
+        info["players"] = info["players"]["env_id"]
+        info["terminated"] = info["terminated"].astype(bool)
+        return obs, info
 
     def step(self, action):
         self.send(action)
