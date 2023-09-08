@@ -73,7 +73,7 @@ class GEBuffer(Buffer):
 
         shape = tuple(self.data["obs"].shape)
         self.data["obs"] = np.zeros(shape, dtype=np.uint8)
-        self.data["act"] = np.zeros(shape[:2], dtype=np.long)
+        self.data["act"] = np.zeros(shape[:2], dtype=np.int)
 
     def reset_with_newtraj(self, ids):
         assert len(ids) > 0
