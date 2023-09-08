@@ -93,7 +93,7 @@ class GEBuffer(Buffer):
             self.data["obs"][:, t] = self.obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
             self.i_locs += 1
-            self.data["obs"][:, t] = action
+            self.data["act"][:, t] = action
             self.obs, _, term, trunc, _ = self.env.step(action)
             assert not any(term) and not any(trunc), "found a done in the ge buffer"
 
