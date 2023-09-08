@@ -65,7 +65,7 @@ def parse_args(*args, **kwargs):
 class GEBuffer(Buffer):
     def __init__(self, env, n_steps, sample_traj_fn, device=None):
         # TODO mange devices
-        super().__init__(env, n_steps, device="cpu")
+        super().__init__(env, None, n_steps, device="cpu")
         self.trajs = [None for _ in range(self.env.num_envs)]
         self.traj_lens = np.zeros(self.env.num_envs, dtype=int)
         self.i_locs = np.zeros(self.env.num_envs, dtype=int)
