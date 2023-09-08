@@ -71,13 +71,17 @@ class GEBuffer(Buffer):
         self.i_locs = np.zeros(self.env.num_envs, dtype=int)
         self.sample_traj_fn = sample_traj_fn
 
+        shape = tuple(self.data["obs"].shape)
+        self.data["obs"] = np.zeros(shape, dtype=np.uint8)
+        self.data["act"] = np.zeros(shape[:2], dtype=np.long)
+
     def reset_with_newtraj(self, ids):
         assert len(ids) > 0
         for id in ids:
             self.trajs[id] = self.sample_traj_fn(id)
             self.traj_lens[id] = len(self.trajs[id])
             self.i_locs[id] = 0
-        obs, info = self.env.reset_subenvs(ids)#, seed=[0 for _ in ids])
+        obs, info = self.env.reset_subenvs(ids)  # , seed=[0 for _ in ids])
         # assert np.array_equal(self.env.envs[id].ale.getRAM(), self.ram_start), "env reset to seed=0"
         return obs
 
