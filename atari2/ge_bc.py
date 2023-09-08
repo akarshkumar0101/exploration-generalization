@@ -72,6 +72,7 @@ class GEBuffer(Buffer):
         self.sample_traj_fn = sample_traj_fn
 
     def reset_with_newtraj(self, ids):
+        assert len(ids) > 0
         for id in ids:
             self.trajs[id] = self.sample_traj_fn(id)
             self.traj_lens[id] = len(self.trajs[id])
@@ -83,7 +84,7 @@ class GEBuffer(Buffer):
     def gecollect(self, pbar=None):
         if self.first_collect:
             self.first_collect = False
-            self.obs = self.reset_with_newtraj(range(self.env.num_envs))
+            self.obs = self.reset_with_newtraj(np.arange(self.env.num_envs))
         for t in range(self.n_steps):
             self.data["obs"][:, t] = self.obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
