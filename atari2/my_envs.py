@@ -30,31 +30,6 @@ class RecordEpisodeStatistics(gym.Wrapper):
         return obs, rew, term, trunc, info
 
 
-class ConcatEnv:
-    def __init__(self, envs):
-        self.envs = envs
-        self.n_envs = self.num_envs = sum([env.num_envs for env in envs])
-        self.single_observation_space = envs[0].single_observation_space
-        self.single_action_space = envs[0].single_action_space
-        self.action_space = gym.spaces.MultiDiscrete([envs[0].single_action_space.n for _ in range(self.num_envs)])
-
-    def reset(self):
-        obss, infos = zip(*[env.reset() for env in self.envs])  # lists
-        obs = rearrange(list(obss), "n b ... -> (n b) ...")
-        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
-        return obs, info
-
-    def step(self, action):
-        action = rearrange(action, "(n b) ... -> n b ...", n=len(self.envs))
-        obss, rews, terms, truncs, infos = zip(*[env.step(a) for env, a in zip(self.envs, action)])
-        obs = rearrange(list(obss), "n b ... -> (n b) ...")
-        rew = rearrange(list(rews), "n b ... -> (n b) ...")
-        term = rearrange(list(terms), "n b ... -> (n b) ...")
-        trunc = rearrange(list(truncs), "n b ... -> (n b) ...")
-        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
-        return obs, rew, term, trunc, info
-
-
 class MyEnvpool(gym.Env):
     def __init__(self, env_id, *args, **kwargs):
         self.env = envpool.make_gymnasium(env_id, *args, **kwargs)
@@ -75,18 +50,73 @@ class MyEnvpool(gym.Env):
         return self.env.reset(ids)
 
     def step(self, action):
+        self.send(action)
+        return self.recv()
+
+    def send(self, action):
         if isinstance(action, torch.Tensor):
             action = action.cpu().numpy()
         elif isinstance(action, list):
             action = np.array(action)
-        obs, rew, term, trunc, info = self.env.step(action)
+        self.env.send(action)
+
+    def recv(self, *args, **kwargs):
+        obs, rew, term, trunc, info = self.env.recv(*args, **kwargs)
         info["players"] = info["players"]["env_id"]
         info["terminated"] = info["terminated"].astype(bool)
         return obs, rew, term, trunc, info
 
 
+class ConcatEnv:
+    def __init__(self, envs):
+        self.envs = envs
+        self.n_envs = self.num_envs = sum([env.num_envs for env in envs])
+        self.single_observation_space = envs[0].single_observation_space
+        self.single_action_space = envs[0].single_action_space
+        self.action_space = gym.spaces.MultiDiscrete([envs[0].single_action_space.n for _ in range(self.num_envs)])
+
+    def reset(self):
+        obss, infos = zip(*[env.reset() for env in self.envs])  # lists
+        obs = rearrange(list(obss), "n b ... -> (n b) ...")
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
+        return obs, info
+
+    def step(self, action, async_=True):
+        action = rearrange(action, "(n b) ... -> n b ...", n=len(self.envs))
+        if async_:
+            [env.send(a) for env, a in zip(self.envs, action)]
+            obss, rews, terms, truncs, infos = zip(*[env.recv() for env, a in zip(self.envs, action)])
+        else:
+            obss, rews, terms, truncs, infos = zip(*[env.step(a) for env, a in zip(self.envs, action)])
+        obs = rearrange(list(obss), "n b ... -> (n b) ...")
+        rew = rearrange(list(rews), "n b ... -> (n b) ...")
+        term = rearrange(list(terms), "n b ... -> (n b) ...")
+        trunc = rearrange(list(truncs), "n b ... -> (n b) ...")
+        info = {k: rearrange([info[k] for info in infos], "n b ... -> (n b) ...") for k in infos[0].keys()}
+        return obs, rew, term, trunc, info
+
+    def reset_subenvs(self, ids):
+        i_env = ids // len(self.envs)
+        i_subenv = ids % len(self.envs)
+
+        obss, infos = [], []
+        for i, env in enumerate(self.envs):
+            ids_ = i_subenv[i_env == i]
+            if len(ids_) > 0:
+                obs, info = env.reset_subenvs(ids_)
+                obss.append(obs)
+                infos.append(info)
+        if isinstance(obs, np.ndarray):
+            obs = np.concatenate(obss)
+            info = {k: np.concatenate([info[k] for info in infos]) for k in infos[0].keys()}
+        else:
+            obs = torch.cat(obss)
+            info = {k: torch.cat([info[k] for info in infos]) for k in infos[0].keys()}
+        return obs, info
+
+
 # def make_concat_env(env_ids, *args, **kwargs):
-# return ConcatEnv([MyEnvpool(env_id, *args, **kwargs) for env_id in env_ids]
+#     return ConcatEnv([MyEnvpool(env_id, *args, **kwargs) for env_id in env_ids])
 
 
 class ToTensor(gym.Wrapper):

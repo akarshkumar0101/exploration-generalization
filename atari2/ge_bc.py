@@ -8,23 +8,19 @@ from collections import defaultdict
 from distutils.util import strtobool
 from functools import partial
 
-import agent_atari
-import atari_data
-import buffers
 import gymnasium as gym
-import normalize
 import numpy as np
 import timers
 import torch
 import torchinfo
-import utils
 import wandb
-from buffers import Buffer, MultiBuffer
 from einops import rearrange, repeat
-from env_atari import MyEnvpool, ToTensor, make_concat_env
 from torch.distributions import Categorical
 from torch.nn.functional import cross_entropy
 from tqdm.auto import tqdm
+from my_envs import *
+
+from my_buffers import Buffer
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
@@ -66,50 +62,14 @@ def parse_args(*args, **kwargs):
     return args
 
 
-class MySyncVectorEnv(gym.vector.SyncVectorEnv):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def reset_subenvs(self, ids, seed=None):
-        old_envs, old_obs, old_nenvs = self.envs, self.observations, self.num_envs
-        self.envs = [self.envs[i] for i in ids]
-        self.observations = self.observations[ids]
-        self.num_envs = len(ids)
-        self.reset_async(seed=seed)
-        obs, info = self.reset_wait(seed=seed)
-        self.envs, self.observations, self.num_envs = old_envs, old_obs, old_nenvs
-        return obs, info
-
-
-class MyAsyncVectorEnv(gym.vector.AsyncVectorEnv):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def reset_subenvs(self, ids, seed=None):
-        old_pipes, old_obs, old_nenvs = self.parent_pipes, self.observations, self.num_envs
-        self.parent_pipes = [self.parent_pipes[i] for i in ids]
-        self.observations = self.observations[ids]
-        self.num_envs = len(ids)
-        self.reset_async(seed=seed)
-        obs, info = self.reset_wait(seed=seed)
-        self.parent_pipes, self.observations, self.num_envs = old_pipes, old_obs, old_nenvs
-        # this line long time to debug. shared_memory=False works as expected. if True(default), then obs is a shared memory object
-        return (self.observations[ids], info) if self.shared_memory else (obs, info)
-
-
 class GEBuffer(Buffer):
     def __init__(self, env, n_steps, sample_traj_fn, device=None):
-        super().__init__(env, n_steps, device=device)
+        # TODO mange devices
+        super().__init__(env, n_steps, device="cpu")
         self.trajs = [None for _ in range(self.env.num_envs)]
         self.traj_lens = np.zeros(self.env.num_envs, dtype=int)
         self.i_locs = np.zeros(self.env.num_envs, dtype=int)
         self.sample_traj_fn = sample_traj_fn
-
-        self.buf_obs = np.zeros((env.num_envs, n_steps, 84, 84), dtype=np.uint8)
-        self.buf_act = np.zeros((env.num_envs, n_steps), dtype=np.uint8)
-        self.next_obs = np.zeros_like(env.observation_space.sample())
-        # env.envs[0].reset(seed=0)
-        # self.ram_start = env.envs[0].ale.getRAM().copy()
 
     def reset_with_newtraj(self, ids):
         for id in ids:
@@ -123,41 +83,37 @@ class GEBuffer(Buffer):
     def gecollect(self, pbar=None):
         if self.first_collect:
             self.first_collect = False
-            self.next_obs = self.reset_with_newtraj(range(self.env.num_envs))
+            self.obs = self.reset_with_newtraj(range(self.env.num_envs))
         for t in range(self.n_steps):
-            self.buf_obs[:, t] = self.next_obs
+            self.data["obs"][:, t] = self.obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
             self.i_locs += 1
-            self.buf_act[:, t] = action
-            self.next_obs, _, term, trunc, _ = self.env.step(action)
+            self.data["obs"][:, t] = action
+            self.obs, _, term, trunc, _ = self.env.step(action)
             assert not any(term) and not any(trunc), "found a done in the ge buffer"
 
             ids_reset = np.where(self.i_locs >= self.traj_lens)[0]
             if len(ids_reset) > 0:
-                self.next_obs[ids_reset] = self.reset_with_newtraj(ids_reset)
+                self.obs[ids_reset] = self.reset_with_newtraj(ids_reset)
             if pbar is not None:
                 pbar.update(1)
-        self.obss[:, :] = torch.from_numpy(self.buf_obs).to(self.device)
-        self.acts[:, :] = torch.from_numpy(self.buf_act).to(self.device)
 
 
-def make_ge_env_single(env_id):
-    env = gym.make(f"ALE/{env_id}-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
-    env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=84, grayscale_obs=True)
-    env.getRAM = lambda: env.ale.getRAM()
+def make_env(args):
+    envs = []
+    for env_id in args.env_ids:
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, noop_max=1, use_fire_reset=False, episodic_life=True, reward_clip=False, seed=args.seed, full_action_space=True)
+        # envi = ToTensor(envi, device=args.device)
+        envs.append(envi)
+    env = ConcatEnv(envs)
     return env
 
 
-def make_ge_env(env_id, n_envs):
-    make_fn = partial(make_ge_env_single, env_id=env_id)
-    return gym.vector.SyncVectorEnv([make_fn for _ in range(n_envs)])
-
-
-def load_env_id2archives(args):
+def load_env_id2archives(env_ids, ge_data_dir, n_archives):
     env_id2archives = {}
-    for env_id in tqdm(args.env_ids):
-        files = sorted(glob.glob(f"{args.ge_data_dir}/*{env_id}*"))
-        files = files[: args.n_archives]
+    for env_id in tqdm(env_ids):
+        files = sorted(glob.glob(f"{ge_data_dir}/*{env_id}*"))
+        files = files[:n_archives]
         env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in files]
     return env_id2archives
 
@@ -189,17 +145,14 @@ def main(args):
     torch.manual_seed(args.seed)
 
     print("Loading archives")
-    env_id2archives = load_env_id2archives(args)
+    env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
     print("Creating trajs")
     env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy)
     for env_id, trajs in env_id2trajs.items():
         print(f"env_id: {env_id}, #trajs: {len(trajs)}")
 
     print("Creating envs")
-    make_env_fns = []
-    for env_id in args.env_ids:
-        make_env_fns.extend([partial(make_ge_env_single, env_id=env_id) for _ in range(args.n_envs)])
-    env = MyAsyncVectorEnv(make_env_fns)
+    env = make_env(args)
     print("Done creating envs!")
 
     def sample_traj_fn(id):
@@ -209,56 +162,58 @@ def main(args):
 
     print("Creating buffer")
     buf = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
+    for _ in tqdm(range(100)):
+        buf.gecollect()
 
-    print("Creating agent")
-    agent = utils.create_agent("gpt", 18, args.ctx_len, load_agent=None, device=args.device)
-    opt = agent.create_optimizer(lr=args.lr)
+    # print("Creating agent")
+    # agent = utils.create_agent("gpt", 18, args.ctx_len, load_agent=None, device=args.device)
+    # opt = agent.create_optimizer(lr=args.lr)
 
-    print("Starting learning")
-    pbar_iters = tqdm(total=args.n_iters)
-    pbar_steps = tqdm(total=args.n_steps)
-    pbar_updates = tqdm(total=args.n_updates)
-    for i_iter in range(args.n_iters):
-        pbar_iters.update(1)
+    # print("Starting learning")
+    # pbar_iters = tqdm(total=args.n_iters)
+    # pbar_steps = tqdm(total=args.n_steps)
+    # pbar_updates = tqdm(total=args.n_updates)
+    # for i_iter in range(args.n_iters):
+    #     pbar_iters.update(1)
 
-        pbar_steps.reset(total=args.n_steps)
-        buf.gecollect(pbar=pbar_steps)
+    #     pbar_steps.reset(total=args.n_steps)
+    #     buf.gecollect(pbar=pbar_steps)
 
-        pbar_updates.reset(total=args.n_updates)
-        for i_update in range(args.n_updates):
-            pbar_updates.update(1)
-            assert args.batch_size % (len(args.env_ids) * args.n_envs) == 0
-            batch = buf.generate_batch(args.batch_size, args.ctx_len)
-            obs, act = batch["obs"], batch["act"]
-            obs = obs[:, :, None, :, :]
-            logits, values = agent(None, obs, act, None)
+    #     pbar_updates.reset(total=args.n_updates)
+    #     for i_update in range(args.n_updates):
+    #         pbar_updates.update(1)
+    #         assert args.batch_size % (len(args.env_ids) * args.n_envs) == 0
+    #         batch = buf.generate_batch(args.batch_size, args.ctx_len)
+    #         obs, act = batch["obs"], batch["act"]
+    #         obs = obs[:, :, None, :, :]
+    #         logits, values = agent(None, obs, act, None)
 
-            loss_bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), reduction="none")
-            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=args.batch_size)
-            loss = loss_bc.mean()
+    #         loss_bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), reduction="none")
+    #         loss_bc = rearrange(loss_bc, "(b t) -> b t", b=args.batch_size)
+    #         loss = loss_bc.mean()
 
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            # if i % 50 == 0:
-            # print(np.e ** loss.item())
+    #         opt.zero_grad()
+    #         loss.backward()
+    #         opt.step()
+    #         # if i % 50 == 0:
+    #         # print(np.e ** loss.item())
 
-            if args.track:
-                data = {}
-                data["loss"] = loss.item()
-                data["ppl"] = np.e ** loss.item()
+    #         if args.track:
+    #             data = {}
+    #             data["loss"] = loss.item()
+    #             data["ppl"] = np.e ** loss.item()
 
-                if i_iter % (args.n_iters // 100) == 0 and i_update == 0:
-                    ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
-                    pos = np.arange(len(ppl))
-                    table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
-                    data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
-                wandb.log(data)
+    #             if i_iter % (args.n_iters // 100) == 0 and i_update == 0:
+    #                 ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
+    #                 pos = np.arange(len(ppl))
+    #                 table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+    #                 data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
+    #             wandb.log(data)
 
-        if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
-            save_agent = args.save_agent.format(**locals())
-            os.makedirs(os.path.dirname(save_agent), exist_ok=True)
-            torch.save(agent.state_dict(), save_agent)
+    #     if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
+    #         save_agent = args.save_agent.format(**locals())
+    #         os.makedirs(os.path.dirname(save_agent), exist_ok=True)
+    #         torch.save(agent.state_dict(), save_agent)
 
 
 # data["trajs"] = np.array([np.array(cell.trajectory, dtype=np.uint8) for cell in archive.values()], dtype=object)
@@ -268,6 +223,7 @@ def main(args):
 
 if __name__ == "__main__":
     main(parse_args())
+
 
 # TODO do goexplore runs with different seeds
 
