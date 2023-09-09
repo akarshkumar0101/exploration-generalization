@@ -27,15 +27,12 @@ parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False)
 parser.add_argument("--entity", type=str, default=None)
 parser.add_argument("--project", type=str, default=None)
 parser.add_argument("--name", type=str, default=None)
-# parser.add_argument("--log-video", type=lambda x: bool(strtobool(x)), default=False)
-# parser.add_argument("--log-hist", type=lambda x: bool(strtobool(x)), default=False)
 
 parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--seed", type=int, default=0)
 
 # Algorithm arguments
 parser.add_argument("--env_ids", type=str, nargs="+", default=["MontezumaRevenge"])
-parser.add_argument("--strategy", type=str, default="best")
 parser.add_argument("--n_iters", type=lambda x: int(float(x)), default=int(1e3))
 parser.add_argument("--n_envs", type=int, default=4)
 parser.add_argument("--n_steps", type=int, default=512)
@@ -46,12 +43,12 @@ parser.add_argument("--ctx_len", type=int, default=64)
 parser.add_argument("--save_agent", type=lambda x: None if x.lower() == "none" else x, default=None)
 
 parser.add_argument("--lr", type=float, default=1e-4)
-# parser.add_argument("--lr-warmup", type=lambda x: bool(strtobool(x)), default=True)
-# parser.add_argument("--lr-decay", type=str, default="none")
-# parser.add_argument("--max-grad-norm", type=float, default=1.0, help="the maximum norm for the gradient clipping")
 
 parser.add_argument("--ge_data_dir", type=str, default=None)
+parser.add_argument("--strategy", type=str, default="best")
 parser.add_argument("--n_archives", type=int, default=1)
+parser.add_argument("--min_traj_len", type=int, default=150)
+
 
 
 def parse_args(*args, **kwargs):
@@ -88,7 +85,9 @@ class GEBuffer(Buffer):
     def gecollect(self, pbar=None):
         if self.first_collect:
             self.first_collect = False
+            self.obs, _ = self.env.reset()
             self.obs = self.reset_with_newtraj(np.arange(self.env.num_envs))
+        self.n_resets = 0
         for t in range(self.n_steps):
             self.data["obs"][:, t] = self.obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
@@ -100,14 +99,16 @@ class GEBuffer(Buffer):
             ids_reset = np.where(self.i_locs >= self.traj_lens)[0]
             if len(ids_reset) > 0:
                 self.obs[ids_reset] = self.reset_with_newtraj(ids_reset)
+                self.n_resets+=len(ids_reset)
             if pbar is not None:
                 pbar.update(1)
+        print(f'{self.n_resets=}')
 
 
 def make_env(args):
     envs = []
     for env_id in args.env_ids:
-        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, noop_max=1, use_fire_reset=False, episodic_life=True, reward_clip=False, seed=args.seed, full_action_space=True)
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
         # envi = ToTensor(envi, device=args.device)
         envs.append(envi)
     env = ConcatEnv(envs)
@@ -123,12 +124,16 @@ def load_env_id2archives(env_ids, ge_data_dir, n_archives):
     return env_id2archives
 
 
-def get_env_id2trajs(env_id2archives, strategy="best"):
+def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=500):
     env_id2trajs = {}
     for env_id, archives in tqdm(env_id2archives.items()):
         env_id2trajs[env_id] = []
         for archive in archives:
             trajs, rets, novelty, is_leaf = archive["traj"], archive["ret"], archive["novelty"], archive["is_leaf"]
+            lens = np.array([len(traj) for traj in trajs])
+            lenmask = lens>min_traj_len
+            assert lenmask.sum().item() >= 1
+            trajs, rets, novelty, is_leaf = trajs[lenmask], rets[lenmask], novelty[lenmask], is_leaf[lenmask]
             if strategy == "all":
                 idx = np.arange(len(trajs))
             elif strategy == "best":
@@ -142,7 +147,7 @@ def get_env_id2trajs(env_id2archives, strategy="best"):
     return env_id2trajs
 
 
-def main(args):
+def mainf(args):
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
@@ -152,7 +157,7 @@ def main(args):
     print("Loading archives")
     env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
     print("Creating trajs")
-    env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy)
+    env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy, min_traj_len=args.min_traj_len)
     for env_id, trajs in env_id2trajs.items():
         print(f"env_id: {env_id}, #trajs: {len(trajs)}")
 
@@ -170,9 +175,9 @@ def main(args):
     for _ in tqdm(range(100)):
         buf.gecollect()
 
-    # print("Creating agent")
-    # agent = utils.create_agent("gpt", 18, args.ctx_len, load_agent=None, device=args.device)
-    # opt = agent.create_optimizer(lr=args.lr)
+    print("Creating agent")
+    agent = utils.create_agent("gpt", 18, args.ctx_len, load_agent=None, device=args.device)
+    opt = agent.create_optimizer(lr=args.lr)
 
     # print("Starting learning")
     # pbar_iters = tqdm(total=args.n_iters)
@@ -225,10 +230,62 @@ def main(args):
 # data["rets"] = np.array([cell.running_ret for cell in archive.values()])
 # data["scores"] = np.array([cell.score for cell in archive.values()])
 
+def main(args):
+    if args.track:
+        wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
+
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    print("Loading archives")
+    env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
+    print("Creating trajs")
+    env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy)
+    for env_id, trajs in env_id2trajs.items():
+        print(f"env_id: {env_id}, #trajs: {len(trajs)}")
+
+    print("Creating envs")
+    env = make_env(args)
+    print("Done creating envs!")
+
+    def sample_traj_fn(id):
+        env_id = args.env_ids[id // args.n_envs]
+        trajs = env_id2trajs[env_id]
+        return trajs[np.random.choice(len(trajs))]
+
+    
+    print("Creating buffer")
+    buf = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
+    for _ in tqdm(range(100)):
+        buf.gecollect()
+
+    # env = gym.make(f"ALE/MontezumaRevenge-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
+    # env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
+    # env.reset()
+
+    # env = envpool.make_gymnasium('MontezumaRevenge-v5', num_envs=1, img_height=210, img_width=210, gray_scale=False, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True)
+    # env.reset()
+
+    # env = MyEnvpool('MontezumaRevenge-v5', num_envs=1, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True)
+    # env = ConcatEnv([env])
+    # env.reset()
+
+    # env = make_env(args)
+    
+    # traj = sample_traj_fn(0)
+    # print(traj)
+    # for i in range(10):
+    #     print(i)
+    #     env.reset()
+    #     for a in traj:
+    #         a = np.array([a]*args.n_envs)
+    #         obs, rew, term, trunc, info = env.step(a)
+    #         # print(term, trunc)
+    #         assert not any(term) and not any(term)
+        
 
 if __name__ == "__main__":
     main(parse_args())
-
 
 # TODO do goexplore runs with different seeds
 

@@ -99,8 +99,8 @@ class ConcatEnv:
         return obs, rew, term, trunc, info
 
     def reset_subenvs(self, ids):
-        i_env = ids // len(self.envs)
-        i_subenv = ids % len(self.envs)
+        i_env = ids // self.envs[0].num_envs
+        i_subenv = ids % self.envs[0].num_envs
 
         obss, infos = [], []
         for i, env in enumerate(self.envs):
