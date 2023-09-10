@@ -165,6 +165,12 @@ class ToTensor(gym.Wrapper):
         info = self.info_to_tensor(info)
         return obs, info
 
+    def reset_subenvs(self, ids):
+        obs, info = self.env.reset_subenvs(ids)
+        obs = torch.from_numpy(obs).to(self.device)
+        info = self.info_to_tensor(info)
+        return obs, info
+
     def step(self, action):
         if isinstance(action, torch.Tensor):
             action = action.cpu().numpy()
