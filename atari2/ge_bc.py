@@ -206,14 +206,14 @@ def main(args):
 
     print("Warming up buffer...")
     for i_iter in tqdm(range(1), leave=False):
-        buffer.collect()
-        # buffer_teacher.collect()
+        # buffer.collect()
+        buffer_teacher.collect()
 
     start_time = time.time()
     print("Starting learning...")
     for i_iter in tqdm(range(args.n_iters)):
-        buffer.collect()
-        # buffer_teacher.collect()
+        # buffer.collect()
+        buffer_teacher.collect()
 
         for _ in range(args.n_updates):
             batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
