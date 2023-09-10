@@ -78,15 +78,15 @@ def calc_ce_loss(dist_student, act):
 class GEBuffer(Buffer):
     def __init__(self, env, n_steps, sample_traj_fn, device=None):
         # TODO mange devices
-        super().__init__(env, None, n_steps, device="cpu")
+        super().__init__(env, None, n_steps, device=device)
         self.trajs = [None for _ in range(self.env.num_envs)]
         self.traj_lens = np.zeros(self.env.num_envs, dtype=int)
         self.i_locs = np.zeros(self.env.num_envs, dtype=int)
         self.sample_traj_fn = sample_traj_fn
 
-        shape = tuple(self.data["obs"].shape)
-        self.data["obs"] = np.zeros(shape, dtype=np.uint8)
-        self.data["act"] = np.zeros(shape[:2], dtype=int)
+        # shape = tuple(self.data["obs"].shape)
+        # self.data["obs"] = np.zeros(shape, dtype=np.uint8)
+        # self.data["act"] = np.zeros(shape[:2], dtype=int)
 
     def reset_with_newtraj(self, ids):
         assert len(ids) > 0
@@ -158,7 +158,7 @@ def make_env(args):
     envs = []
     for env_id in args.env_ids:
         envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
-        # envi = ToTensor(envi, device=args.device)
+        envi = ToTensor(envi, device=args.device)
         envs.append(envi)
     env = ConcatEnv(envs)
     return env
@@ -200,8 +200,8 @@ def main(args):
         return trajs[np.random.choice(len(trajs))]
 
     print("Creating buffer...")
-    buffer = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
-    buffer_teacher = Buffer(env_teacher, agent_teacher, args.n_steps, device=args.device)
+    buffer = Buffer(env, agent, args.n_steps, device=args.device)
+    buffer_teacher = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Warming up buffer...")
     for i_iter in tqdm(range(40), leave=False):
