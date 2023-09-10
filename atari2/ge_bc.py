@@ -106,6 +106,7 @@ class GEBuffer(Buffer):
         for t in range(self.n_steps):
             self.data["obs"][:, t] = self.obs
             action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
+            action = torch.from_numpy(action).to(self.device)
             self.i_locs += 1
             self.data["act"][:, t] = action
             self.obs, _, term, trunc, _ = self.env.step(action)
