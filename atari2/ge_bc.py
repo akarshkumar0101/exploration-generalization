@@ -201,7 +201,7 @@ def main(args):
 
     print("Creating buffer...")
     buffer = Buffer(env, agent, args.n_steps, device=args.device)
-    buffer_teacher = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
+    buffer_teacher = GEBuffer(env_teacher, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Warming up buffer...")
     for i_iter in tqdm(range(40), leave=False):
