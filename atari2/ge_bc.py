@@ -51,8 +51,11 @@ parser.add_argument("--n_updates", type=int, default=16)
 
 # BC arguments
 parser.add_argument("--ent_coef", type=float, default=0.000)
-parser.add_argument("--model-teacher", type=str, default="cnn-4")
-parser.add_argument("--load-ckpt-teacher", type=str, nargs="+", default=None)
+# Go-Explore data arguments
+parser.add_argument("--ge_data_dir", type=str, default=None)
+parser.add_argument("--strategy", type=str, default="best")
+parser.add_argument("--n_archives", type=int, default=1)
+parser.add_argument("--min_traj_len", type=int, default=150)
 
 
 def parse_args(*args, **kwargs):
