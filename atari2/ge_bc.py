@@ -205,7 +205,7 @@ def main(args):
     buffer_teacher = GEBuffer(env_teacher, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Warming up buffer...")
-    for i_iter in tqdm(range(40), leave=False):
+    for i_iter in tqdm(range(1), leave=False):
         buffer.collect()
         # buffer_teacher.collect()
 
