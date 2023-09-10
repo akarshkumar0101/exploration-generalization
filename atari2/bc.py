@@ -75,8 +75,6 @@ def make_env(args):
     envs = []
     for env_id in args.env_ids:
         envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, reward_clip=True, seed=args.seed, full_action_space=True)
-        if args.norm_rew:
-            envi = MyNormalizeReward(envi, gamma=args.gamma)
         envi = RecordEpisodeStatistics(envi, deque_size=32)
         envs.append(envi)
     env = ConcatEnv(envs)
