@@ -219,7 +219,7 @@ def main(args):
             batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
 
             logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
-            dist, batch_act = torch.distributions.Categorical(logits=logits), torch.distributions.Categorical(logits=batch["act"])
+            dist, batch_act = torch.distributions.Categorical(logits=logits), batch["act"]
 
             loss_bc = calc_ce_loss(dist, batch_act)
             assert loss_bc.shape == (args.batch_size, agent.ctx_len)
