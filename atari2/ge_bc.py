@@ -54,7 +54,7 @@ parser.add_argument("--ent_coef", type=float, default=0.000)
 parser.add_argument("--ge_data_dir", type=str, default=None)
 parser.add_argument("--strategy", type=str, default="best")
 parser.add_argument("--n_archives", type=int, default=1)
-parser.add_argument("--min_traj_len", type=int, default=150)
+parser.add_argument("--min_traj_len", type=int, default=100)
 
 
 def parse_args(*args, **kwargs):
@@ -131,7 +131,7 @@ def load_env_id2archives(env_ids, ge_data_dir, n_archives):
     return env_id2archives
 
 
-def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=150):
+def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=100):
     env_id2trajs = {}
     for env_id, archives in tqdm(env_id2archives.items()):
         env_id2trajs[env_id] = []
@@ -207,13 +207,13 @@ def main(args):
     print("Warming up buffer...")
     for i_iter in tqdm(range(40), leave=False):
         buffer.collect()
-        buffer_teacher.collect()
+        # buffer_teacher.collect()
 
     start_time = time.time()
     print("Starting learning...")
     for i_iter in tqdm(range(args.n_iters)):
         buffer.collect()
-        buffer_teacher.collect()
+        # buffer_teacher.collect()
 
         for _ in range(args.n_updates):
             batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
@@ -247,18 +247,18 @@ def main(args):
 
         data = {}
         if viz_fast:
-            for envi in env.envs:
-                data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
-                data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
-                data[f"charts/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
-                low, high = hns.atari_human_normalized_scores[envi.env_id]
-                data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
-            for envi in env_teacher.envs:
-                data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
-                data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
-                data[f"charts_teacher/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
-                low, high = hns.atari_human_normalized_scores[envi.env_id]
-                data["charts_teacher/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+            # for envi in env.envs:
+            #     data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+            #     data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+            #     data[f"charts/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+            #     low, high = hns.atari_human_normalized_scores[envi.env_id]
+            #     data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+            # for envi in env_teacher.envs:
+            #     data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+            #     data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+            #     data[f"charts_teacher/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+            #     low, high = hns.atari_human_normalized_scores[envi.env_id]
+            #     data["charts_teacher/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
 
             env_steps = (i_iter + 1) * len(args.env_ids) * args.n_envs * args.n_steps
             grad_steps = (i_iter + 1) * args.n_updates
