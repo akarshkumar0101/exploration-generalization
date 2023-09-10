@@ -4,7 +4,6 @@ import os
 import random
 import time
 
-import gym
 import hns
 import numpy as np
 import torch
@@ -158,9 +157,12 @@ def make_env(args):
     envs = []
     for env_id in args.env_ids:
         envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
-        envi = ToTensor(envi, device=args.device)
+        if args.norm_rew:
+            envi = MyNormalizeReward(envi, gamma=args.gamma)
+        envi = RecordEpisodeStatistics(envi, deque_size=32)
         envs.append(envi)
     env = ConcatEnv(envs)
+    env = ToTensor(env, device=args.device)
     return env
 
 

@@ -10,6 +10,22 @@ import envpool
 from einops import rearrange
 
 
+class MyNormalizeReward(gym.wrappers.NormalizeReward):
+    def __init__(self, env, gamma=0.99):
+        super().__init__(env, gamma=gamma)
+
+    def recv(self, *args, **kwargs):
+        """Steps through the environment, normalizing the rewards returned."""
+        obs, rews, terminateds, truncateds, infos = self.env.recv(*args, **kwargs)
+        if not self.is_vector_env:
+            rews = np.array([rews])
+        self.returns = self.returns * self.gamma * (1 - terminateds) + rews
+        rews = self.normalize(rews)
+        if not self.is_vector_env:
+            rews = rews[0]
+        return obs, rews, terminateds, truncateds, infos
+
+
 class RecordEpisodeStatistics(gym.Wrapper):
     def __init__(self, env, deque_size=100):
         super().__init__(env)
@@ -21,6 +37,16 @@ class RecordEpisodeStatistics(gym.Wrapper):
 
     def step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
+        self.episode_returns += info["reward"]  # use info["reward"] instead of rew to get true atari rewards
+        self.episode_lengths += 1
+        self.traj_rets.extend(self.episode_returns[info["terminated"]])
+        self.traj_lens.extend(self.episode_lengths[info["terminated"]])
+        self.episode_returns *= 1 - info["terminated"]  # use info["terminated"] instead of term to get true atari terminated
+        self.episode_lengths *= 1 - info["terminated"]
+        return obs, rew, term, trunc, info
+
+    def recv(self, *args, **kwargs):
+        obs, rew, term, trunc, info = self.env.recv(*args, **kwargs)
         self.episode_returns += info["reward"]  # use info["reward"] instead of rew to get true atari rewards
         self.episode_lengths += 1
         self.traj_rets.extend(self.episode_returns[info["terminated"]])
