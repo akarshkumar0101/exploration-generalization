@@ -187,15 +187,6 @@ def main(args):
         ckpt = torch.load(args.load_ckpt, map_location=args.device)
         agent.load_state_dict(ckpt["agent"])
 
-    print("Creating teacher agents...")
-    agent_teacher = []
-    for load_ckpt in args.load_ckpt_teacher:
-        a = make_agent(args.model_teacher, 18).to(args.device)
-        ckpt = torch.load(load_ckpt, map_location=args.device)
-        a.load_state_dict(ckpt["agent"])
-        agent_teacher.append(a)
-    agent_teacher = ConcatAgent(agent_teacher)
-
     print("Loading archives")
     env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
     print("Creating trajs")
