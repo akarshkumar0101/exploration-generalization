@@ -49,12 +49,10 @@ parser.add_argument("--n_steps", type=int, default=128)
 parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--n_updates", type=int, default=16)
 
-
-# Go-Explore data arguments
-parser.add_argument("--ge_data_dir", type=str, default=None)
-parser.add_argument("--strategy", type=str, default="best")
-parser.add_argument("--n_archives", type=int, default=1)
-parser.add_argument("--min_traj_len", type=int, default=150)
+# BC arguments
+parser.add_argument("--ent_coef", type=float, default=0.000)
+parser.add_argument("--model-teacher", type=str, default="cnn-4")
+parser.add_argument("--load-ckpt-teacher", type=str, nargs="+", default=None)
 
 
 def parse_args(*args, **kwargs):
@@ -62,6 +60,16 @@ def parse_args(*args, **kwargs):
     for k, v in dict([tuple(uarg.replace("--", "").split("=")) for uarg in uargs]).items():
         setattr(args, k, v)
     return args
+
+
+def calc_ce_loss(dist_student, act):
+    b, t, d = dist_student.logits.shape
+    logits = dist_student.logits
+    logits = rearrange(logits, "b t d -> (b t) d")
+    act = rearrange(act, "b t -> (b t)")
+    loss = torch.nn.functional.cross_entropy(logits, act, reduction="none")
+    loss = rearrange(loss, "(b t) -> b t", b=b)
+    return loss
 
 
 class GEBuffer(Buffer):
@@ -87,7 +95,7 @@ class GEBuffer(Buffer):
         # assert np.array_equal(self.env.envs[id].ale.getRAM(), self.ram_start), "env reset to seed=0"
         return obs
 
-    def gecollect(self, pbar=None):
+    def collect(self, pbar=None):
         if self.first_collect:
             self.first_collect = False
             self.obs, _ = self.env.reset()
@@ -107,16 +115,6 @@ class GEBuffer(Buffer):
                 self.n_resets += len(ids_reset)
             if pbar is not None:
                 pbar.update(1)
-
-
-def make_env(args):
-    envs = []
-    for env_id in args.env_ids:
-        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
-        # envi = ToTensor(envi, device=args.device)
-        envs.append(envi)
-    env = ConcatEnv(envs)
-    return env
 
 
 def load_env_id2archives(env_ids, ge_data_dir, n_archives):
@@ -153,12 +151,47 @@ def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=150):
     return env_id2trajs
 
 
+def make_env(args):
+    envs = []
+    for env_id in args.env_ids:
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
+        # envi = ToTensor(envi, device=args.device)
+        envs.append(envi)
+    env = ConcatEnv(envs)
+    return env
+
+
 def main(args):
+    print("Running GEBC with args: ", args)
+    print("Starting wandb...")
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
 
+    print("Seeding...")
+    random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+
+    print("Creating environment...")
+    env = make_env(args)
+    env_teacher = make_env(args)
+
+    print("Creating agent...")
+    agent = make_agent(args.model, 18).to(args.device)
+    opt = torch.optim.Adam(agent.parameters(), lr=args.lr, eps=1e-5)
+    if args.load_ckpt is not None:
+        print("Loading checkpoint...")
+        ckpt = torch.load(args.load_ckpt, map_location=args.device)
+        agent.load_state_dict(ckpt["agent"])
+
+    print("Creating teacher agents...")
+    agent_teacher = []
+    for load_ckpt in args.load_ckpt_teacher:
+        a = make_agent(args.model_teacher, 18).to(args.device)
+        ckpt = torch.load(load_ckpt, map_location=args.device)
+        a.load_state_dict(ckpt["agent"])
+        agent_teacher.append(a)
+    agent_teacher = ConcatAgent(agent_teacher)
 
     print("Loading archives")
     env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
@@ -167,67 +200,88 @@ def main(args):
     for env_id, trajs in env_id2trajs.items():
         print(f"env_id: {env_id}, #trajs: {len(trajs)}")
 
-    print("Creating envs")
-    env = make_env(args)
-    print("Done creating envs!")
-
     def sample_traj_fn(id):
         env_id = args.env_ids[id // args.n_envs]
         trajs = env_id2trajs[env_id]
         return trajs[np.random.choice(len(trajs))]
 
-    print("Creating buffer")
-    buf = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
-    for _ in tqdm(range(100)):
-        buf.gecollect()
+    print("Creating buffer...")
+    buffer = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
+    buffer_teacher = Buffer(env_teacher, agent_teacher, args.n_steps, device=args.device)
 
-    print("Creating agent")
-    agent = utils.create_agent("gpt", 18, args.ctx_len, load_agent=None, device=args.device)
-    opt = agent.create_optimizer(lr=args.lr)
+    print("Warming up buffer...")
+    for i_iter in tqdm(range(40), leave=False):
+        buffer.collect()
+        buffer_teacher.collect()
 
-    print("Starting learning")
-    pbar_iters = tqdm(total=args.n_iters)
-    pbar_steps = tqdm(total=args.n_steps)
-    pbar_updates = tqdm(total=args.n_updates)
-    for i_iter in range(args.n_iters):
-        pbar_iters.update(1)
+    start_time = time.time()
+    print("Starting learning...")
+    for i_iter in tqdm(range(args.n_iters)):
+        buffer.collect()
+        buffer_teacher.collect()
 
-        pbar_steps.reset(total=args.n_steps)
-        buf.gecollect(pbar=pbar_steps)
+        for _ in range(args.n_updates):
+            batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
 
-        pbar_updates.reset(total=args.n_updates)
-        for i_update in range(args.n_updates):
-            pbar_updates.update(1)
-            assert args.batch_size % (len(args.env_ids) * args.n_envs) == 0
-            batch = buf.generate_batch(args.batch_size, args.ctx_len)
-            obs, act = batch["obs"], batch["act"]
-            obs = obs[:, :, None, :, :]
-            logits, values = agent(None, obs, act, None)
+            logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
+            dist, batch_act = torch.distributions.Categorical(logits=logits), torch.distributions.Categorical(logits=batch["act"])
 
-            loss_bc = torch.nn.functional.cross_entropy(rearrange(logits, "b t d -> (b t) d"), rearrange(act, "b t -> (b t)"), reduction="none")
-            loss_bc = rearrange(loss_bc, "(b t) -> b t", b=args.batch_size)
-            loss = loss_bc.mean()
+            loss_bc = calc_ce_loss(dist, batch_act)
+            assert loss_bc.shape == (args.batch_size, agent.ctx_len)
+            loss_e = dist.entropy()
+
+            if not agent.train_per_token:
+                loss_bc, loss_e = loss_bc[:, [-1]], loss_e[:, [-1]]
+            loss = 1.0 * loss_bc.mean() - args.ent_coef * loss_e.mean()
 
             opt.zero_grad()
             loss.backward()
+            nn.utils.clip_grad_norm_(agent.parameters(), args.clip_grad_norm)
             opt.step()
 
-            if args.track:
-                data = {}
-                data["loss"] = loss.item()
-                data["ppl"] = np.e ** loss.item()
+        if args.save_ckpt is not None and args.n_ckpts > 0 and (i_iter + 1) % (args.n_iters // args.n_ckpts) == 0:
+            print(f"Saving Checkpoint at {i_iter}/{args.n_iters} iterations")
+            file = args.save_ckpt.format(i_iter=i_iter)
+            ckpt = dict(args=args, i_iter=i_iter, agent=agent.state_dict())
+            os.makedirs(os.path.dirname(file), exist_ok=True)
+            torch.save(ckpt, file)
 
-                if i_iter % (args.n_iters // 100) == 0 and i_update == 0:
-                    ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
-                    pos = np.arange(len(ppl))
-                    table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
-                    data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
-                wandb.log(data)
+        viz_slow = i_iter % np.clip(args.n_iters // 10, 1, None) == 0
+        viz_midd = i_iter % np.clip(args.n_iters // 100, 1, None) == 0 or viz_slow
+        viz_fast = i_iter % np.clip(args.n_iters // 1000, 1, None) == 0 or viz_midd
 
-        if args.save_agent is not None and i_iter % (args.n_iters // 100) == 0:
-            save_agent = args.save_agent.format(**locals())
-            os.makedirs(os.path.dirname(save_agent), exist_ok=True)
-            torch.save(agent.state_dict(), save_agent)
+        data = {}
+        if viz_fast:
+            for envi in env.envs:
+                data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+                data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+                data[f"charts/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+                low, high = hns.atari_human_normalized_scores[envi.env_id]
+                data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+            for envi in env_teacher.envs:
+                data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+                data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+                data[f"charts_teacher/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+                low, high = hns.atari_human_normalized_scores[envi.env_id]
+                data["charts_teacher/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+
+            env_steps = (i_iter + 1) * len(args.env_ids) * args.n_envs * args.n_steps
+            grad_steps = (i_iter + 1) * args.n_updates
+            data["env_steps"] = env_steps
+            data["grad_steps"] = grad_steps
+            sps = int(env_steps / (time.time() - start_time))
+            data["meta/SPS"] = sps
+
+            data["loss"] = loss.item()
+            data["ppl"] = np.e ** loss.item()
+        if viz_midd:
+            ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
+            pos = np.arange(len(ppl))
+            table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+            data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
+
+        if args.track and viz_fast:
+            wandb.log(data)
 
 
 if __name__ == "__main__":
