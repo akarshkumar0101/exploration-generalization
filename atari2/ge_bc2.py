@@ -62,31 +62,107 @@ def parse_args(*args, **kwargs):
     return args
 
 
-def calc_kl_loss(dist_student, dist_teacher):
+def calc_ce_loss(dist_student, act):
     b, t, d = dist_student.logits.shape
-    logits_student, logits_teacher = dist_student.logits, dist_teacher.logits
-    logits_student = rearrange(logits_student, "b t d -> (b t) d")
-    logits_teacher = rearrange(logits_teacher, "b t d -> (b t) d")
-    loss = torch.nn.functional.kl_div(logits_student, logits_teacher, log_target=True, reduction="none").sum(dim=-1)
+    logits = dist_student.logits
+    logits = rearrange(logits, "b t d -> (b t) d")
+    act = rearrange(act, "b t -> (b t)")
+    loss = torch.nn.functional.cross_entropy(logits, act, reduction="none")
     loss = rearrange(loss, "(b t) -> b t", b=b)
     return loss
+
+
+class GEBuffer(Buffer):
+    def __init__(self, env, n_steps, sample_traj_fn, device=None):
+        # TODO mange devices
+        super().__init__(env, None, n_steps, device="cpu")
+        self.trajs = [None for _ in range(self.env.num_envs)]
+        self.traj_lens = np.zeros(self.env.num_envs, dtype=int)
+        self.i_locs = np.zeros(self.env.num_envs, dtype=int)
+        self.sample_traj_fn = sample_traj_fn
+
+        shape = tuple(self.data["obs"].shape)
+        self.data["obs"] = np.zeros(shape, dtype=np.uint8)
+        self.data["act"] = np.zeros(shape[:2], dtype=int)
+
+    def reset_with_newtraj(self, ids):
+        assert len(ids) > 0
+        for id in ids:
+            self.trajs[id] = self.sample_traj_fn(id)
+            self.traj_lens[id] = len(self.trajs[id])
+            self.i_locs[id] = 0
+        obs, info = self.env.reset_subenvs(ids)  # , seed=[0 for _ in ids])
+        # assert np.array_equal(self.env.envs[id].ale.getRAM(), self.ram_start), "env reset to seed=0"
+        return obs
+
+    def collect(self, pbar=None):
+        if self.first_collect:
+            self.first_collect = False
+            self.obs, _ = self.env.reset()
+            self.obs = self.reset_with_newtraj(np.arange(self.env.num_envs))
+        self.n_resets = 0
+        for t in range(self.n_steps):
+            self.data["obs"][:, t] = self.obs
+            action = np.array([traj[i_loc] for traj, i_loc in zip(self.trajs, self.i_locs)])
+            self.i_locs += 1
+            self.data["act"][:, t] = action
+            self.obs, _, term, trunc, _ = self.env.step(action)
+            assert not any(term) and not any(trunc), "found a done in the ge buffer"
+
+            ids_reset = np.where(self.i_locs >= self.traj_lens)[0]
+            if len(ids_reset) > 0:
+                self.obs[ids_reset] = self.reset_with_newtraj(ids_reset)
+                self.n_resets += len(ids_reset)
+            if pbar is not None:
+                pbar.update(1)
+
+
+def load_env_id2archives(env_ids, ge_data_dir, n_archives):
+    import glob
+
+    env_id2archives = {}
+    for env_id in tqdm(env_ids):
+        files = sorted(glob.glob(f"{ge_data_dir}/*{env_id}*"))
+        files = files[:n_archives]
+        env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in files]
+    return env_id2archives
+
+
+def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=150):
+    env_id2trajs = {}
+    for env_id, archives in tqdm(env_id2archives.items()):
+        env_id2trajs[env_id] = []
+        for archive in archives:
+            trajs, rets, novelty, is_leaf = archive["traj"], archive["ret"], archive["novelty"], archive["is_leaf"]
+            lens = np.array([len(traj) for traj in trajs])
+            lenmask = lens > min_traj_len
+            assert lenmask.sum().item() >= 1
+            trajs, rets, novelty, is_leaf = trajs[lenmask], rets[lenmask], novelty[lenmask], is_leaf[lenmask]
+            if strategy == "all":
+                idx = np.arange(len(trajs))
+            elif strategy == "best":
+                idx = np.array([np.argmax(rets)])
+            elif strategy == "leaf":
+                idx = np.nonzero(is_leaf)[0]
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}")
+            trajs = trajs[idx]
+            env_id2trajs[env_id].extend(trajs)
+    return env_id2trajs
 
 
 def make_env(args):
     envs = []
     for env_id in args.env_ids:
-        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, episodic_life=True, reward_clip=True, seed=args.seed, full_action_space=True)
-        if args.norm_rew:
-            envi = gym.wrappers.NormalizeReward(envi, gamma=args.gamma)
-        envi = RecordEpisodeStatistics(envi, deque_size=32)
-        envi = ToTensor(envi, device=args.device)
+        envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
+        # envi = ToTensor(envi, device=args.device)
         envs.append(envi)
     env = ConcatEnv(envs)
     return env
 
 
 def main(args):
-    print("Running BC with args: ", args)
+    print("Running GEBC with args: ", args)
     print("Starting wandb...")
     if args.track:
         wandb.init(entity=args.entity, project=args.project, name=args.name, config=args, save_code=True)
@@ -117,8 +193,20 @@ def main(args):
         agent_teacher.append(a)
     agent_teacher = ConcatAgent(agent_teacher)
 
+    print("Loading archives")
+    env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
+    print("Creating trajs")
+    env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy, min_traj_len=args.min_traj_len)
+    for env_id, trajs in env_id2trajs.items():
+        print(f"env_id: {env_id}, #trajs: {len(trajs)}")
+
+    def sample_traj_fn(id):
+        env_id = args.env_ids[id // args.n_envs]
+        trajs = env_id2trajs[env_id]
+        return trajs[np.random.choice(len(trajs))]
+
     print("Creating buffer...")
-    buffer = Buffer(env, agent, args.n_steps, device=args.device)
+    buffer = GEBuffer(env, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
     buffer_teacher = Buffer(env_teacher, agent_teacher, args.n_steps, device=args.device)
 
     print("Warming up buffer...")
@@ -136,9 +224,9 @@ def main(args):
             batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
 
             logits, val = agent(done=batch["done"], obs=batch["obs"], act=batch["act"], rew=batch["rew"])
-            dist, batch_dist = torch.distributions.Categorical(logits=logits), torch.distributions.Categorical(logits=batch["logits"])
+            dist, batch_act = torch.distributions.Categorical(logits=logits), torch.distributions.Categorical(logits=batch["act"])
 
-            loss_bc = calc_kl_loss(dist, batch_dist)
+            loss_bc = calc_ce_loss(dist, batch_act)
             assert loss_bc.shape == (args.batch_size, agent.ctx_len)
             loss_e = dist.entropy()
 
@@ -183,6 +271,15 @@ def main(args):
             data["grad_steps"] = grad_steps
             sps = int(env_steps / (time.time() - start_time))
             data["meta/SPS"] = sps
+
+            data["loss"] = loss.item()
+            data["ppl"] = np.e ** loss.item()
+        if viz_midd:
+            ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
+            pos = np.arange(len(ppl))
+            table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+            data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
+
         if args.track and viz_fast:
             wandb.log(data)
 

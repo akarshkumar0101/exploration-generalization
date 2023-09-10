@@ -130,7 +130,6 @@ def main(args):
         print("Loading checkpoint...")
         ckpt = torch.load(args.load_ckpt, map_location=args.device)
         agent.load_state_dict(ckpt["agent"])
-        opt.load_state_dict(ckpt["opt"])
 
     print("Creating buffer...")
     buffer = Buffer(env, agent, args.n_steps, device=args.device)
@@ -165,9 +164,9 @@ def main(args):
             opt.step()
 
         if args.save_ckpt is not None and args.n_ckpts > 0 and (i_iter + 1) % (args.n_iters // args.n_ckpts) == 0:
-            print(f"Saving Checkpoint at {i_iter}/{args.n_iters}")
+            print(f"Saving Checkpoint at {i_iter}/{args.n_iters} iterations")
             file = args.save_ckpt.format(i_iter=i_iter)
-            ckpt = dict(i_iter=i_iter, agent=agent, opt=opt)
+            ckpt = dict(args=args, i_iter=i_iter, agent=agent.state_dict())
             os.makedirs(os.path.dirname(file), exist_ok=True)
             torch.save(ckpt, file)
 
