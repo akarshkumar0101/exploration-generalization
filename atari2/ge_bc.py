@@ -269,7 +269,7 @@ def main(args):
 
             data["loss"] = loss.item()
             data["ppl"] = np.e ** loss.item()
-        if viz_midd:
+        if viz_midd and args.track:
             ppl = loss_bc.mean(dim=0).exp().detach().cpu().numpy()
             pos = np.arange(len(ppl))
             table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
