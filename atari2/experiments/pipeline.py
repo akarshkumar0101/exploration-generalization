@@ -13,6 +13,7 @@ import experiment_utils
 
 import ppo
 import bc
+import ge_bc
 
 # import goexplore
 
@@ -33,16 +34,16 @@ n_train = round(len(env_ids) * 0.85)
 n_test = len(env_ids) - n_train
 print(f"n_train: {n_train}, n_test: {n_test}")
 
-np.random.seed(3)
+np.random.seed(143)
 env_ids_permuted = np.random.permutation(env_ids).copy()
 env_ids_trains, env_ids_tests = [], []
-for i_split in range(5):
+for i_split in range(3):
     mask_test = np.arange(len(env_ids_permuted))
     mask_test = (mask_test >= i_split * 8) & (mask_test < (i_split + 1) * 8)
     mask_train = ~mask_test
 
-    env_ids_trains.append(env_ids_permuted[mask_train])
-    env_ids_tests.append(env_ids_permuted[mask_test])
+    env_ids_trains.append(sorted(list(env_ids_permuted[mask_train])))
+    env_ids_tests.append(sorted(list(env_ids_permuted[mask_test])))
 
 train = set.union(*[set(env_ids_train) for env_ids_train in env_ids_trains])
 test = set.union(*[set(env_ids_test) for env_ids_test in env_ids_tests])
@@ -52,13 +53,13 @@ test = set.union(*[set(env_ids_test) for env_ids_test in env_ids_tests])
 # print(f'{len(test)} unique test envs')
 env_ids_exploration = ["Pitfall", "MontezumaRevenge", "Venture", "Zaxxon", "Berzerk", "Asteroids", "Frostbite", "PrivateEye"]
 # print([env_id in test for env_id in env_ids_exploration])
+# print(seed)
 print(all([env_id in test for env_id in env_ids_exploration]))
 
-for i_split in range(5):
+for i_split in range(3):
     print(f"Split {i_split}:")
     print(f"Train: {env_ids_trains[i_split]}")
     print(f"Test: {env_ids_tests[i_split]}")
-
 
 # ------------------------ SPECIALIST ------------------------ #
 np.random.seed(0)
@@ -115,7 +116,7 @@ for seed in range(1):
 
             config["lr"] = 2.5e-4
 
-            config["env_ids"] = env_ids_train.tolist()
+            config["env_ids"] = env_ids_train
             config["n_iters"] = 1000
             config["n_envs"] = 8
             config["n_steps"] = 128
@@ -234,7 +235,7 @@ print("Done!")
 #             config["seed"] = seed
 #             config["device"] = "cuda"
 
-#             config["env_ids"] = env_ids_train.tolist()
+#             config["env_ids"] = env_ids_train
 #             config["n_iters"] = int(1500)
 #             config["n_envs"] = 4
 #             config["n_steps"] = 512
@@ -305,3 +306,45 @@ print("Done!")
 # command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python train.py", out_file=f"ge_finetune_ppo.sh")
 # print("Done!")
 # # ------------------------------------------------------------- #
+
+# ------------------------ GO-EXPLORE GENERALIST ------------------------ #
+np.random.seed(0)
+default_config = vars(ge_bc.parser.parse_args())
+configs = []
+for seed in range(1):
+    for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
+        for strategy in ["best", "leaf"]:
+            config = default_config.copy()
+            config["track"] = True
+            config["project"] = "egb_ge_generalist"
+            config["name"] = f"{strategy}_{i_split}_{seed:04d}"
+
+            config["device"] = "cuda"
+            config["seed"] = seed
+
+            config["model"] = "trans_32"
+            config["load_ckpt"] = None
+            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
+            config["n_ckpts"] = 100
+
+            config["lr"] = 2.5e-4
+
+            config["env_ids"] = env_ids_train
+            config["n_iters"] = 10000
+            config["n_envs"] = 4
+            config["n_steps"] = 512
+            config["batch_size"] = 384
+            config["n_updates"] = 32
+
+            config["ge_data_dir"] = f"../atari/data/ge_specialist/"
+            config["strategy"] = strategy
+            config["n_archives"] = 200
+            config["min_traj_len"] = 100
+
+            config["i_split"] = i_split
+
+            configs.append(config.copy())
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ge_bc.py", out_file=f"ge_generalist.sh")
+print("Done!")
+# ------------------------------------------------------------ #
+
