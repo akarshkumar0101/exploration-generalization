@@ -50,8 +50,8 @@ parser.add_argument("--n_updates", type=int, default=16)
 
 # BC arguments
 parser.add_argument("--ent_coef", type=float, default=0.000)
-parser.add_argument("--model-teacher", type=str, default="cnn-4")
-parser.add_argument("--load-ckpt-teacher", type=str, nargs="+", default=None)
+parser.add_argument("--model_teacher", type=str, default="cnn_4")
+parser.add_argument("--load_ckpt_teacher", type=str, nargs="+", default=None)
 
 
 def parse_args(*args, **kwargs):
@@ -129,6 +129,7 @@ def main(args):
         buffer.collect()
         buffer_teacher.collect()
 
+        loss_bc_list = []
         for _ in range(args.n_updates):
             batch = buffer_teacher.generate_batch(args.batch_size, ctx_len=agent.ctx_len)
 
@@ -137,6 +138,7 @@ def main(args):
 
             loss_bc = calc_kl_loss(dist, batch_dist)
             assert loss_bc.shape == (args.batch_size, agent.ctx_len)
+            loss_bc_list.append(loss_bc.detach())
             loss_e = dist.entropy()
 
             if not agent.train_per_token:
@@ -180,6 +182,16 @@ def main(args):
             data["grad_steps"] = grad_steps
             sps = int(env_steps / (time.time() - start_time))
             data["meta/SPS"] = sps
+
+            loss_bc_list = torch.stack(loss_bc_list).detach().cpu()  # n_updates, batch_size, ctx_len
+            data["loss_bc"] = loss_bc_list.mean().item()
+            data["ppl_bc"] = np.e ** data["loss_bc"]
+        if viz_midd and args.track:
+            ppl = loss_bc_list.mean(dim=(0, 1)).exp().numpy()
+            pos = np.arange(len(ppl))
+            table = wandb.Table(data=np.stack([pos, ppl], axis=-1), columns=["ctx_pos", "ppl"])
+            data["ppl_vs_ctx_pos"] = wandb.plot.line(table, "ctx_pos", "ppl", title="PPL vs Context Position")
+
         if args.track and viz_fast:
             wandb.log(data)
 
