@@ -227,7 +227,7 @@ print("Done!")
 np.random.seed(0)
 default_config = vars(ppo.parser.parse_args())
 configs = []
-for seed in range(1):
+for seed in range(10):
     for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
         for strategy in ["best", "leaf", None]:
             for env_id in env_ids_test:
