@@ -351,6 +351,8 @@ class ConcatAgent(nn.Module):
     def __init__(self, agents):
         super().__init__()
         self.agents = agents
+        self.train_per_token = self.agents[0].train_per_token
+        self.ctx_len = self.agents[0].ctx_len
 
     def forward(self, done, obs, act, rew):
         nb, t, c, h, w = obs.shape
