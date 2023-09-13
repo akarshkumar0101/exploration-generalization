@@ -213,7 +213,7 @@ for seed in range(1):
 
                 config["ent_coef"] = 0.0
                 config["model_teacher"] = "cnn_4"
-                config["load_ckpt_teacher"] = [f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"]
+                config["load_ckpt_teacher"] = [f"./data/egb_specialist/{env_id}_{0:04d}/ckpt_9999.pt"]
 
                 config["i_split"] = i_split
                 config["strategy"] = strategy
