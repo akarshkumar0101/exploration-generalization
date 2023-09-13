@@ -64,6 +64,7 @@ def parse_args(*args, **kwargs):
 def calc_kl_loss(dist_student, dist_teacher):
     b, t, d = dist_student.logits.shape
     logits_student, logits_teacher = dist_student.logits, dist_teacher.logits
+    logits_student, logits_teacher = torch.broadcast_tensors(logits_student, logits_teacher)
     logits_student = rearrange(logits_student, "b t d -> (b t) d")
     logits_teacher = rearrange(logits_teacher, "b t d -> (b t) d")
     loss = torch.nn.functional.kl_div(logits_student, logits_teacher, log_target=True, reduction="none").sum(dim=-1)
