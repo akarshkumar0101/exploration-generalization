@@ -234,7 +234,7 @@ for seed in range(10):
                 config = default_config.copy()
                 config["track"] = True
                 config["project"] = "egb_ftppo"
-                config["name"] = f"{env_id}_{seed:04d}"
+                config["name"] = f"{env_id}_{strategy}_{i_split}_{seed:04d}"
 
                 config["device"] = "cuda"
                 config["seed"] = seed
