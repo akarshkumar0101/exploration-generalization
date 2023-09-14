@@ -248,7 +248,7 @@ for seed in range(10):
                 config["lr"] = 2.5e-4
 
                 config["env_ids"] = [env_id]
-                config["n_iters"] = 10000
+                config["n_iters"] = 4000
                 config["n_envs"] = 8
                 config["n_steps"] = 128
                 config["batch_size"] = 256
