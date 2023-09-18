@@ -171,11 +171,12 @@ def main(args):
             #     low, high = hns.atari_human_normalized_scores[envi.env_id]
             #     data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
             for envi in env_teacher.envs:
-                data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
-                data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
-                data[f"charts_teacher/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
-                low, high = hns.atari_human_normalized_scores[envi.env_id]
-                data["charts_teacher/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+                if len(envi.traj_rets) > 0:
+                    data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+                    data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+                    data[f"charts_teacher/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+                    low, high = hns.atari_human_normalized_scores[envi.env_id]
+                    data["charts_teacher/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
 
             env_steps = (i_iter + 1) * len(args.env_ids) * args.n_envs * args.n_steps
             grad_steps = (i_iter + 1) * args.n_updates
