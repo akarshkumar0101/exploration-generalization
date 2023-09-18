@@ -111,8 +111,8 @@ for seed in range(1):
 
             config["model"] = "trans_32"
             config["load_ckpt"] = None
-            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt_{{i_iter}}.pt"
-            config["n_ckpts"] = 1
+            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
+            config["n_ckpts"] = 50
 
             config["lr"] = 2.5e-4
 
