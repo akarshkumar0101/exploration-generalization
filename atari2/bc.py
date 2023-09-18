@@ -120,14 +120,14 @@ def main(args):
     buffer_teacher = Buffer(env_teacher, agent_teacher, args.n_steps, device=args.device)
 
     print("Warming up buffer...")
-    for i_iter in tqdm(range(40), leave=False):
-        buffer.collect()
+    for i_iter in tqdm(range(1)):
+        # buffer.collect()
         buffer_teacher.collect()
 
     start_time = time.time()
     print("Starting learning...")
     for i_iter in tqdm(range(args.n_iters)):
-        buffer.collect()
+        # buffer.collect()
         buffer_teacher.collect()
 
         loss_bc_list = []
@@ -164,12 +164,12 @@ def main(args):
 
         data = {}
         if viz_fast:
-            for envi in env.envs:
-                data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
-                data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
-                data[f"charts/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
-                low, high = hns.atari_human_normalized_scores[envi.env_id]
-                data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
+            # for envi in env.envs:
+            #     data[f"charts/{envi.env_id}_score"] = np.mean(envi.traj_rets)
+            #     data[f"charts/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
+            #     data[f"charts/{envi.env_id}_score_max"] = np.max(envi.traj_rets)
+            #     low, high = hns.atari_human_normalized_scores[envi.env_id]
+            #     data["charts/hns"] = (np.mean(envi.traj_rets) - low) / (high - low)
             for envi in env_teacher.envs:
                 data[f"charts_teacher/{envi.env_id}_score"] = np.mean(envi.traj_rets)
                 data[f"charts_teacher/{envi.env_id}_tlen"] = np.mean(envi.traj_lens)
@@ -187,6 +187,8 @@ def main(args):
             loss_bc_list = torch.stack(loss_bc_list).detach().cpu()  # n_updates, batch_size, ctx_len
             data["loss_bc"] = loss_bc_list.mean().item()
             data["ppl_bc"] = np.e ** data["loss_bc"]
+            data["ppl_bc_first_update"] = np.e ** loss_bc_list[0].mean().item()
+            data["ppl_bc_last_update"] = np.e ** loss_bc_list[-1].mean().item()
         if viz_midd and args.track:
             ppl = loss_bc_list.mean(dim=(0, 1)).exp().numpy()
             pos = np.arange(len(ppl))

@@ -141,7 +141,7 @@ def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=100):
             lenmask = lens > min_traj_len
             assert lenmask.sum().item() >= 1
             trajs, rets, novelty, is_leaf = trajs[lenmask], rets[lenmask], novelty[lenmask], is_leaf[lenmask]
-            if strategy == "all":
+            if strategy == "all" or strategy == "nov" or strategy == "inv_nov":
                 idx = np.arange(len(trajs))
             elif strategy == "best":
                 idx = np.array([np.argmax(rets)])
@@ -198,14 +198,17 @@ def main(args):
     def sample_traj_fn(id):
         env_id = args.env_ids[id // args.n_envs]
         trajs = env_id2trajs[env_id]
-        return trajs[np.random.choice(len(trajs))]
+
+        # if args.strategy != 'nov' and args.strategy != 'inv_nov':
+        # return trajs[np.random.choice(len(trajs))]
+        # else:
 
     print("Creating buffer...")
     buffer = Buffer(env, agent, args.n_steps, device=args.device)
     buffer_teacher = GEBuffer(env_teacher, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Warming up buffer...")
-    for i_iter in tqdm(range(1), leave=False):
+    for i_iter in tqdm(range(20)):
         # buffer.collect()
         buffer_teacher.collect()
 

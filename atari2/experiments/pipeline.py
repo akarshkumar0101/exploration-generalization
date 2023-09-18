@@ -100,7 +100,7 @@ default_config = vars(bc.parser.parse_args())
 configs = []
 for seed in range(1):
     for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-        for strategy in ["final_ckpt", "all_ckpts"]:
+        for strategy in ["final_ckpts", "all_ckpts"]:
             config = default_config.copy()
             config["track"] = True
             config["project"] = "egb_generalist"
@@ -109,7 +109,7 @@ for seed in range(1):
             config["device"] = "cuda"
             config["seed"] = seed
 
-            config["model"] = "trans_64"
+            config["model"] = "trans_32"
             config["load_ckpt"] = None
             config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt_{{i_iter}}.pt"
             config["n_ckpts"] = 1
@@ -124,18 +124,19 @@ for seed in range(1):
             config["n_updates"] = 16
 
             config["model_teacher"] = "cnn_4"
-
-            if strategy == "final_ckpt":
+            if strategy == "final_ckpts":
                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
             elif strategy == "all_ckpts":
                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_*.pt"
+            else:
+                raise NotImplementedError
             config["load_ckpt_teacher"] = [env_id2teachers(env_id) for env_id in env_ids_train]
 
             config["i_split"] = i_split
             config["strategy"] = strategy
 
             configs.append(config.copy())
-command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python bc.py", out_file=f"generalist.sh")
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python bc.py", out_file=f"cd_generalist.sh")
 print("Done!")
 # ------------------------------------------------------------ #
 
