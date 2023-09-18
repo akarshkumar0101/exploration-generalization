@@ -119,10 +119,10 @@ for seed in range(1):
             config["env_ids"] = env_ids_train
             config["n_iters"] = 1000
             config["n_envs"] = 8
-            config["n_steps"] = 128
-            config["batch_size"] = 256
-            config["n_updates"] = 16
-
+            config["n_steps"] = 512
+            config["batch_size"] = 8*48*2 # = 768
+            config["n_updates"] = 32
+            
             config["model_teacher"] = "cnn_4"
             if strategy == "final_ckpts":
                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
