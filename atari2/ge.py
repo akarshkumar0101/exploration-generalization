@@ -101,6 +101,8 @@ def main(args):
     np.random.seed(args.seed)
     random.seed(args.seed)
 
+    if args.env_id == "TicTacToe3d":
+        args.env_id = "TicTacToe3D"
     env = gym.make(f"ALE/{args.env_id}-v5", frameskip=1, repeat_action_probability=0.0, full_action_space=True)
     assert env.action_space.n == 18
     env = gym.wrappers.AtariPreprocessing(env, noop_max=1, frame_skip=4, screen_size=210, grayscale_obs=False)
