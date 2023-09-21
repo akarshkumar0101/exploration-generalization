@@ -8,60 +8,108 @@ import copy
 
 import numpy as np
 
-sys.path.append("../")
 import experiment_utils
 
+sys.path.append("../")
+import ge
 import ppo
 import bc
 import ge_bc
 import utils
 
-# import goexplore
-
 for f in glob.glob("*.sh"):
     os.remove(f)
 
 np.random.seed(0)
+env_ids_tests = np.random.permutation(utils.env_ids_57_ignore).reshape(4, 14).tolist()
+env_ids_tests = [sorted(env_ids_test) for env_ids_test in env_ids_tests]
+env_ids_trains = [sorted(list(set(utils.env_ids_104_ignore)-set(env_ids_test))) for env_ids_test in env_ids_tests]
 
-env_ids = utils.env_ids_104_ignore
+for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
+    print(f'Split: {i_split}')
+    print('------------------------------------------------------------------------')
+    print(' '.join(env_ids_train))
+    print()
+    print(' '.join(env_ids_test))
+    print('------------------------------------------------------------------------')
+    print()
+    print()
 
-n_train = round(len(env_ids) * 0.85)
-n_test = len(env_ids) - n_train
-print(f"n_train: {n_train}, n_test: {n_test}")
+# ------------------------ GO-EXPLORE-RANDOM ------------------------ #
+# 100*200*(15/60)*(1/40/5) = 25 hours
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_specialist/ --job_cpu_mem=1000 --max_jobs_cpu=1 --max_jobs_gpu=10 --conda_env=egb
+np.random.seed(0)
+default_config = vars(ge.parser.parse_args())
+configs = []
+for seed in range(200):
+    for env_id in utils.env_ids_104_ignore:
+        config = default_config.copy()
+        config["track"] = False
+        config["entity"] = None
+        config["project"] = "egb_goexplore_rand"
+        config["name"] = f"{env_id}_{seed:04d}"
+        config["log_hist"] = False
 
-np.random.seed(143)
-env_ids_permuted = np.random.permutation(env_ids).copy()
-env_ids_trains, env_ids_tests = [], []
-for i_split in range(3):
-    mask_test = np.arange(len(env_ids_permuted))
-    mask_test = (mask_test >= i_split * 8) & (mask_test < (i_split + 1) * 8)
-    mask_train = ~mask_test
+        config["seed"] = seed
 
-    env_ids_trains.append(sorted(list(env_ids_permuted[mask_train])))
-    env_ids_tests.append(sorted(list(env_ids_permuted[mask_test])))
+        config["env_id"] = env_id
+        config["n_iters"] = int(2e3)
+        config["p_repeat"] = 0.0
 
-train = set.union(*[set(env_ids_train) for env_ids_train in env_ids_trains])
-test = set.union(*[set(env_ids_test) for env_ids_test in env_ids_tests])
+        config["h"] = np.random.randint(4, 20)  # 8
+        config["w"] = np.random.randint(4, 20)  # 11
+        config["d"] = np.random.randint(4, 20)  # 8
 
-# print(seed)
-# print(f'{len(train)} unique train envs')
-# print(f'{len(test)} unique test envs')
-env_ids_exploration = ["Pitfall", "MontezumaRevenge", "Venture", "Zaxxon", "Berzerk", "Asteroids", "Frostbite", "PrivateEye"]
-# print([env_id in test for env_id in env_ids_exploration])
-# print(seed)
-print(all([env_id in test for env_id in env_ids_exploration]))
+        config["max_cells"] = 50000
+        config["use_reward"] = True
 
-for i_split in range(3):
-    print(f"Split {i_split}:")
-    print(f"Train: {env_ids_trains[i_split]}")
-    print(f"Test: {env_ids_tests[i_split]}")
+        config["save_archive"] = f"./data/{config['project']}/{config['name']}.npy"
+        configs.append(config.copy())
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ge.py", out_file=f"goexplore_rand.sh")
+print("Done!")
+# ------------------------------------------------------------ #
 
-# ------------------------ CHECKPOINT SPECIALIST ------------------------ #
+    
+# ------------------------ GO-EXPLORE ------------------------ #
+# 100*200*(15/60)*(1/40/5) = 25 hours
+# python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_specialist/ --job_cpu_mem=1000 --max_jobs_cpu=1 --max_jobs_gpu=10 --conda_env=egb
+np.random.seed(0)
+default_config = vars(ge.parser.parse_args())
+configs = []
+for seed in range(200):
+    for env_id in utils.env_ids_104_ignore:
+        config = default_config.copy()
+        config["track"] = False
+        config["entity"] = None
+        config["project"] = "egb_goexplore"
+        config["name"] = f"{env_id}_{seed:04d}"
+        config["log_hist"] = False
+
+        config["seed"] = seed
+
+        config["env_id"] = env_id
+        config["n_iters"] = int(2e3)
+        config["p_repeat"] = 0.0
+
+        config["h"] = 8  # np.random.randint(4, 20)  # 8
+        config["w"] = 11  # np.random.randint(4, 20)  # 11
+        config["d"] = 8  # np.random.randint(4, 20)  # 8
+
+        config["max_cells"] = 50000
+        config["use_reward"] = True
+
+        config["save_archive"] = f"./data/{config['project']}/{config['name']}.npy"
+        configs.append(config.copy())
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ge.py", out_file=f"goexplore.sh")
+print("Done!")
+# ------------------------------------------------------------ #
+
+# ------------------------ SPECIALISTS ------------------------ #
 np.random.seed(0)
 default_config = vars(ppo.parser.parse_args())
 configs = []
 for seed in range(1):
-    for env_id in env_ids:
+    for env_id in utils.env_ids_57_ignore:
         config = default_config.copy()
         config["track"] = True
         config["project"] = "egb_specialist"
@@ -85,54 +133,54 @@ for seed in range(1):
         config["n_updates"] = 16
 
         configs.append(config.copy())
-command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ppo.py", out_file=f"specialist.sh")
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ppo.py", out_file=f"specialists.sh")
 print("Done!")
 # ------------------------------------------------------------ #
 
-# ------------------------ CHECKPOINT GENERALIST ------------------------ #
-np.random.seed(0)
-default_config = vars(bc.parser.parse_args())
-configs = []
-for seed in range(1):
-    for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-        for strategy in ["final_ckpts", "all_ckpts"]:
-            config = default_config.copy()
-            config["track"] = True
-            config["project"] = "egb_generalist"
-            config["name"] = f"{strategy}_{i_split}_{seed:04d}"
+# # ------------------------ CHECKPOINT GENERALIST ------------------------ #
+# np.random.seed(0)
+# default_config = vars(bc.parser.parse_args())
+# configs = []
+# for seed in range(1):
+#     for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
+#         for strategy in ["final_ckpts", "all_ckpts"]:
+#             config = default_config.copy()
+#             config["track"] = True
+#             config["project"] = "egb_generalist"
+#             config["name"] = f"{strategy}_{i_split}_{seed:04d}"
 
-            config["device"] = "cuda"
-            config["seed"] = seed
+#             config["device"] = "cuda"
+#             config["seed"] = seed
 
-            config["model"] = "trans_32"
-            config["load_ckpt"] = None
-            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
-            config["n_ckpts"] = 50
+#             config["model"] = "trans_32"
+#             config["load_ckpt"] = None
+#             config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
+#             config["n_ckpts"] = 50
 
-            config["lr"] = 2.5e-4
+#             config["lr"] = 2.5e-4
 
-            config["env_ids"] = env_ids_train
-            config["n_iters"] = 1000
-            config["n_envs"] = 8
-            config["n_steps"] = 512
-            config["batch_size"] = 8*48*2 # = 768
-            config["n_updates"] = 32
+#             config["env_ids"] = env_ids_train
+#             config["n_iters"] = 1000
+#             config["n_envs"] = 8
+#             config["n_steps"] = 512
+#             config["batch_size"] = 8*48*2 # = 768
+#             config["n_updates"] = 32
             
-            config["model_teacher"] = "cnn_4"
-            if strategy == "final_ckpts":
-                env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
-            elif strategy == "all_ckpts":
-                env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_*.pt"
-            else:
-                raise NotImplementedError
-            config["load_ckpt_teacher"] = [env_id2teachers(env_id) for env_id in env_ids_train]
+#             config["model_teacher"] = "cnn_4"
+#             if strategy == "final_ckpts":
+#                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
+#             elif strategy == "all_ckpts":
+#                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_*.pt"
+#             else:
+#                 raise NotImplementedError
+#             config["load_ckpt_teacher"] = [env_id2teachers(env_id) for env_id in env_ids_train]
 
-            config["i_split"] = i_split
-            config["strategy"] = strategy
+#             config["i_split"] = i_split
+#             config["strategy"] = strategy
 
-            configs.append(config.copy())
-command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python bc.py", out_file=f"cd_generalist.sh")
-print("Done!")
+#             configs.append(config.copy())
+# command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python bc.py", out_file=f"cd_generalist.sh")
+# print("Done!")
 # ------------------------------------------------------------ #
 
 # ------------------------ GO-EXPLORE GENERALIST ------------------------ #

@@ -1,8 +1,10 @@
-with open("atari_games_57.txt") as f:
+import os
+base = os.path.dirname(os.path.abspath(__file__))
+with open(f"{base}/atari_games_57.txt") as f:
     env_ids_57 = f.read().split("\n")
-with open("atari_games_104.txt") as f:
+with open(f"{base}/atari_games_104.txt") as f:
     env_ids_104 = f.read().split("\n")
-with open("atari_games_ignore.txt") as f:
+with open(f"{base}/atari_games_ignore.txt") as f:
     env_ids_ignore = f.read().split("\n")
 
 env_ids_57 = sorted(env_ids_57)
