@@ -14,6 +14,7 @@ import experiment_utils
 import ppo
 import bc
 import ge_bc
+import utils
 
 # import goexplore
 
@@ -21,14 +22,8 @@ for f in glob.glob("*.sh"):
     os.remove(f)
 
 np.random.seed(0)
-with open("../atari_games_57.txt") as f:
-    env_ids = "".join(f.readlines()).split("\n")
-with open("../atari_games_ignore.txt") as f:
-    env_ids_ignore = "".join(f.readlines()).split("\n")
-env_ids = np.array([env_id for env_id in env_ids if env_id not in env_ids_ignore])
 
-# print(len(env_ids))
-# print(env_ids)
+env_ids = utils.env_ids_104_ignore
 
 n_train = round(len(env_ids) * 0.85)
 n_test = len(env_ids) - n_train

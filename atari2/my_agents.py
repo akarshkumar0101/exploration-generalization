@@ -369,7 +369,7 @@ if __name__ == "__main__":
     import torchinfo
 
     for model in ['cnn', 'trans']:
-        for ctx_len in [4, 8]:
+        for ctx_len in [4, 32]:
             print(f"{model}_{ctx_len}")
             agent = make_agent(f"{model}_{ctx_len}")
             n_params = sum(p.numel() for p in agent.parameters())
