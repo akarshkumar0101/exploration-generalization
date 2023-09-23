@@ -23,15 +23,15 @@ for f in glob.glob("*.sh"):
 np.random.seed(0)
 env_ids_tests = np.random.permutation(utils.env_ids_57_ignore).reshape(4, 14).tolist()
 env_ids_tests = [sorted(env_ids_test) for env_ids_test in env_ids_tests]
-env_ids_trains = [sorted(list(set(utils.env_ids_104_ignore)-set(env_ids_test))) for env_ids_test in env_ids_tests]
+env_ids_trains = [sorted(list(set(utils.env_ids_104_ignore) - set(env_ids_test))) for env_ids_test in env_ids_tests]
 
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-    print(f'Split: {i_split}')
-    print('------------------------------------------------------------------------')
-    print(' '.join(env_ids_train))
+    print(f"Split: {i_split}")
+    print("------------------------------------------------------------------------")
+    print(" ".join(env_ids_train))
     print()
-    print(' '.join(env_ids_test))
-    print('------------------------------------------------------------------------')
+    print(" ".join(env_ids_test))
+    print("------------------------------------------------------------------------")
     print()
     print()
 
@@ -69,7 +69,7 @@ command_txt = experiment_utils.create_command_txt_from_configs(configs, default_
 print("Done!")
 # ------------------------------------------------------------ #
 
-    
+
 # ------------------------ GO-EXPLORE ------------------------ #
 # 100*200*(15/60)*(1/40/5) = 25 hours
 # python server.py --command_file=~/exploration-generalization/atari/experiments/goexplore/ge_specialist.sh --run_dir=~/exploration-generalization/atari --experiment_dir=~/experiments/ge_specialist/ --job_cpu_mem=1000 --max_jobs_cpu=1 --max_jobs_gpu=10 --conda_env=egb
@@ -137,6 +137,48 @@ command_txt = experiment_utils.create_command_txt_from_configs(configs, default_
 print("Done!")
 # ------------------------------------------------------------ #
 
+
+# ------------------------ GO-EXPLORE GENERALIST ------------------------ #
+np.random.seed(0)
+default_config = vars(ge_bc.parser.parse_args())
+configs = []
+for seed in range(1):
+    for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
+        for strategy in ["best", "leaf"]:
+            config = default_config.copy()
+            config["track"] = True
+            config["project"] = "egb_ge_generalist"
+            config["name"] = f"{strategy}_{i_split}_{seed:04d}"
+
+            config["device"] = "cuda"
+            config["seed"] = seed
+
+            config["model"] = "trans_32"
+            config["load_ckpt"] = None
+            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
+            config["n_ckpts"] = 100
+
+            config["lr"] = 2.5e-4
+
+            config["env_ids"] = env_ids_train
+            config["n_iters"] = 10000
+            config["n_envs"] = 4
+            config["n_steps"] = 512
+            config["batch_size"] = len(env_ids_train) * 8 # 84 * 8 = 672
+            config["n_updates"] = 32
+
+            config["ge_data_dir"] = f"../atari/data/ge_specialist/"
+            config["strategy"] = strategy
+            config["n_archives"] = 200
+            config["min_traj_len"] = 100
+
+            config["i_split"] = i_split
+
+            configs.append(config.copy())
+command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ge_bc.py", out_file=f"ge_generalist.sh")
+print("Done!")
+# ------------------------------------------------------------ #
+
 # # ------------------------ CHECKPOINT GENERALIST ------------------------ #
 # np.random.seed(0)
 # default_config = vars(bc.parser.parse_args())
@@ -165,7 +207,7 @@ print("Done!")
 #             config["n_steps"] = 512
 #             config["batch_size"] = 8*48*2 # = 768
 #             config["n_updates"] = 32
-            
+
 #             config["model_teacher"] = "cnn_4"
 #             if strategy == "final_ckpts":
 #                 env_id2teachers = lambda env_id: f"./data/egb_specialist/{env_id}_{seed:04d}/ckpt_9999.pt"
@@ -181,47 +223,6 @@ print("Done!")
 #             configs.append(config.copy())
 # command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python bc.py", out_file=f"cd_generalist.sh")
 # print("Done!")
-# ------------------------------------------------------------ #
-
-# ------------------------ GO-EXPLORE GENERALIST ------------------------ #
-np.random.seed(0)
-default_config = vars(ge_bc.parser.parse_args())
-configs = []
-for seed in range(1):
-    for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
-        for strategy in ["best", "leaf"]:
-            config = default_config.copy()
-            config["track"] = True
-            config["project"] = "egb_ge_generalist"
-            config["name"] = f"{strategy}_{i_split}_{seed:04d}"
-
-            config["device"] = "cuda"
-            config["seed"] = seed
-
-            config["model"] = "trans_32"
-            config["load_ckpt"] = None
-            config["save_ckpt"] = f"./data/{config['project']}/{config['name']}/ckpt.pt"
-            config["n_ckpts"] = 100
-
-            config["lr"] = 2.5e-4
-
-            config["env_ids"] = env_ids_train
-            config["n_iters"] = 10000
-            config["n_envs"] = 4
-            config["n_steps"] = 512
-            config["batch_size"] = 384
-            config["n_updates"] = 32
-
-            config["ge_data_dir"] = f"../atari/data/ge_specialist/"
-            config["strategy"] = strategy
-            config["n_archives"] = 200
-            config["min_traj_len"] = 100
-
-            config["i_split"] = i_split
-
-            configs.append(config.copy())
-command_txt = experiment_utils.create_command_txt_from_configs(configs, default_config, prune=True, python_command="python ge_bc.py", out_file=f"ge_generalist.sh")
-print("Done!")
 # ------------------------------------------------------------ #
 
 # ------------------------ GO-EXPLORE FINETUNE-BC ------------------------ #

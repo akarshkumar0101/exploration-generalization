@@ -22,6 +22,10 @@ For these reason, these 4 environments are in atari_games_ignore.txt.
 - Frogger
 - KingKong
 
+### Loses a life in first couple of seconds for no reason
+- Galaxian
+### Trajectories not long enough
+- FlagCapture
 
 
 ### Does not reset RAM on actual env.reset

@@ -344,6 +344,10 @@ def make_agent(model, n_acts=18):
         return StackedCNNAgent(n_acts, ctx_len)
     elif model == "trans":
         return TransformerAgent(n_acts, ctx_len, n_layers=4, n_heads=4, n_embd=4 * 64, dropout=0.0, bias=True)
+    elif model == "transmed":
+        return TransformerAgent(n_acts, ctx_len, n_layers=6, n_heads=6, n_embd=6 * 64, dropout=0.0, bias=True)
+    elif model == "transbig":
+        return TransformerAgent(n_acts, ctx_len, n_layers=8, n_heads=8, n_embd=8 * 64, dropout=0.0, bias=True)
     else:
         raise ValueError(f"Unknown model name {model}")
 

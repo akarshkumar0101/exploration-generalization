@@ -2,3 +2,5 @@ LostLuggage
 Skiing
 Frogger
 KingKong
+Galaxian
+FlagCapture
