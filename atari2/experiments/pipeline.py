@@ -28,8 +28,10 @@ env_ids_trains = [sorted(list(set(utils.env_ids_104_ignore) - set(env_ids_test))
 for i_split, (env_ids_train, env_ids_test) in enumerate(zip(env_ids_trains, env_ids_tests)):
     print(f"Split: {i_split}")
     print("------------------------------------------------------------------------")
+    print(f"{len(env_ids_train)} TRAIN ENVS: ")
     print(" ".join(env_ids_train))
     print()
+    print(f"{len(env_ids_test)} TEST ENVS: ")
     print(" ".join(env_ids_test))
     print("------------------------------------------------------------------------")
     print()
@@ -167,7 +169,7 @@ for seed in range(1):
             config["batch_size"] = len(env_ids_train) * 8 # 84 * 8 = 672
             config["n_updates"] = 32
 
-            config["ge_data_dir"] = f"../atari/data/ge_specialist/"
+            config["ge_data_dir"] = f"./data/egb_goexplore/"
             config["strategy"] = strategy
             config["n_archives"] = 200
             config["min_traj_len"] = 100

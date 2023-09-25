@@ -3,6 +3,7 @@ import argparse
 import os
 import random
 import time
+import glob
 
 import hns
 import numpy as np
@@ -119,29 +120,20 @@ class GEBuffer(Buffer):
             if pbar is not None:
                 pbar.update(1)
 
-
-def load_env_id2archives(env_ids, ge_data_dir, n_archives):
-    import glob
-
-    env_id2archives = {}
-    for env_id in tqdm(env_ids):
-        files = sorted(glob.glob(f"{ge_data_dir}/*{env_id}*"))
-        files = files[:n_archives]
-        env_id2archives[env_id] = [np.load(f, allow_pickle=True).item() for f in files]
-    return env_id2archives
-
-
-def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=100):
+def load_env_id2trajs(env_ids, ge_data_dir, n_archives, strategy="best", min_traj_len=100):
     env_id2trajs = {}
-    for env_id, archives in tqdm(env_id2archives.items()):
+    for env_id in tqdm(env_ids):
         env_id2trajs[env_id] = []
-        for archive in archives:
+        files = sorted(glob.glob(f"{ge_data_dir}/{env_id}_*"))[:n_archives]
+        for f in files:
+            archive = np.load(f, allow_pickle=True).item()
             trajs, rets, novelty, is_leaf = archive["traj"], archive["ret"], archive["novelty"], archive["is_leaf"]
             lens = np.array([len(traj) for traj in trajs])
             lenmask = lens > min_traj_len
-            assert lenmask.sum().item() >= 1
+            if lenmask.sum()==0:
+                continue
             trajs, rets, novelty, is_leaf = trajs[lenmask], rets[lenmask], novelty[lenmask], is_leaf[lenmask]
-            if strategy == "all" or strategy == "nov" or strategy == "inv_nov":
+            if strategy == "all":
                 idx = np.arange(len(trajs))
             elif strategy == "best":
                 idx = np.array([np.argmax(rets)])
@@ -151,12 +143,16 @@ def get_env_id2trajs(env_id2archives, strategy="best", min_traj_len=100):
                 raise ValueError(f"Unknown strategy: {strategy}")
             trajs = trajs[idx]
             env_id2trajs[env_id].extend(trajs)
+    for env_id in env_ids:
+        if not len(env_id2trajs[env_id]) > 0:
+            print(f"{env_id} does not have enough trajectories of length >{min_traj_len}")
+    for env_id in env_ids:
+        assert len(env_id2trajs[env_id]) > 0
     return env_id2trajs
-
 
 def make_env(args):
     envs = []
-    for env_id in args.env_ids:
+    for env_id in tqdm(args.env_ids):
         envi = MyEnvpool(f"{env_id}-v5", num_envs=args.n_envs, stack_num=1, frame_skip=4, repeat_action_probability=0.0, noop_max=1, use_fire_reset=False, full_action_space=True, seed=0)
         envi = RecordEpisodeStatistics(envi, deque_size=32)
         envs.append(envi)
@@ -177,7 +173,7 @@ def main(args):
     torch.manual_seed(args.seed)
 
     print("Creating environment...")
-    env = make_env(args)
+    # env = make_env(args)
     env_teacher = make_env(args)
 
     print("Creating agent...")
@@ -188,27 +184,22 @@ def main(args):
         ckpt = torch.load(args.load_ckpt, map_location=args.device)
         agent.load_state_dict(ckpt["agent"])
 
-    print("Loading archives")
-    env_id2archives = load_env_id2archives(args.env_ids, args.ge_data_dir, args.n_archives)
-    print("Creating trajs")
-    env_id2trajs = get_env_id2trajs(env_id2archives, strategy=args.strategy, min_traj_len=args.min_traj_len)
+    print("Loading archives and Creating Trajs")
+    env_id2trajs = load_env_id2trajs(args.env_ids, args.ge_data_dir, args.n_archives, strategy=args.strategy, min_traj_len=args.min_traj_len)
     for env_id, trajs in env_id2trajs.items():
         print(f"env_id: {env_id}, #trajs: {len(trajs)}")
 
     def sample_traj_fn(id):
         env_id = args.env_ids[id // args.n_envs]
         trajs = env_id2trajs[env_id]
-
-        # if args.strategy != 'nov' and args.strategy != 'inv_nov':
-        # return trajs[np.random.choice(len(trajs))]
-        # else:
+        return trajs[np.random.choice(len(trajs))]
 
     print("Creating buffer...")
-    buffer = Buffer(env, agent, args.n_steps, device=args.device)
+    # buffer = Buffer(env, agent, args.n_steps, device=args.device)
     buffer_teacher = GEBuffer(env_teacher, args.n_steps, sample_traj_fn=sample_traj_fn, device=args.device)
 
     print("Warming up buffer...")
-    for i_iter in tqdm(range(20)):
+    for i_iter in tqdm(range(2)):
         # buffer.collect()
         buffer_teacher.collect()
 
