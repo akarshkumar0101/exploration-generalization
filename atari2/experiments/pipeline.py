@@ -149,7 +149,7 @@ for seed in range(1):
         for strategy in ["best", "leaf"]:
             config = default_config.copy()
             config["track"] = True
-            config["project"] = "egb_ge_generalist"
+            config["project"] = "egb_ge_generalist_rand"
             config["name"] = f"{strategy}_{i_split}_{seed:04d}"
 
             config["device"] = "cuda"
@@ -169,7 +169,7 @@ for seed in range(1):
             config["batch_size"] = len(env_ids_train) * 8 # 84 * 8 = 672
             config["n_updates"] = 32
 
-            config["ge_data_dir"] = f"./data/egb_goexplore/"
+            config["ge_data_dir"] = f"./data/egb_goexplore_rand/"
             config["strategy"] = strategy
             config["n_archives"] = 200
             config["min_traj_len"] = 100
